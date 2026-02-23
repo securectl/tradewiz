@@ -100,14 +100,16 @@ def _parse_json(text: str) -> dict:
         return {"error": "Failed to parse LLM response", "raw": text[:500]}
 
 
-def _build_trade_context(coin: str, side: str, price: float, indicators: dict, signal_reason: str) -> str:
+def _build_trade_context(coin: str, side: str, price: float, indicators: dict,
+                         signal_reason: str, performance_history: dict = None,
+                         strategy_name: str = None) -> str:
     """Build context string for LLM validation."""
-    return f"""
-Crypto Trade Signal for Validation:
+    ctx = f"""Crypto Trade Signal for Validation:
 - Coin: {coin}
 - Side: {side.upper()}
 - Current Price: ${price:,.2f}
 - Signal Reason: {signal_reason}
+- Strategy: {strategy_name or 'unknown'}
 
 Technical Indicators:
 - RSI(14): {indicators.get('rsi_14', 'N/A')}
@@ -117,15 +119,33 @@ Technical Indicators:
 - SMA 200: {indicators.get('sma_200', 'N/A')}
 - ATR(14): {indicators.get('atr_14', 'N/A')}
 - Volume: {indicators.get('volume', 'N/A')}
-- Relative Volume: {indicators.get('relative_volume', 'N/A')}
+- Relative Volume: {indicators.get('relative_volume', 'N/A')}"""
 
-This is a PAPER TRADING bot running on demo API. Evaluate the trade setup quality.
-""".strip()
+    if performance_history and performance_history.get("overall"):
+        overall = performance_history["overall"]
+        ctx += f"""
+
+Historical Performance (last 7 days):
+- Overall: {overall['total_trades']} trades, {overall['win_rate']}% win rate, avg P&L ${overall['avg_pnl']}, total P&L ${overall['total_pnl']}"""
+
+        strat_stats = performance_history.get("by_strategy", {}).get(strategy_name or "")
+        if strat_stats:
+            ctx += f"\n- This strategy ({strategy_name}): {strat_stats['trades']} trades, {strat_stats['win_rate']}% win rate, avg P&L ${strat_stats['avg_pnl']}"
+
+        coin_stats = performance_history.get("by_coin", {}).get(coin)
+        if coin_stats:
+            ctx += f"\n- This coin ({coin}): {coin_stats['trades']} trades, {coin_stats['win_rate']}% win rate, avg P&L ${coin_stats['avg_pnl']}"
+
+        if overall["win_rate"] < 40:
+            ctx += "\n\nWARNING: Overall win rate is BELOW 40%. Be MORE SELECTIVE — only approve trades with strong confluence."
+
+    ctx += "\n\nThis is a PAPER TRADING bot running on demo API. Evaluate the trade setup quality."
+    return ctx
 
 
 def _validate_ollama(trade_context: str) -> dict:
     """Gate 1: Local Ollama validation — fast, free filter."""
-    prompt = f"""You are a crypto trading risk analyst. Evaluate this trade signal and decide if it should execute.
+    prompt = f"""You are a strict crypto trading risk analyst. Evaluate this trade signal and decide if it should execute.
 
 {trade_context}
 
@@ -137,7 +157,12 @@ Respond in JSON format ONLY:
     "risk_level": "low/medium/high/extreme"
 }}
 
-This is paper trading (no real money). Approve if the technical setup has reasonable confluence. Return execute=true unless the setup is clearly bad.
+Be SELECTIVE. Only approve trades where multiple indicators clearly align in the same direction. Reject if:
+- RSI contradicts the trade direction (e.g. overbought for a buy, oversold for a sell)
+- MACD histogram is weak or flat
+- Historical win rate is poor (below 40%)
+- The signal lacks strong confluence across at least 2-3 indicators
+Return execute=true ONLY for high-quality setups with clear edge.
 """
     return _call_ollama(prompt)
 
@@ -145,7 +170,7 @@ This is paper trading (no real money). Approve if the technical setup has reason
 def _validate_sentiment(trade_context: str) -> dict:
     """Gate 2a: OpenRouter sentiment analysis."""
     messages = [
-        {"role": "system", "content": "You are a crypto market sentiment analyst. Evaluate trade signals based on technical momentum and market context. Respond in JSON only."},
+        {"role": "system", "content": "You are a strict crypto market sentiment analyst. You protect capital by only approving high-conviction setups. Respond in JSON only."},
         {"role": "user", "content": f"""{trade_context}
 
 Evaluate the SENTIMENT and MOMENTUM of this trade. Respond in JSON:
@@ -157,7 +182,7 @@ Evaluate the SENTIMENT and MOMENTUM of this trade. Respond in JSON:
     "reasoning": "brief explanation"
 }}
 
-This is paper trading. Approve if momentum reasonably supports the direction. Only reject if signals clearly contradict the trade."""}
+Only approve if momentum CLEARLY supports the trade direction with strong indicator alignment. If historical performance shows a losing streak or low win rate, require STRONG confluence before approving. Reject if momentum is ambiguous, indicators conflict, or confidence is below 0.6."""}
     ]
     raw = _call_openrouter(LLM_BOT_SENTIMENT, messages)
     return _parse_json(raw)
@@ -166,10 +191,10 @@ This is paper trading. Approve if momentum reasonably supports the direction. On
 def _validate_risk(trade_context: str) -> dict:
     """Gate 2b: OpenRouter risk analysis."""
     messages = [
-        {"role": "system", "content": "You are a crypto trading risk manager. Your job is to protect capital. Evaluate trade signals for risk. Respond in JSON only."},
+        {"role": "system", "content": "You are a conservative crypto trading risk manager. Your PRIMARY job is to protect capital and prevent losses. Respond in JSON only."},
         {"role": "user", "content": f"""{trade_context}
 
-Evaluate the RISK of this trade. Consider: overextension, false signal probability, volatility risk, position timing. Respond in JSON:
+Evaluate the RISK of this trade. Consider: overextension, false signal probability, volatility risk, position timing, and historical performance. Respond in JSON:
 {{
     "execute": true/false,
     "risk_score": 0-100,
@@ -179,7 +204,12 @@ Evaluate the RISK of this trade. Consider: overextension, false signal probabili
     "reasoning": "brief explanation"
 }}
 
-This is paper trading. Approve unless risk is clearly excessive or the signal is a high-probability false signal."""}
+Be CONSERVATIVE. If historical performance shows a low win rate, raise the bar significantly. Reject when:
+- Risk/reward ratio is unclear or unfavorable
+- False signal probability exceeds 0.5
+- Risk score is above 60
+- The setup relies on a single weak indicator
+Only approve trades with clear risk/reward edge and strong technical backing."""}
     ]
     raw = _call_openrouter(LLM_BOT_RISK, messages)
     return _parse_json(raw)
@@ -372,13 +402,17 @@ Respond in JSON:
 
 
 def validate_trade(coin: str, side: str, price: float,
-                   indicators: dict, signal_reason: str) -> dict:
+                   indicators: dict, signal_reason: str,
+                   performance_history: dict = None,
+                   strategy_name: str = None) -> dict:
     """Full 2-layer validation pipeline.
 
     Returns:
         dict with 'approved' (bool), 'ollama', 'sentiment', 'risk' results, 'summary'
     """
-    trade_context = _build_trade_context(coin, side, price, indicators, signal_reason)
+    trade_context = _build_trade_context(coin, side, price, indicators, signal_reason,
+                                         performance_history=performance_history,
+                                         strategy_name=strategy_name)
 
     result = {
         "approved": False,

@@ -188,6 +188,17 @@ def init_db():
         )
     """)
 
+    # Idempotent schema migration — add new columns to bot_trades
+    for col_sql in [
+        "ALTER TABLE bot_trades ADD COLUMN strategy TEXT",
+        "ALTER TABLE bot_trades ADD COLUMN asset_type TEXT DEFAULT 'crypto'",
+        "ALTER TABLE bot_trades ADD COLUMN direction_bias TEXT",
+    ]:
+        try:
+            conn.execute(col_sql)
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
     conn.commit()
     conn.close()
 
@@ -788,19 +799,26 @@ def api_bot_kill():
 
 @app.route("/api/bot/trades")
 def api_bot_trades():
-    """Get trade history. Query params: status (open|closed), limit (default 50)."""
+    """Get trade history. Query params: status (open|closed), asset_type (crypto|stock), limit (default 50)."""
     status = request.args.get("status")
+    asset_type = request.args.get("asset_type")
     limit = int(request.args.get("limit", 50))
     conn = get_db()
+
+    clauses = []
+    params = []
     if status:
-        rows = conn.execute(
-            "SELECT * FROM bot_trades WHERE status = ? ORDER BY opened_at DESC LIMIT ?",
-            (status, limit)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM bot_trades ORDER BY opened_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        clauses.append("status = ?")
+        params.append(status)
+    if asset_type:
+        clauses.append("asset_type = ?")
+        params.append(asset_type)
+
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    rows = conn.execute(
+        f"SELECT * FROM bot_trades{where} ORDER BY opened_at DESC LIMIT ?", params
+    ).fetchall()
     conn.close()
     trades = []
     for r in rows:
@@ -810,6 +828,9 @@ def api_bot_trades():
             "exit_price": r["exit_price"], "pnl": r["pnl"],
             "pnl_pct": r["pnl_pct"], "status": r["status"],
             "signal_reason": r["signal_reason"],
+            "strategy": r["strategy"],
+            "asset_type": r["asset_type"],
+            "direction_bias": r["direction_bias"],
             "stop_loss": r["stop_loss"], "take_profit": r["take_profit"],
             "opened_at": r["opened_at"], "closed_at": r["closed_at"],
             "blofin_order_id": r["blofin_order_id"],
@@ -831,6 +852,9 @@ def api_bot_trade_detail(trade_id):
         "exit_price": r["exit_price"], "pnl": r["pnl"],
         "pnl_pct": r["pnl_pct"], "status": r["status"],
         "signal_reason": r["signal_reason"],
+        "strategy": r["strategy"],
+        "asset_type": r["asset_type"],
+        "direction_bias": r["direction_bias"],
         "validation_result": json.loads(r["validation_result"]) if r["validation_result"] else None,
         "stop_loss": r["stop_loss"], "take_profit": r["take_profit"],
         "opened_at": r["opened_at"], "closed_at": r["closed_at"],

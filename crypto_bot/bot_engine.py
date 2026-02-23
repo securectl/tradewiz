@@ -53,6 +53,64 @@ def _log(level: str, message: str, details: str = None):
     log_fn(f"[BOT] {message}")
 
 
+def _get_trade_performance() -> dict:
+    """Query last 7 days of closed trades and return performance stats."""
+    try:
+        conn = _get_db()
+        cutoff = (datetime.now() - __import__("datetime").timedelta(days=7)).isoformat()
+        rows = conn.execute(
+            "SELECT coin, strategy, pnl FROM bot_trades WHERE status = 'closed' AND closed_at >= ?",
+            (cutoff,),
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return {}
+
+        total = len(rows)
+        wins = sum(1 for r in rows if (r["pnl"] or 0) > 0)
+        pnls = [r["pnl"] or 0 for r in rows]
+        overall = {
+            "total_trades": total,
+            "win_rate": round(wins / total * 100, 1) if total else 0,
+            "avg_pnl": round(sum(pnls) / total, 2) if total else 0,
+            "total_pnl": round(sum(pnls), 2),
+        }
+
+        # By strategy
+        by_strategy = {}
+        for r in rows:
+            s = r["strategy"] or "unknown"
+            by_strategy.setdefault(s, []).append(r["pnl"] or 0)
+        strategy_stats = {}
+        for s, p_list in by_strategy.items():
+            sw = sum(1 for p in p_list if p > 0)
+            strategy_stats[s] = {
+                "trades": len(p_list),
+                "win_rate": round(sw / len(p_list) * 100, 1),
+                "avg_pnl": round(sum(p_list) / len(p_list), 2),
+            }
+
+        # By coin
+        by_coin = {}
+        for r in rows:
+            c = r["coin"]
+            by_coin.setdefault(c, []).append(r["pnl"] or 0)
+        coin_stats = {}
+        for c, p_list in by_coin.items():
+            cw = sum(1 for p in p_list if p > 0)
+            coin_stats[c] = {
+                "trades": len(p_list),
+                "win_rate": round(cw / len(p_list) * 100, 1),
+                "avg_pnl": round(sum(p_list) / len(p_list), 2),
+            }
+
+        return {"overall": overall, "by_strategy": strategy_stats, "by_coin": coin_stats}
+    except Exception as e:
+        logger.warning(f"Failed to get trade performance: {e}")
+        return {}
+
+
 class TradingBot:
     """Autonomous crypto trading bot — paper trading only."""
 
@@ -281,12 +339,16 @@ class TradingBot:
 
         # LLM Validation
         _log("info", f"{coin_key}: Running LLM validation...")
+        perf_history = _get_trade_performance()
+        strategy_name = signal.get("strategy", "unknown")
         validation = validate_trade(
             coin=coin_key,
             side=signal["side"],
             price=current_price,
             indicators=indicators,
             signal_reason=signal["reason"],
+            performance_history=perf_history,
+            strategy_name=strategy_name,
         )
 
         if not validation["approved"]:
@@ -321,13 +383,15 @@ class TradingBot:
             conn = _get_db()
             conn.execute("""
                 INSERT INTO bot_trades (coin, side, size, entry_price, status, signal_reason,
-                    validation_result, stop_loss, take_profit, blofin_order_id)
-                VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)
+                    validation_result, stop_loss, take_profit, blofin_order_id,
+                    strategy, asset_type, direction_bias)
+                VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 coin_key, signal["side"], round(size_coins, 6), current_price,
                 signal["reason"], json.dumps(validation),
                 round(stop_loss, 2), round(take_profit, 2),
                 order_result.get("order_id", ""),
+                signal.get("strategy", "unknown"), "crypto", direction_bias,
             ))
             conn.commit()
             conn.close()
@@ -340,13 +404,15 @@ class TradingBot:
                 conn = _get_db()
                 conn.execute("""
                     INSERT INTO bot_trades (coin, side, size, entry_price, status, signal_reason,
-                        validation_result, stop_loss, take_profit, blofin_order_id)
-                    VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)
+                        validation_result, stop_loss, take_profit, blofin_order_id,
+                        strategy, asset_type, direction_bias)
+                    VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     coin_key, signal["side"], round(size_coins, 6), current_price,
                     signal["reason"], json.dumps(validation),
                     round(stop_loss, 2), round(take_profit, 2),
                     "PAPER-LOCAL",
+                    signal.get("strategy", "unknown"), "crypto", direction_bias,
                 ))
                 conn.commit()
                 conn.close()

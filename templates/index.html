@@ -490,7 +490,14 @@
 
     <!-- Trade History -->
     <div class="bot-panel bot-trades-panel">
-        <div class="bot-panel-title">Trade History</div>
+        <div class="bot-panel-title" style="display:flex; align-items:center; gap:12px;">
+            Trade History
+            <select id="bot-asset-filter" class="bot-select" style="font-size:12px; padding:2px 8px;" onchange="loadBotTrades()">
+                <option value="">All Assets</option>
+                <option value="crypto">Crypto</option>
+                <option value="stock">Stock</option>
+            </select>
+        </div>
         <div id="bot-trades" class="bot-trades-table-wrap">
             <table class="bot-trades-table">
                 <thead>
@@ -498,6 +505,7 @@
                         <th>#</th>
                         <th>Coin</th>
                         <th>Side</th>
+                        <th>Strategy</th>
                         <th>Entry</th>
                         <th>Exit</th>
                         <th>P&L</th>
@@ -506,7 +514,7 @@
                     </tr>
                 </thead>
                 <tbody id="bot-trades-body">
-                    <tr><td colspan="8" class="bot-empty">No trades yet</td></tr>
+                    <tr><td colspan="9" class="bot-empty">No trades yet</td></tr>
                 </tbody>
             </table>
         </div>

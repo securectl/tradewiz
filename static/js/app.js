@@ -2988,12 +2988,17 @@ async function killSwitch() {
 
 async function loadBotTrades() {
     try {
-        const resp = await fetch('/api/bot/trades?limit=50');
+        let url = '/api/bot/trades?limit=50';
+        const assetFilter = document.getElementById('bot-asset-filter');
+        if (assetFilter && assetFilter.value) {
+            url += '&asset_type=' + encodeURIComponent(assetFilter.value);
+        }
+        const resp = await fetch(url);
         const trades = await resp.json();
         const tbody = document.getElementById('bot-trades-body');
 
         if (!trades.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="bot-empty">No trades yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="bot-empty">No trades yet</td></tr>';
             return;
         }
 
@@ -3004,10 +3009,12 @@ async function loadBotTrades() {
             const entryStr = t.entry_price != null ? '$' + t.entry_price.toLocaleString() : '—';
             const statusClass = t.status === 'open' ? 'status-open' : t.status === 'closed' ? 'status-closed' : 'status-killed';
             const dt = t.opened_at ? new Date(t.opened_at).toLocaleString() : '';
+            const stratStr = t.strategy || '—';
             return `<tr>
                 <td>${t.id}</td>
                 <td>${t.coin}</td>
                 <td class="side-${t.side}">${t.side}</td>
+                <td>${stratStr}</td>
                 <td>${entryStr}</td>
                 <td>${exitStr}</td>
                 <td class="${pnlClass}">${pnlStr}</td>
