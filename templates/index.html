@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Stock Analyst — Breakout Scanner</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <div class="logo">
+        AI Stock Analyst
+        <span>Breakout Pattern Scanner</span>
+    </div>
+    <form class="search-bar" id="search-form">
+        <input type="text" id="ticker-input" placeholder="Enter ticker..." autocomplete="off" maxlength="10">
+        <select id="period-select">
+            <option value="ytd">YTD</option>
+            <option value="1mo">1 Month</option>
+            <option value="3mo">3 Months</option>
+            <option value="6mo" selected>6 Months</option>
+            <option value="1y">12 Months</option>
+            <option value="2y">2 Years</option>
+        </select>
+        <select id="interval-select">
+            <option value="1d" selected>Daily</option>
+            <option value="1wk">Weekly</option>
+        </select>
+        <button type="submit" class="btn-analyze" id="btn-analyze">Analyze</button>
+    </form>
+    <div class="header-right">
+        <div class="font-size-toggle" id="font-size-toggle" title="Text size">
+            <button class="font-size-btn" data-size="small">A</button>
+            <button class="font-size-btn active" data-size="medium">A</button>
+            <button class="font-size-btn" data-size="large">A</button>
+        </div>
+        <label class="fast-mode-toggle" title="Use faster/cheaper models for research & health">
+            <input type="checkbox" id="fast-mode-toggle">
+            <span class="fast-mode-label">Fast Mode</span>
+        </label>
+        <button class="btn-history" id="btn-history">History</button>
+        <button class="btn-status-header" id="btn-status-header" onclick="switchTab('status')">Status</button>
+        <button class="btn-settings-header" id="btn-settings" onclick="openSettings()" title="Settings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<!-- Tab Bar -->
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="analyzer" onclick="switchTab('analyzer')">Analyzer</button>
+    <button class="tab-btn" data-tab="qullamaggie" onclick="switchTab('qullamaggie')">Breakout Scanner</button>
+    <button class="tab-btn" data-tab="tracker" onclick="switchTab('tracker')">Tracker</button>
+    <button class="tab-btn" data-tab="screener" onclick="switchTab('screener')">Screener</button>
+    <button class="tab-btn" data-tab="autotrading" onclick="switchTab('autotrading')">Auto Trading</button>
+</div>
+
+<!-- Main -->
+<div class="main-content">
+    <!-- Chart Area -->
+    <div class="chart-area" id="chart-area">
+        <div class="chart-header" id="chart-header" style="display:none;">
+            <div>
+                <div class="ticker-title" id="ticker-title"></div>
+                <div class="ticker-name" id="ticker-name"></div>
+            </div>
+            <div class="price-info">
+                <div class="current-price" id="current-price"></div>
+                <div class="price-change" id="price-change"></div>
+            </div>
+        </div>
+        <div class="chart-toolbar" id="chart-toolbar" style="display:none;">
+            <div class="toolbar-group">
+                <span class="toolbar-label">MA:</span>
+                <label class="toolbar-toggle"><input type="checkbox" id="ma-ema9" checked><span>9 EMA</span></label>
+                <label class="toolbar-toggle"><input type="checkbox" id="ma-sma20" checked><span>20 SMA</span></label>
+                <label class="toolbar-toggle"><input type="checkbox" id="ma-sma50"><span>50 SMA</span></label>
+                <label class="toolbar-toggle"><input type="checkbox" id="ma-sma100"><span>100 SMA</span></label>
+                <label class="toolbar-toggle"><input type="checkbox" id="ma-sma200"><span>200 SMA</span></label>
+            </div>
+            <div class="toolbar-group">
+                <label class="toolbar-toggle"><input type="checkbox" id="toggle-volume" checked><span>Volume</span></label>
+            </div>
+        </div>
+        <div id="chart-container" style="position: relative;">
+            <div class="welcome" id="welcome-screen">
+                <h2>Breakout Pattern Scanner</h2>
+                <p>
+                    Enter a stock ticker above to analyze breakout patterns.
+                    The engine detects symmetrical triangles, ascending/descending triangles,
+                    pennants, and wedges — with breakout levels, price targets, and stop losses.
+                </p>
+                <p style="margin-top: 16px; color: #787b86; font-size: 12px;">
+                    Data sourced from Yahoo Finance. Searches saved for 3 days.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel" id="right-panel" style="display:none;">
+        <!-- Breakout Status -->
+        <div class="panel-section" id="section-breakout">
+            <div class="panel-section-title">Breakout Status</div>
+            <div id="breakout-status-box"></div>
+        </div>
+
+        <!-- Pattern Info -->
+        <div class="panel-section" id="section-pattern">
+            <div class="panel-section-title">Pattern Detected</div>
+            <div id="pattern-info"></div>
+        </div>
+
+        <!-- Trade Plan -->
+        <div class="panel-section" id="section-trade">
+            <div class="panel-section-title">Trade Plan ($25K Account)</div>
+            <div id="trade-plan"></div>
+        </div>
+
+        <!-- Indicators -->
+        <div class="panel-section" id="section-indicators">
+            <div class="panel-section-title">Technical Indicators</div>
+            <div id="indicators-box"></div>
+        </div>
+
+        <!-- Financials (simple explanations) -->
+        <div class="panel-section" id="section-financials">
+            <div class="panel-section-title">Financials</div>
+            <div id="financials-box">
+                <div style="color:#787b86; font-size:12px;">Run an analysis to see financials.</div>
+            </div>
+        </div>
+
+        <!-- AI Validation -->
+        <div class="panel-section" id="section-ai">
+            <div class="panel-section-title">AI Multi-Model Validation</div>
+            <div id="ai-validation-box">
+                <button class="btn-ai-validate" id="btn-ai-validate" style="display:none;">
+                    Validate with AI
+                </button>
+                <div id="ai-not-configured" style="display:none; color:#787b86; font-size:12px;">
+                    AI validation not configured. Add your OpenRouter API key to .env
+                </div>
+            </div>
+        </div>
+
+        <!-- 12-Month Investment Prediction -->
+        <div class="panel-section" id="section-prediction">
+            <div class="panel-section-title">12-Month Investment Prediction</div>
+            <div id="prediction-box">
+                <button class="btn-prediction" id="btn-prediction" style="display:none;">
+                    Run 12-Month Prediction
+                </button>
+                <div id="prediction-not-configured" style="display:none; color:#787b86; font-size:12px;">
+                    AI prediction not configured. Add your OpenRouter API key to .env
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Qullamaggie Breakout Scanner View -->
+<div class="qullamaggie-content" id="qullamaggie-content" style="display:none;">
+    <div class="qullamaggie-section">
+        <div class="qullamaggie-header">
+            <h3>Qullamaggie Breakout Scanner</h3>
+            <div class="qullamaggie-controls">
+                <select id="qullamaggie-universe">
+                    <option value="all">All Stocks</option>
+                    <option value="lowcap">Low-Cap</option>
+                    <option value="midcap">Mid-Cap</option>
+                    <option value="largecap">Large-Cap</option>
+                </select>
+                <button class="btn-qullamaggie-scan" id="btn-qullamaggie-scan" onclick="runQullamaggieScan()">Scan for Setups</button>
+            </div>
+        </div>
+        <div class="qullamaggie-results" id="qullamaggie-results">
+            <div style="padding:60px; color:#787b86; text-align:center;">
+                <h2 style="color:#d1d4dc; margin-bottom:12px;">Qullamaggie Breakout Scanner</h2>
+                <p>Scans for High Tight Flag (HTF), Volatility Contraction Pattern (VCP), and Episodic Pivot (EP) setups.</p>
+                <p style="margin-top:12px; font-size:12px;">Select a universe and click "Scan for Setups" to start.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tracker View -->
+<div class="tracker-content" id="tracker-content" style="display:none;">
+    <!-- Left: Journal -->
+    <div class="journal-panel">
+        <!-- Quick Add Bar -->
+        <div class="journal-add-bar">
+            <div class="journal-add-row">
+                <input type="text" id="journal-ticker" placeholder="TICKER" maxlength="10" class="journal-ticker-input">
+                <textarea id="journal-notes" placeholder="Quick note..." rows="1" class="journal-notes-input"></textarea>
+                <button class="btn-add-note" id="btn-add-note" onclick="addJournalEntry()">Add Note</button>
+                <button class="btn-toggle-trade" id="btn-toggle-trade" onclick="toggleTradeFields()">Trade</button>
+            </div>
+            <div class="journal-trade-fields" id="journal-trade-fields" style="display:none;">
+                <select id="journal-action" class="journal-select">
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                </select>
+                <input type="number" id="journal-entry-price" placeholder="Entry $" step="0.01" class="journal-num-input">
+                <input type="number" id="journal-exit-price" placeholder="Exit $" step="0.01" class="journal-num-input">
+                <input type="number" id="journal-shares" placeholder="Shares" step="0.01" class="journal-num-input">
+            </div>
+        </div>
+        <!-- Journal Entries List -->
+        <div class="journal-list" id="journal-list">
+            <div style="padding:40px; color:#787b86; text-align:center;">No journal entries yet. Add your first note above.</div>
+        </div>
+    </div>
+
+    <!-- Right: Goal Dashboard -->
+    <div class="goal-dashboard" id="goal-dashboard">
+        <div style="padding:20px; color:#787b86; text-align:center;">Loading goals...</div>
+    </div>
+</div>
+
+<!-- Screener View -->
+<div class="screener-content" id="screener-content" style="display:none;">
+    <!-- Hot Sectors Panel -->
+    <div class="hot-sectors-panel" id="hot-sectors-panel">
+        <div class="hot-sectors-header">
+            <h3>Hot Sectors</h3>
+            <div class="hot-sectors-periods" id="hot-sectors-periods">
+                <button class="period-btn" data-period="1w">1W</button>
+                <button class="period-btn" data-period="2w">2W</button>
+                <button class="period-btn active" data-period="1mo">1M</button>
+                <button class="period-btn" data-period="3mo">3M</button>
+                <button class="period-btn" data-period="6mo">6M</button>
+                <button class="period-btn" data-period="1y">1Y</button>
+            </div>
+        </div>
+        <div class="hot-sectors-grid" id="hot-sectors-grid">
+            <div style="padding:20px; color:#787b86; text-align:center; font-size:13px;">
+                Click a time period to identify trending sectors with AI
+            </div>
+        </div>
+    </div>
+
+    <div class="screener-controls">
+        <div class="screener-category-bar">
+            <button class="screener-category-btn active" data-category="lowcap" onclick="switchScreenerCategory('lowcap')">Low-Cap</button>
+            <button class="screener-category-btn" data-category="midcap" onclick="switchScreenerCategory('midcap')">Mid-Cap</button>
+            <button class="screener-category-btn" data-category="largecap" onclick="switchScreenerCategory('largecap')">Large-Cap</button>
+            <button class="screener-category-btn" data-category="etf" onclick="switchScreenerCategory('etf')">ETFs</button>
+            <button class="screener-category-btn" data-category="metals_mining" onclick="switchScreenerCategory('metals_mining')">Metals &amp; Mining</button>
+            <button class="screener-category-btn" data-category="crypto" onclick="switchScreenerCategory('crypto')">Crypto</button>
+            <button class="screener-category-btn" data-category="ai" onclick="switchScreenerCategory('ai')">AI</button>
+        </div>
+        <!-- Sector Filter -->
+        <div class="screener-sector-filter" id="screener-sector-filter">
+            <span class="filter-label">Sectors:</span>
+            <div class="sector-pills" id="sector-pills">
+                <!-- Populated by JS based on category -->
+            </div>
+        </div>
+        <div class="screener-risk-banner" id="screener-risk-banner">
+            Small-cap stocks ($2-$15) carry elevated risk. Never allocate more than 2% of your account per position. AI vetting does not guarantee safety.
+        </div>
+        <div class="screener-controls-row">
+            <div class="screener-input-group" id="screener-min-group">
+                <label>Min Price</label>
+                <input type="number" id="screener-min-price" value="2" min="0.5" max="50" step="0.5">
+            </div>
+            <div class="screener-input-group" id="screener-max-group">
+                <label>Max Price</label>
+                <input type="number" id="screener-max-price" value="15" min="1" max="100" step="0.5">
+            </div>
+            <div class="screener-input-group">
+                <label>Scan Limit</label>
+                <input type="number" id="screener-limit" value="20" min="5" max="50" step="5">
+            </div>
+            <button class="btn-screener-run" id="btn-screener-run" onclick="runScreener()">
+                Scan &amp; Vet with AI
+            </button>
+        </div>
+    </div>
+    <div class="screener-results" id="screener-results">
+        <div style="padding:60px; color:#787b86; text-align:center;">
+            <h2 style="color:#d1d4dc; margin-bottom:12px;">Multi-Cap Stock Screener</h2>
+            <p>Select a category above, then scan and vet stocks with AI. Each category uses tailored analysis prompts.</p>
+            <p style="margin-top:12px; font-size:12px;">Click "Scan & Vet with AI" to start.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Status View -->
+<div class="status-content" id="status-content" style="display:none;">
+    <div id="status-inner">
+        <div style="padding:60px; color:#787b86; text-align:center;">
+            <div class="spinner" style="margin:0 auto 16px;"></div>
+            <div>Loading service status...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Auto Trading View -->
+<div class="autotrading-content" id="autotrading-content" style="display:none;">
+    <!-- Top Bar -->
+    <div class="bot-top-bar">
+        <div class="bot-status-row">
+            <div class="bot-status-indicator" id="bot-status-indicator">
+                <span class="bot-dot" id="bot-dot"></span>
+                <span id="bot-status-text">Stopped</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Balance</span>
+                <span class="bot-stat-value" id="bot-balance">$0.00</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Today P&L</span>
+                <span class="bot-stat-value" id="bot-daily-pnl">$0.00</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Daily Goal</span>
+                <span class="bot-stat-value" id="bot-daily-goal-progress">$0 / $50</span>
+            </div>
+            <div class="bot-controls">
+                <button class="btn-bot-start" id="btn-bot-start" onclick="startBot()">Start</button>
+                <button class="btn-bot-stop" id="btn-bot-stop" onclick="stopBot()">Stop</button>
+                <button class="btn-bot-kill" id="btn-bot-kill" onclick="killSwitch()">KILL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="bot-grid">
+        <!-- Left Column -->
+        <div class="bot-left">
+            <!-- Trending Now -->
+            <div class="bot-panel bot-trending-panel">
+                <div class="bot-panel-title">
+                    Trending Now
+                    <button class="btn-bot-refresh-trending" id="btn-refresh-trending" onclick="loadTrending()">Refresh</button>
+                </div>
+                <div id="bot-trending" class="bot-trending-feed">
+                    <div class="bot-empty">Click Refresh to scan market</div>
+                </div>
+            </div>
+
+            <!-- P&L Chart -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Cumulative P&L</div>
+                <div id="bot-pnl-chart" style="height:250px;"></div>
+            </div>
+            <!-- Open Positions -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Open Positions</div>
+                <div id="bot-positions" class="bot-positions-list">
+                    <div class="bot-empty">No open positions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="bot-right">
+            <!-- Platform & API Keys -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Platform</div>
+                <div class="bot-config-form">
+                    <div class="bot-config-row">
+                        <label>Exchange</label>
+                        <select id="bot-cfg-platform" class="bot-select" onchange="onPlatformChange()">
+                            <option value="blofin" selected>BloFin (Demo)</option>
+                            <option value="bybit">Bybit (Testnet)</option>
+                            <option value="okx">OKX (Demo)</option>
+                            <option value="binance">Binance (Testnet)</option>
+                        </select>
+                    </div>
+                    <div class="bot-platform-note" id="bot-platform-note">
+                        Paper trading on BloFin demo API — no real funds
+                    </div>
+                    <div class="bot-config-row">
+                        <label>API Key</label>
+                        <input type="password" id="bot-cfg-api-key" placeholder="Enter API key" class="bot-input-wide">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>API Secret</label>
+                        <input type="password" id="bot-cfg-api-secret" placeholder="Enter API secret" class="bot-input-wide">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Passphrase</label>
+                        <input type="password" id="bot-cfg-passphrase" placeholder="Enter passphrase" class="bot-input-wide">
+                    </div>
+                    <div class="bot-key-actions">
+                        <button class="btn-bot-save-keys" onclick="savePlatformKeys()">Save Keys</button>
+                        <button class="btn-bot-test-keys" onclick="testPlatformConnection()">Test Connection</button>
+                        <button class="btn-bot-check-perms" onclick="checkTradePermissions()">Check Permissions</button>
+                    </div>
+                    <div id="bot-key-status" class="bot-key-status"></div>
+                    <div id="bot-permission-status" class="bot-permission-status"></div>
+                </div>
+            </div>
+
+            <!-- Coin Selection -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Coins to Trade</div>
+                <div id="bot-coin-picker" class="bot-coin-picker">
+                    <div class="bot-empty">Loading coins...</div>
+                </div>
+                <button class="btn-bot-save-coins" onclick="updateBotCoins()">Save Coins</button>
+            </div>
+
+            <!-- Risk Settings -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Settings</div>
+                <div class="bot-config-form" id="bot-config-form">
+                    <div class="bot-config-row">
+                        <label>Trading Mode</label>
+                        <select id="bot-cfg-trading-mode" class="bot-select">
+                            <option value="futures" selected>Futures (Perpetual Swaps)</option>
+                            <option value="spot">Spot</option>
+                        </select>
+                    </div>
+                    <div class="bot-trading-mode-note" id="bot-trading-mode-note">
+                        BloFin demo only supports futures (perpetual swaps)
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Direction Bias</label>
+                        <select id="bot-cfg-direction-bias" class="bot-select">
+                            <option value="both">Both (Long & Short)</option>
+                            <option value="long_only">Long Only (Bullish)</option>
+                            <option value="short_only">Short Only (Bearish)</option>
+                            <option value="auto">Auto (LLM Decides)</option>
+                        </select>
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Daily Goal ($)</label>
+                        <input type="number" id="bot-cfg-daily-goal" value="50" min="1" max="10000" step="5">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Max Position %</label>
+                        <input type="number" id="bot-cfg-max-pct" value="10" min="1" max="50" step="1">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Daily Loss Limit ($)</label>
+                        <input type="number" id="bot-cfg-loss-limit" value="250" min="10" max="5000" step="10">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Max Open Positions</label>
+                        <input type="number" id="bot-cfg-max-open" value="3" min="1" max="10" step="1">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Scan Interval (sec)</label>
+                        <input type="number" id="bot-cfg-interval" value="300" min="60" max="3600" step="60">
+                    </div>
+                    <button class="btn-bot-save-config" onclick="updateBotConfig()">Save Settings</button>
+                </div>
+                <div class="bot-test-trade-section">
+                    <div class="bot-panel-title" style="margin-top:12px;">Test Trade</div>
+                    <div class="bot-config-form">
+                        <div class="bot-config-row">
+                            <label>Coin</label>
+                            <select id="bot-test-coin" class="bot-select">
+                                <option value="BTC-USDT">BTC-USDT</option>
+                                <option value="ETH-USDT">ETH-USDT</option>
+                                <option value="SOL-USDT">SOL-USDT</option>
+                            </select>
+                        </div>
+                        <div class="bot-config-row">
+                            <label>Side</label>
+                            <select id="bot-test-side" class="bot-select">
+                                <option value="buy">Buy</option>
+                                <option value="sell">Sell</option>
+                            </select>
+                        </div>
+                        <button class="btn-bot-test-trade" onclick="placeTestTrade()">Place Test Trade (Min Size)</button>
+                        <div id="bot-test-trade-result" class="bot-test-trade-result"></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Activity Log -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Activity Log</div>
+                <div id="bot-log" class="bot-log-list">
+                    <div class="bot-empty">No activity yet</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trade History -->
+    <div class="bot-panel bot-trades-panel">
+        <div class="bot-panel-title">Trade History</div>
+        <div id="bot-trades" class="bot-trades-table-wrap">
+            <table class="bot-trades-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Coin</th>
+                        <th>Side</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>P&L</th>
+                        <th>Status</th>
+                        <th>Opened</th>
+                    </tr>
+                </thead>
+                <tbody id="bot-trades-body">
+                    <tr><td colspan="8" class="bot-empty">No trades yet</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- History Sidebar -->
+<div class="backdrop" id="backdrop"></div>
+<div class="history-overlay" id="history-panel">
+    <div class="history-header">
+        <h3>Search History</h3>
+        <button class="btn-close-history" id="btn-close-history">&times;</button>
+    </div>
+    <div class="history-list" id="history-list"></div>
+</div>
+
+<!-- Settings Modal -->
+<div class="settings-backdrop" id="settings-backdrop" onclick="closeSettings()"></div>
+<div class="settings-modal" id="settings-modal">
+    <div class="settings-header">
+        <h3>Settings</h3>
+        <button class="btn-close-settings" onclick="closeSettings()">&times;</button>
+    </div>
+    <div class="settings-body">
+        <!-- API Keys -->
+        <div class="settings-section">
+            <div class="settings-section-title">API Keys</div>
+            <div class="settings-row">
+                <label>OpenRouter API Key</label>
+                <div class="settings-key-group">
+                    <input type="password" id="set-openrouter-key" placeholder="sk-or-v1-..." class="settings-input">
+                    <span class="settings-status" id="set-openrouter-status"></span>
+                </div>
+            </div>
+            <div class="settings-row">
+                <label>BloFin API Key</label>
+                <div class="settings-key-group">
+                    <input type="password" id="set-blofin-key" placeholder="API key" class="settings-input">
+                    <span class="settings-status" id="set-blofin-key-status"></span>
+                </div>
+            </div>
+            <div class="settings-row">
+                <label>BloFin API Secret</label>
+                <input type="password" id="set-blofin-secret" placeholder="API secret" class="settings-input">
+            </div>
+            <div class="settings-row">
+                <label>BloFin Passphrase</label>
+                <input type="password" id="set-blofin-pass" placeholder="Passphrase" class="settings-input">
+            </div>
+        </div>
+
+        <!-- LLM Models -->
+        <div class="settings-section">
+            <div class="settings-section-title">LLM Models (OpenRouter)</div>
+            <div class="settings-row"><label>Research</label><input type="text" id="set-llm-research" class="settings-input"></div>
+            <div class="settings-row"><label>Research (Fast)</label><input type="text" id="set-llm-research-fast" class="settings-input"></div>
+            <div class="settings-row"><label>Pattern</label><input type="text" id="set-llm-pattern" class="settings-input"></div>
+            <div class="settings-row"><label>Prediction</label><input type="text" id="set-llm-prediction" class="settings-input"></div>
+            <div class="settings-row"><label>Screener</label><input type="text" id="set-llm-screener" class="settings-input"></div>
+            <div class="settings-row"><label>Bot Sentiment</label><input type="text" id="set-llm-bot-sentiment" class="settings-input"></div>
+            <div class="settings-row"><label>Bot Risk</label><input type="text" id="set-llm-bot-risk" class="settings-input"></div>
+        </div>
+
+        <!-- LLM Settings -->
+        <div class="settings-section">
+            <div class="settings-section-title">LLM Settings</div>
+            <div class="settings-row"><label>Max Tokens</label><input type="number" id="set-llm-max-tokens" min="256" max="8192" step="256" class="settings-input"></div>
+            <div class="settings-row"><label>Temperature</label><input type="number" id="set-llm-temperature" min="0" max="2" step="0.1" class="settings-input"></div>
+            <div class="settings-row">
+                <label>Fast Mode</label>
+                <label class="settings-toggle"><input type="checkbox" id="set-llm-fast-mode"><span>Use faster/cheaper models</span></label>
+            </div>
+        </div>
+
+        <!-- Ollama -->
+        <div class="settings-section">
+            <div class="settings-section-title">Ollama (Local LLM)</div>
+            <div class="settings-row"><label>URL</label><input type="text" id="set-ollama-url" class="settings-input"></div>
+            <div class="settings-row"><label>Model</label><input type="text" id="set-ollama-model" class="settings-input"></div>
+        </div>
+    </div>
+    <div class="settings-footer">
+        <span class="settings-save-status" id="settings-save-status"></span>
+        <button class="btn-settings-save" onclick="saveSettings()">Save All</button>
+    </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
