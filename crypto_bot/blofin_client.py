@@ -12,6 +12,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Module-level defaults (used when no per-user keys are provided)
 BLOFIN_API_KEY = os.getenv("BLOFIN_API_KEY", "")
 BLOFIN_API_SECRET = os.getenv("BLOFIN_API_SECRET", "")
 BLOFIN_PASSPHRASE = os.getenv("BLOFIN_PASSPHRASE", "")
@@ -42,7 +43,11 @@ DEMO_URL = "https://demo-trading-openapi.blofin.com"
 class BloFinClient:
     """Wrapper around BloFin SDK. Paper trading only (demo endpoint)."""
 
-    def __init__(self):
+    def __init__(self, api_key=None, api_secret=None, passphrase=None):
+        """Initialize with optional per-user keys. Falls back to env vars."""
+        self._api_key = api_key or BLOFIN_API_KEY
+        self._api_secret = api_secret or BLOFIN_API_SECRET
+        self._passphrase = passphrase or BLOFIN_PASSPHRASE
         if BLOFIN_DEMO != "1":
             raise RuntimeError("SAFETY: BLOFIN_DEMO must be '1'. Refusing to use production endpoint.")
         self._client = None
@@ -55,8 +60,8 @@ class BloFinClient:
         if self._initialized:
             return
 
-        if not all([BLOFIN_API_KEY, BLOFIN_API_SECRET, BLOFIN_PASSPHRASE]):
-            raise RuntimeError("BloFin API credentials not configured. Set BLOFIN_API_KEY, BLOFIN_API_SECRET, BLOFIN_PASSPHRASE in .env")
+        if not all([self._api_key, self._api_secret, self._passphrase]):
+            raise RuntimeError("BloFin API credentials not configured. Set BLOFIN_API_KEY, BLOFIN_API_SECRET, BLOFIN_PASSPHRASE in settings.")
 
         if BLOFIN_DEMO != "1":
             raise RuntimeError("SAFETY: BLOFIN_DEMO must be '1'.")
@@ -70,9 +75,9 @@ class BloFinClient:
 
             from blofin import BloFinClient as _SDK
             self._client = _SDK(
-                api_key=BLOFIN_API_KEY,
-                api_secret=BLOFIN_API_SECRET,
-                passphrase=BLOFIN_PASSPHRASE,
+                api_key=self._api_key,
+                api_secret=self._api_secret,
+                passphrase=self._passphrase,
             )
             self._initialized = True
             logger.info("BloFin client initialized (demo: %s)", DEMO_URL)
@@ -93,7 +98,7 @@ class BloFinClient:
 
     def is_configured(self) -> bool:
         """Check if BloFin credentials are set."""
-        return bool(BLOFIN_API_KEY and BLOFIN_API_SECRET and BLOFIN_PASSPHRASE and BLOFIN_DEMO == "1")
+        return bool(self._api_key and self._api_secret and self._passphrase and BLOFIN_DEMO == "1")
 
     def check_trade_permission(self) -> dict:
         """Check if the API key has trade permissions."""
@@ -200,6 +205,7 @@ class BloFinClient:
                             "side": pos.get("posSide", pos.get("positionSide", "")),
                             "size": size,
                             "entry_price": float(pos.get("averagePrice", 0) or pos.get("avgPx", 0) or 0),
+                            "mark_price": float(pos.get("markPrice", 0) or pos.get("markPx", 0) or 0),
                             "unrealized_pnl": float(pos.get("unrealizedPnl", 0) or pos.get("upl", 0) or 0),
                             "margin": float(pos.get("margin", 0) or 0),
                             "raw": pos,

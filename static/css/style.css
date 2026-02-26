@@ -2518,8 +2518,35 @@ body.font-large  { zoom: 1.18; }
 .bot-pos-side.buy, .bot-pos-side.long { background: rgba(38,166,154,0.15); color: var(--accent-green); }
 .bot-pos-side.sell, .bot-pos-side.short { background: rgba(239,83,80,0.15); color: var(--accent-red); }
 .bot-pos-pnl { margin-left: auto; font-weight: 600; }
+.bot-position-row .btn-close-trade { margin-left: 8px; flex-shrink: 0; }
 .bot-pos-pnl.positive { color: var(--accent-green); }
 .bot-pos-pnl.negative { color: var(--accent-red); }
+
+/* P&L Summary Grid */
+.pnl-summary-grid {
+    display: flex;
+    gap: 0;
+    border-top: 1px solid var(--border-color);
+    margin-top: 8px;
+}
+.pnl-period {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 4px;
+    border-right: 1px solid var(--border-color);
+}
+.pnl-period:last-child { border-right: none; }
+.pnl-period-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+.pnl-period-value { font-size: 13px; font-weight: 700; }
+.pnl-period-value.positive { color: var(--accent-green); }
+.pnl-period-value.negative { color: var(--accent-red); }
+.pnl-period-trades { font-size: 10px; color: var(--text-secondary); margin-top: 1px; }
+
+/* Position details row */
+.bot-pos-details { display: flex; gap: 10px; font-size: 11px; color: var(--text-secondary); }
+.bot-pos-size, .bot-pos-entry, .bot-pos-value { white-space: nowrap; }
 
 /* Trending Now */
 .bot-trending-panel .bot-panel-title {
@@ -2940,6 +2967,22 @@ body.font-large  { zoom: 1.18; }
     font-weight: 600;
 }
 
+.btn-close-trade {
+    background: rgba(239,83,80,0.15);
+    color: var(--accent-red);
+    border: 1px solid rgba(239,83,80,0.3);
+    padding: 2px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-close-trade:hover {
+    background: rgba(239,83,80,0.3);
+    border-color: var(--accent-red);
+}
+
 /* ─── Settings Modal ─────────────────────────────────────── */
 
 .btn-settings-header {
@@ -3112,6 +3155,125 @@ body.font-large  { zoom: 1.18; }
 .btn-settings-save:hover { opacity: 0.85; }
 .btn-settings-save:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* User Profile */
+.user-profile {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 4px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border-color);
+}
+
+.user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.user-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn-logout {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    transition: color 0.2s;
+}
+.btn-logout:hover { color: var(--accent-red); }
+
+/* Admin Panel */
+.admin-content {
+    padding: 20px 24px;
+    overflow-y: auto;
+    height: calc(100vh - 93px);
+}
+
+.admin-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    max-width: 1200px;
+}
+
+.admin-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.admin-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.admin-invite-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.admin-invite-form input {
+    flex: 1;
+}
+
+.admin-invite-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.admin-invite-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.admin-invite-item .invite-email { color: var(--text-primary); }
+
+.admin-invite-item .invite-role {
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.admin-invite-item .btn-revoke {
+    background: none;
+    border: none;
+    color: var(--accent-red);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 6px;
+}
+
+.admin-config-form .settings-row {
+    margin-bottom: 8px;
+}
+
+.admin-config-form .settings-row label {
+    min-width: 120px;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
     .bot-grid {
@@ -3119,5 +3281,8 @@ body.font-large  { zoom: 1.18; }
     }
     .settings-modal {
         width: 95vw;
+    }
+    .admin-grid {
+        grid-template-columns: 1fr;
     }
 }

@@ -49,6 +49,17 @@
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
             </svg>
         </button>
+        <div class="user-profile" id="user-profile" style="display:none;">
+            <img class="user-avatar" id="user-avatar" src="" alt="">
+            <span class="user-name" id="user-name"></span>
+            <button class="btn-logout" id="btn-logout" onclick="location.href='/auth/logout'" title="Sign out">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+            </button>
+        </div>
     </div>
 </div>
 
@@ -58,7 +69,9 @@
     <button class="tab-btn" data-tab="qullamaggie" onclick="switchTab('qullamaggie')">Breakout Scanner</button>
     <button class="tab-btn" data-tab="tracker" onclick="switchTab('tracker')">Tracker</button>
     <button class="tab-btn" data-tab="screener" onclick="switchTab('screener')">Screener</button>
-    <button class="tab-btn" data-tab="autotrading" onclick="switchTab('autotrading')">Auto Trading</button>
+    <button class="tab-btn" data-tab="autotrading" data-role="trader" onclick="switchTab('autotrading')" style="display:none;">Crypto Trading</button>
+    <button class="tab-btn" data-tab="stocktrading" data-role="trader" onclick="switchTab('stocktrading')" style="display:none;">Stock Trading</button>
+    <button class="tab-btn" data-tab="admin" data-role="admin" onclick="switchTab('admin')" style="display:none;">Admin</button>
 </div>
 
 <!-- Main -->
@@ -351,6 +364,13 @@
             <div class="bot-panel">
                 <div class="bot-panel-title">Cumulative P&L</div>
                 <div id="bot-pnl-chart" style="height:250px;"></div>
+                <div id="bot-pnl-summary" class="pnl-summary-grid">
+                    <div class="pnl-period"><span class="pnl-period-label">Day</span><span class="pnl-period-value" id="pnl-day">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">Week</span><span class="pnl-period-value" id="pnl-week">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">Month</span><span class="pnl-period-value" id="pnl-month">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">Year</span><span class="pnl-period-value" id="pnl-year">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">All Time</span><span class="pnl-period-value" id="pnl-all">$0.00</span></div>
+                </div>
             </div>
             <!-- Open Positions -->
             <div class="bot-panel">
@@ -450,6 +470,10 @@
                         <input type="number" id="bot-cfg-max-open" value="3" min="1" max="10" step="1">
                     </div>
                     <div class="bot-config-row">
+                        <label>Max Daily Trades</label>
+                        <input type="number" id="bot-cfg-max-daily-trades" value="25" min="1" max="100" step="1">
+                    </div>
+                    <div class="bot-config-row">
                         <label>Scan Interval (sec)</label>
                         <input type="number" id="bot-cfg-interval" value="300" min="60" max="3600" step="60">
                     </div>
@@ -511,12 +535,280 @@
                         <th>P&L</th>
                         <th>Status</th>
                         <th>Opened</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody id="bot-trades-body">
-                    <tr><td colspan="9" class="bot-empty">No trades yet</td></tr>
+                    <tr><td colspan="10" class="bot-empty">No trades yet</td></tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Stock Trading View -->
+<div class="autotrading-content" id="stocktrading-content" style="display:none;">
+    <!-- Top Bar -->
+    <div class="bot-top-bar">
+        <div class="bot-status-row">
+            <div class="bot-status-indicator" id="sbot-status-indicator">
+                <span class="bot-dot" id="sbot-dot"></span>
+                <span id="sbot-status-text">Stopped</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Market</span>
+                <span class="bot-stat-value" id="sbot-market-status">
+                    <span id="sbot-market-dot" class="bot-dot stopped" style="display:inline-block;width:8px;height:8px;margin-right:4px;"></span>
+                    <span id="sbot-market-text">Checking...</span>
+                </span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Balance</span>
+                <span class="bot-stat-value" id="sbot-balance">$0.00</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Today P&L</span>
+                <span class="bot-stat-value" id="sbot-daily-pnl">$0.00</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Daily Goal</span>
+                <span class="bot-stat-value" id="sbot-daily-goal-progress">$0 / $50</span>
+            </div>
+            <div class="bot-controls">
+                <button class="btn-bot-start" id="btn-sbot-start" onclick="startStockBot()">Start</button>
+                <button class="btn-bot-stop" id="btn-sbot-stop" onclick="stopStockBot()">Stop</button>
+                <button class="btn-bot-kill" id="btn-sbot-kill" onclick="killStockBot()">KILL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="bot-grid">
+        <!-- Left Column -->
+        <div class="bot-left">
+            <!-- P&L Chart -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Cumulative P&L (Stocks)</div>
+                <div id="sbot-pnl-chart" style="height:250px;"></div>
+                <div id="sbot-pnl-summary" class="pnl-summary-grid">
+                    <div class="pnl-period"><span class="pnl-period-label">Day</span><span class="pnl-period-value" id="spnl-day">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">Week</span><span class="pnl-period-value" id="spnl-week">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">Month</span><span class="pnl-period-value" id="spnl-month">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">Year</span><span class="pnl-period-value" id="spnl-year">$0.00</span></div>
+                    <div class="pnl-period"><span class="pnl-period-label">All Time</span><span class="pnl-period-value" id="spnl-all">$0.00</span></div>
+                </div>
+            </div>
+            <!-- Open Positions -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Open Positions</div>
+                <div id="sbot-positions" class="bot-positions-list">
+                    <div class="bot-empty">No open positions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="bot-right">
+            <!-- Broker & API Keys -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Broker</div>
+                <div class="bot-config-form">
+                    <div class="bot-config-row">
+                        <label>Broker</label>
+                        <select id="sbot-cfg-broker" class="bot-select" onchange="onStockBrokerChange()">
+                            <option value="alpaca" selected>Alpaca (Paper)</option>
+                            <option value="webull">Webull</option>
+                        </select>
+                    </div>
+                    <div class="bot-platform-note" id="sbot-broker-note">
+                        Paper trading on Alpaca — no real funds
+                    </div>
+                    <!-- Alpaca fields -->
+                    <div id="sbot-alpaca-fields">
+                        <div class="bot-config-row">
+                            <label>API Key</label>
+                            <input type="password" id="sbot-cfg-api-key" placeholder="Enter Alpaca API key" class="bot-input-wide">
+                        </div>
+                        <div class="bot-config-row">
+                            <label>Secret Key</label>
+                            <input type="password" id="sbot-cfg-api-secret" placeholder="Enter Alpaca secret key" class="bot-input-wide">
+                        </div>
+                    </div>
+                    <!-- Webull fields -->
+                    <div id="sbot-webull-fields" style="display:none;">
+                        <div class="bot-config-row">
+                            <label>App Key</label>
+                            <input type="password" id="sbot-cfg-wb-app-key" placeholder="Enter Webull App Key" class="bot-input-wide">
+                        </div>
+                        <div class="bot-config-row">
+                            <label>App Secret</label>
+                            <input type="password" id="sbot-cfg-wb-app-secret" placeholder="Enter Webull App Secret" class="bot-input-wide">
+                        </div>
+                        <div class="bot-config-row">
+                            <label>Account ID</label>
+                            <input type="text" id="sbot-cfg-wb-account-id" placeholder="Enter Webull Account ID" class="bot-input-wide">
+                        </div>
+                    </div>
+                    <div class="bot-key-actions">
+                        <button class="btn-bot-save-keys" onclick="saveStockBrokerKeys()">Save Keys</button>
+                        <button class="btn-bot-test-keys" onclick="testStockConnection()">Test Connection</button>
+                    </div>
+                    <div id="sbot-key-status" class="bot-key-status"></div>
+                </div>
+            </div>
+
+            <!-- Stock Selection -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Stocks to Trade</div>
+                <div style="display:flex;gap:8px;margin-bottom:10px;">
+                    <input type="text" id="sbot-add-ticker" placeholder="Add ticker (e.g. AAPL)" style="flex:1;padding:6px 10px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-bright);font-size:13px;text-transform:uppercase;" onkeydown="if(event.key==='Enter')addStockTicker()">
+                    <button class="btn-bot-save-coins" onclick="addStockTicker()" style="margin:0;white-space:nowrap;">+ Add</button>
+                </div>
+                <div id="sbot-add-status" style="font-size:12px;margin-bottom:6px;display:none;"></div>
+                <div id="sbot-stock-picker" class="bot-coin-picker">
+                    <div class="bot-empty">Loading stocks...</div>
+                </div>
+                <button class="btn-bot-save-coins" onclick="updateStockBotStocks()">Save Stocks</button>
+            </div>
+
+            <!-- Risk Settings -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Settings</div>
+                <div class="bot-config-form" id="sbot-config-form">
+                    <div class="bot-config-row">
+                        <label>Direction Bias</label>
+                        <select id="sbot-cfg-direction-bias" class="bot-select">
+                            <option value="long_only" selected>Long Only (Bullish)</option>
+                            <option value="both">Both (Long & Short)</option>
+                            <option value="short_only">Short Only (Bearish)</option>
+                        </select>
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Daily Goal ($)</label>
+                        <input type="number" id="sbot-cfg-daily-goal" value="50" min="1" max="10000" step="5">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Max Position %</label>
+                        <input type="number" id="sbot-cfg-max-pct" value="10" min="1" max="50" step="1">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Daily Loss Limit ($)</label>
+                        <input type="number" id="sbot-cfg-loss-limit" value="250" min="10" max="5000" step="10">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Max Open Positions</label>
+                        <input type="number" id="sbot-cfg-max-open" value="3" min="1" max="10" step="1">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Max Daily Trades</label>
+                        <input type="number" id="sbot-cfg-max-daily-trades" value="25" min="1" max="100" step="1">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Scan Interval (sec)</label>
+                        <input type="number" id="sbot-cfg-interval" value="300" min="60" max="3600" step="60">
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Extended Hours</label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                            <input type="checkbox" id="sbot-cfg-extended-hours">
+                            <span style="font-size:0.85em;color:var(--text-secondary)">Trade pre-market (4am) &amp; after-hours (8pm ET)</span>
+                        </label>
+                    </div>
+                    <button class="btn-bot-save-config" onclick="updateStockBotConfig()">Save Settings</button>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Activity Log</div>
+                <div id="sbot-log" class="bot-log-list">
+                    <div class="bot-empty">No activity yet</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trade History -->
+    <div class="bot-panel bot-trades-panel">
+        <div class="bot-panel-title">Stock Trade History</div>
+        <div id="sbot-trades" class="bot-trades-table-wrap">
+            <table class="bot-trades-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Stock</th>
+                        <th>Side</th>
+                        <th>Strategy</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>P&L</th>
+                        <th>Status</th>
+                        <th>Opened</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="sbot-trades-body">
+                    <tr><td colspan="10" class="bot-empty">No trades yet</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Admin Panel -->
+<div class="admin-content" id="admin-content" style="display:none;">
+    <div class="admin-grid">
+        <!-- Invite Users -->
+        <div class="admin-card">
+            <div class="admin-card-title">Invite Users</div>
+            <div class="admin-invite-form">
+                <input type="email" id="admin-invite-email" class="settings-input" placeholder="Email address">
+                <select id="admin-invite-role" class="settings-input" style="width:auto;">
+                    <option value="trader">Trader</option>
+                    <option value="user">User</option>
+                </select>
+                <button class="btn-analyze" onclick="adminInviteUser()" style="padding:7px 16px; font-size:12px;">Invite</button>
+            </div>
+            <div class="admin-invite-list" id="admin-invite-list"></div>
+        </div>
+
+        <!-- Users -->
+        <div class="admin-card">
+            <div class="admin-card-title">Users</div>
+            <table class="bot-trades-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Roles</th>
+                        <th>Last Login</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-users-body">
+                    <tr><td colspan="5" class="bot-empty">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- System Config -->
+        <div class="admin-card" id="admin-config-card">
+            <div class="admin-card-title">System Config (LLM Models)</div>
+            <div class="admin-config-form" id="admin-config-form">
+                <div class="settings-row"><label>Research</label><input type="text" id="admin-llm-research" class="settings-input"></div>
+                <div class="settings-row"><label>Research (Fast)</label><input type="text" id="admin-llm-research-fast" class="settings-input"></div>
+                <div class="settings-row"><label>Pattern</label><input type="text" id="admin-llm-pattern" class="settings-input"></div>
+                <div class="settings-row"><label>Prediction</label><input type="text" id="admin-llm-prediction" class="settings-input"></div>
+                <div class="settings-row"><label>Screener</label><input type="text" id="admin-llm-screener" class="settings-input"></div>
+                <div class="settings-row"><label>Bot Sentiment</label><input type="text" id="admin-llm-bot-sentiment" class="settings-input"></div>
+                <div class="settings-row"><label>Bot Risk</label><input type="text" id="admin-llm-bot-risk" class="settings-input"></div>
+                <div class="settings-row"><label>Max Tokens</label><input type="number" id="admin-llm-max-tokens" class="settings-input"></div>
+                <div class="settings-row"><label>Temperature</label><input type="number" id="admin-llm-temperature" class="settings-input" step="0.1"></div>
+                <div style="margin-top:12px; text-align:right;">
+                    <span id="admin-config-status" style="font-size:12px; margin-right:12px;"></span>
+                    <button class="btn-analyze" onclick="adminSaveConfig()" style="padding:7px 16px; font-size:12px;">Save Config</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -535,7 +827,7 @@
 <div class="settings-backdrop" id="settings-backdrop" onclick="closeSettings()"></div>
 <div class="settings-modal" id="settings-modal">
     <div class="settings-header">
-        <h3>Settings</h3>
+        <h3>My API Keys</h3>
         <button class="btn-close-settings" onclick="closeSettings()">&times;</button>
     </div>
     <div class="settings-body">
@@ -564,25 +856,22 @@
                 <label>BloFin Passphrase</label>
                 <input type="password" id="set-blofin-pass" placeholder="Passphrase" class="settings-input">
             </div>
+            <div class="settings-row">
+                <label>Alpaca API Key</label>
+                <div class="settings-key-group">
+                    <input type="password" id="set-alpaca-key" placeholder="Alpaca paper API key" class="settings-input">
+                    <span class="settings-status" id="set-alpaca-key-status"></span>
+                </div>
+            </div>
+            <div class="settings-row">
+                <label>Alpaca Secret Key</label>
+                <input type="password" id="set-alpaca-secret" placeholder="Alpaca paper secret key" class="settings-input">
+            </div>
         </div>
 
-        <!-- LLM Models -->
+        <!-- LLM Settings (visible to all, read from admin config) -->
         <div class="settings-section">
-            <div class="settings-section-title">LLM Models (OpenRouter)</div>
-            <div class="settings-row"><label>Research</label><input type="text" id="set-llm-research" class="settings-input"></div>
-            <div class="settings-row"><label>Research (Fast)</label><input type="text" id="set-llm-research-fast" class="settings-input"></div>
-            <div class="settings-row"><label>Pattern</label><input type="text" id="set-llm-pattern" class="settings-input"></div>
-            <div class="settings-row"><label>Prediction</label><input type="text" id="set-llm-prediction" class="settings-input"></div>
-            <div class="settings-row"><label>Screener</label><input type="text" id="set-llm-screener" class="settings-input"></div>
-            <div class="settings-row"><label>Bot Sentiment</label><input type="text" id="set-llm-bot-sentiment" class="settings-input"></div>
-            <div class="settings-row"><label>Bot Risk</label><input type="text" id="set-llm-bot-risk" class="settings-input"></div>
-        </div>
-
-        <!-- LLM Settings -->
-        <div class="settings-section">
-            <div class="settings-section-title">LLM Settings</div>
-            <div class="settings-row"><label>Max Tokens</label><input type="number" id="set-llm-max-tokens" min="256" max="8192" step="256" class="settings-input"></div>
-            <div class="settings-row"><label>Temperature</label><input type="number" id="set-llm-temperature" min="0" max="2" step="0.1" class="settings-input"></div>
+            <div class="settings-section-title">Preferences</div>
             <div class="settings-row">
                 <label>Fast Mode</label>
                 <label class="settings-toggle"><input type="checkbox" id="set-llm-fast-mode"><span>Use faster/cheaper models</span></label>

@@ -331,6 +331,56 @@ def fit_trendline(indices: np.ndarray, values: np.ndarray) -> tuple:
     return slope, intercept, r_value ** 2
 
 
+def check_line_validity(slope, intercept, start_idx, end_idx, df, line_type):
+    """Check that no candle between two anchor points cuts through the trendline.
+    For resistance: no candle High should exceed the line.
+    For support: no candle Low should go below the line.
+    Returns True if line is valid (no cuts)."""
+    lo = min(start_idx, end_idx)
+    hi = max(start_idx, end_idx)
+    for idx in range(lo, hi + 1):
+        line_val = slope * idx + intercept
+        if line_type == "resistance":
+            if df["High"].iloc[idx] > line_val:
+                return False
+        else:  # support
+            if df["Low"].iloc[idx] < line_val:
+                return False
+    return True
+
+
+def construct_validated_trendline(swing_indices, df, line_type):
+    """Build a validated trendline from the 2 most recent swing points.
+    Iterates backward through swing point pairs until a valid pair is found.
+    line_type: 'resistance' (uses High) or 'support' (uses Low).
+    Returns (slope, intercept, anchor_a_idx, anchor_b_idx) or None."""
+    if len(swing_indices) < 2:
+        return None
+
+    price_col = "High" if line_type == "resistance" else "Low"
+    # Sort most recent first
+    sorted_pts = sorted(swing_indices, reverse=True)
+
+    # Try pairs: most recent A with earlier B, then move A back
+    for i in range(len(sorted_pts) - 1):
+        a_idx = int(sorted_pts[i])
+        a_val = float(df[price_col].iloc[a_idx])
+        for j in range(i + 1, len(sorted_pts)):
+            b_idx = int(sorted_pts[j])
+            b_val = float(df[price_col].iloc[b_idx])
+
+            if a_idx == b_idx:
+                continue
+
+            slope = (a_val - b_val) / (a_idx - b_idx)
+            intercept = a_val - slope * a_idx
+
+            if check_line_validity(slope, intercept, b_idx, a_idx, df, line_type):
+                return slope, intercept, a_idx, b_idx
+
+    return None
+
+
 def detect_horizontal_resistance(df: pd.DataFrame, highs_idx: np.ndarray, tolerance_pct: float = 0.03) -> tuple:
     """
     Detect horizontal resistance: multiple swing highs clustering at the same price.
@@ -424,45 +474,44 @@ def detect_triangle_pattern(df: pd.DataFrame, min_points: int = 2) -> dict:
         # -- Ascending triangle: flat top + rising bottom --
         h_resistance, h_touches, h_r2 = detect_horizontal_resistance(df, highs_idx)
         if h_resistance is not None and h_touches >= 2:
-            lower_slope, lower_intercept, lower_r2 = fit_trendline(
-                lows_idx, df["Low"].values[lows_idx]
-            )
-            if lower_slope is not None and lower_slope > 0:
-                # Support should be below resistance at current bar
-                support_at_end = lower_slope * (n - 1) + lower_intercept
-                if support_at_end < h_resistance:
-                    score = _score_horizontal_pattern(
-                        h_r2, h_touches, lower_r2, lows_idx, n, df, "ascending"
-                    )
-                    if score > best_score:
-                        best_score = score
-                        best_pattern = _build_horizontal_pattern(
-                            df, n, "ascending_triangle", score,
-                            h_resistance, 0, h_r2,  # flat resistance
-                            lower_slope, lower_intercept, lower_r2,
-                            highs_idx, lows_idx, is_upper_flat=True
+            lower_result = construct_validated_trendline(lows_idx, df, "support")
+            if lower_result is not None:
+                lower_slope, lower_intercept, _, _ = lower_result
+                if lower_slope > 0:
+                    support_at_end = lower_slope * (n - 1) + lower_intercept
+                    if support_at_end < h_resistance:
+                        score = _score_horizontal_pattern(
+                            h_r2, h_touches, 1.0, lows_idx, n, df, "ascending"
                         )
+                        if score > best_score:
+                            best_score = score
+                            best_pattern = _build_horizontal_pattern(
+                                df, n, "ascending_triangle", score,
+                                h_resistance, 0, h_r2,  # flat resistance
+                                lower_slope, lower_intercept, 1.0,
+                                highs_idx, lows_idx, is_upper_flat=True
+                            )
 
         # -- Descending triangle: flat bottom + falling top --
         h_support, s_touches, s_r2 = detect_horizontal_support(df, lows_idx)
         if h_support is not None and s_touches >= 2:
-            upper_slope, upper_intercept, upper_r2 = fit_trendline(
-                highs_idx, df["High"].values[highs_idx]
-            )
-            if upper_slope is not None and upper_slope < 0:
-                resistance_at_end = upper_slope * (n - 1) + upper_intercept
-                if resistance_at_end > h_support:
-                    score = _score_horizontal_pattern(
-                        upper_r2, s_touches, s_r2, highs_idx, n, df, "descending"
-                    )
-                    if score > best_score:
-                        best_score = score
-                        best_pattern = _build_horizontal_pattern(
-                            df, n, "descending_triangle", score,
-                            upper_slope, upper_intercept, upper_r2,
-                            h_support, 0, s_r2,  # flat support
-                            highs_idx, lows_idx, is_upper_flat=False
+            upper_result = construct_validated_trendline(highs_idx, df, "resistance")
+            if upper_result is not None:
+                upper_slope, upper_intercept, _, _ = upper_result
+                if upper_slope < 0:
+                    resistance_at_end = upper_slope * (n - 1) + upper_intercept
+                    if resistance_at_end > h_support:
+                        score = _score_horizontal_pattern(
+                            1.0, s_touches, s_r2, highs_idx, n, df, "descending"
                         )
+                        if score > best_score:
+                            best_score = score
+                            best_pattern = _build_horizontal_pattern(
+                                df, n, "descending_triangle", score,
+                                upper_slope, upper_intercept, 1.0,
+                                h_support, 0, s_r2,  # flat support
+                                highs_idx, lows_idx, is_upper_flat=False
+                            )
 
     # ── APPROACH 3: Both lines sloped (symmetrical triangle, wedges, pennants) ──
     for order in [2, 3, 4, 5, 6, 7, 8]:
@@ -470,7 +519,7 @@ def detect_triangle_pattern(df: pd.DataFrame, min_points: int = 2) -> dict:
         if len(highs_idx) < min_points or len(lows_idx) < min_points:
             continue
 
-        for lookback_pct in [0.0, 0.2, 0.3, 0.4, 0.5]:
+        for lookback_pct in [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.0]:
             lookback_start = int(n * lookback_pct)
             recent_highs = highs_idx[highs_idx >= lookback_start]
             recent_lows = lows_idx[lows_idx >= lookback_start]
@@ -478,21 +527,21 @@ def detect_triangle_pattern(df: pd.DataFrame, min_points: int = 2) -> dict:
             if len(recent_highs) < 2 or len(recent_lows) < 2:
                 continue
 
-            upper_slope, upper_intercept, upper_r2 = fit_trendline(
-                recent_highs, df["High"].values[recent_highs]
-            )
-            lower_slope, lower_intercept, lower_r2 = fit_trendline(
-                recent_lows, df["Low"].values[recent_lows]
-            )
-            if upper_slope is None or lower_slope is None:
+            upper_result = construct_validated_trendline(recent_highs, df, "resistance")
+            lower_result = construct_validated_trendline(recent_lows, df, "support")
+            if upper_result is None or lower_result is None:
                 continue
+
+            upper_slope, upper_intercept, upper_anchor_a, upper_anchor_b = upper_result
+            lower_slope, lower_intercept, lower_anchor_a, lower_anchor_b = lower_result
 
             pattern_type = classify_triangle(upper_slope, lower_slope, avg_price)
             if pattern_type is None:
                 continue
 
-            upper_at_start = upper_slope * lookback_start + upper_intercept
-            lower_at_start = lower_slope * lookback_start + lower_intercept
+            pattern_oldest = min(upper_anchor_b, lower_anchor_b)
+            upper_at_start = upper_slope * pattern_oldest + upper_intercept
+            lower_at_start = lower_slope * pattern_oldest + lower_intercept
             upper_at_end = upper_slope * (n - 1) + upper_intercept
             lower_at_end = lower_slope * (n - 1) + lower_intercept
 
@@ -516,7 +565,8 @@ def detect_triangle_pattern(df: pd.DataFrame, min_points: int = 2) -> dict:
                 continue
 
             score = calculate_pattern_score(
-                upper_r2, lower_r2, recent_highs, recent_lows, n, apex_idx, df
+                recent_highs, recent_lows, n, apex_idx, df,
+                upper_slope, upper_intercept, lower_slope, lower_intercept
             )
 
             if score > best_score:
@@ -534,8 +584,9 @@ def detect_triangle_pattern(df: pd.DataFrame, min_points: int = 2) -> dict:
 
                 upper_line_points = []
                 lower_line_points = []
+                draw_start = min(upper_anchor_b, lower_anchor_b)
                 draw_end = min(int(apex_idx) if apex_idx < n + 50 else n + 20, n + 20)
-                for idx in range(int(pattern_start), draw_end):
+                for idx in range(int(draw_start), draw_end):
                     upper_line_points.append({
                         "idx": idx,
                         "value": round(upper_slope * idx + upper_intercept, 2)
@@ -559,11 +610,13 @@ def detect_triangle_pattern(df: pd.DataFrame, min_points: int = 2) -> dict:
                     "apex_index": int(apex_idx),
                     "upper_trendline": {
                         "slope": upper_slope, "intercept": upper_intercept,
-                        "r_squared": round(upper_r2, 4), "points": upper_line_points,
+                        "anchors": [upper_anchor_b, upper_anchor_a],
+                        "points": upper_line_points,
                     },
                     "lower_trendline": {
                         "slope": lower_slope, "intercept": lower_intercept,
-                        "r_squared": round(lower_r2, 4), "points": lower_line_points,
+                        "anchors": [lower_anchor_b, lower_anchor_a],
+                        "points": lower_line_points,
                     },
                     "swing_highs": [int(x) for x in recent_highs],
                     "swing_lows": [int(x) for x in recent_lows],
@@ -712,49 +765,103 @@ def _build_horizontal_pattern(df, n, pattern_type, score,
 
 
 def classify_triangle(upper_slope: float, lower_slope: float, avg_price: float = 100) -> str:
-    """Classify triangle type based on trendline slopes, relative to price level."""
+    """Classify triangle/wedge/channel type based on strict slope relationship table.
+    | Pattern              | Resistance Slope | Support Slope                          |
+    |----------------------|-----------------|----------------------------------------|
+    | Symmetrical Triangle | Negative        | Positive                               |
+    | Ascending Triangle   | Flat (~0)       | Positive                               |
+    | Descending Triangle  | Negative        | Flat (~0)                              |
+    | Rising Wedge         | Positive        | Positive, support slope > resistance   |
+    | Falling Wedge        | Negative        | Negative, support steeper (more neg)   |
+    | Channel Up           | Positive        | Positive, slopes roughly equal         |
+    | Channel Down         | Negative        | Negative, slopes roughly equal         |
+    """
     slope_threshold = avg_price * 0.0003
 
+    upper_pos = upper_slope > slope_threshold
+    upper_neg = upper_slope < -slope_threshold
     upper_flat = abs(upper_slope) < slope_threshold
+    lower_pos = lower_slope > slope_threshold
+    lower_neg = lower_slope < -slope_threshold
     lower_flat = abs(lower_slope) < slope_threshold
-    upper_down = upper_slope < -slope_threshold
-    lower_up = lower_slope > slope_threshold
 
-    if upper_down and lower_up:
-        ratio = abs(upper_slope) / max(abs(lower_slope), 1e-10)
-        if 0.4 < ratio < 2.5:
-            return "symmetrical_triangle"
-        elif ratio >= 2.5:
-            return "falling_wedge"
-        else:
-            return "rising_wedge"
-    elif upper_flat and lower_up:
+    # Symmetrical triangle: resistance falling, support rising
+    if upper_neg and lower_pos:
+        return "symmetrical_triangle"
+
+    # Ascending triangle: flat resistance, rising support
+    if upper_flat and lower_pos:
         return "ascending_triangle"
-    elif upper_down and lower_flat:
+
+    # Descending triangle: falling resistance, flat support
+    if upper_neg and lower_flat:
         return "descending_triangle"
-    elif upper_down and lower_slope < 0 and upper_slope < lower_slope:
-        return "falling_wedge"
-    elif lower_up and upper_slope > 0 and lower_slope > upper_slope:
-        return "rising_wedge"
-    elif upper_slope < 0 and lower_slope > 0:
-        return "pennant"
+
+    # Both positive slopes
+    if upper_pos and lower_pos:
+        slope_ratio = abs(upper_slope) / max(abs(lower_slope), 1e-10)
+        # Channel up: slopes roughly equal (ratio 0.5 to 2.0)
+        if 0.5 < slope_ratio < 2.0:
+            return "channel_up"
+        # Rising wedge: support slope > resistance slope (steeper support)
+        if lower_slope > upper_slope:
+            return "rising_wedge"
+        return "channel_up"
+
+    # Both negative slopes
+    if upper_neg and lower_neg:
+        slope_ratio = abs(upper_slope) / max(abs(lower_slope), 1e-10)
+        # Channel down: slopes roughly equal
+        if 0.5 < slope_ratio < 2.0:
+            return "channel_down"
+        # Falling wedge: support steeper (more negative) than resistance
+        if lower_slope < upper_slope:
+            return "falling_wedge"
+        return "channel_down"
 
     return None
 
 
 def calculate_pattern_score(
-    upper_r2, lower_r2, highs_idx, lows_idx, n, apex_idx, df
+    highs_idx, lows_idx, n, apex_idx, df,
+    upper_slope=None, upper_intercept=None,
+    lower_slope=None, lower_intercept=None
 ) -> float:
-    """Calculate a confidence score for the pattern (0-100)."""
+    """Calculate a confidence score for the pattern (0-100).
+    Uses validation-based scoring instead of R²."""
     score = 0
 
-    # Trendline fit quality (0-30)
-    avg_r2 = (upper_r2 + lower_r2) / 2
-    score += avg_r2 * 30
+    # Line validity — both lines pass validation (0-25)
+    valid_upper = False
+    valid_lower = False
+    if upper_slope is not None and upper_intercept is not None and len(highs_idx) >= 2:
+        valid_upper = check_line_validity(
+            upper_slope, upper_intercept,
+            int(highs_idx[-1]), int(highs_idx[0]), df, "resistance"
+        )
+    if lower_slope is not None and lower_intercept is not None and len(lows_idx) >= 2:
+        valid_lower = check_line_validity(
+            lower_slope, lower_intercept,
+            int(lows_idx[-1]), int(lows_idx[0]), df, "support"
+        )
+    if valid_upper and valid_lower:
+        score += 25
+    elif valid_upper or valid_lower:
+        score += 12
 
-    # Number of touch points (0-20)
-    touches = len(highs_idx) + len(lows_idx)
-    score += min(touches / 8, 1) * 20
+    # Touch points — additional swing points near the line (0-15)
+    near_touches = 0
+    if upper_slope is not None and upper_intercept is not None:
+        for idx in highs_idx:
+            line_val = upper_slope * idx + upper_intercept
+            if abs(df["High"].iloc[idx] - line_val) < line_val * 0.015:
+                near_touches += 1
+    if lower_slope is not None and lower_intercept is not None:
+        for idx in lows_idx:
+            line_val = lower_slope * idx + lower_intercept
+            if abs(df["Low"].iloc[idx] - line_val) < line_val * 0.015:
+                near_touches += 1
+    score += min(near_touches / 6, 1) * 15
 
     # Recency — pattern should be near current price (0-15)
     last_high = highs_idx[-1]
@@ -762,23 +869,34 @@ def calculate_pattern_score(
     recency = max(last_high, last_low) / n
     score += recency * 15
 
-    # Volume declining in consolidation (0-20)
+    # Compactness — tight patterns in recent data score higher (0-20)
+    # Measures what fraction of the chart the pattern spans; smaller = better
+    pattern_start = min(highs_idx[0], lows_idx[0])
+    pattern_span = n - pattern_start
+    span_ratio = pattern_span / n  # 1.0 = entire chart, 0.1 = last 10%
+    if span_ratio <= 0.5:
+        score += 20  # Pattern in last 50% of chart — very compact
+    elif span_ratio <= 0.7:
+        score += 12
+    else:
+        score += 4  # Wide patterns get minimal compactness bonus
+
+    # Volume declining in consolidation (0-15)
     if "Volume" in df.columns:
         vol = df["Volume"].values
-        pattern_start = min(highs_idx[0], lows_idx[0])
         if pattern_start < n - 5:
             early_vol = np.mean(vol[pattern_start : pattern_start + 5])
             late_vol = np.mean(vol[-5:])
             if early_vol > 0:
                 vol_decline = 1 - (late_vol / early_vol)
-                score += max(0, min(vol_decline, 1)) * 20
+                score += max(0, min(vol_decline, 1)) * 15
 
-    # Apex distance — not too close, not too far (0-15)
+    # Apex distance — not too close, not too far (0-10)
     apex_distance = (apex_idx - n) / n
     if 0.05 < apex_distance < 0.5:
-        score += 15
+        score += 10
     elif 0 < apex_distance <= 0.05:
-        score += 8
+        score += 5
 
     return min(score, 100)
 
@@ -1018,8 +1136,8 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     rel_vol = current_vol / vol_ma_10 if vol_ma_10 > 0 else 0
 
     return {
-        "atr_14": round(atr_14, 2),
-        "tr_4": round(tr_4, 2),
+        "atr_14": round(atr_14, 6),
+        "tr_4": round(tr_4, 6),
         "adr_pct": round(daily_range_pct, 2),
         "volume": current_vol,
         "vol_ma_10": vol_ma_10,
@@ -1038,6 +1156,11 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
         "macd_histogram": round(macd_histogram.iloc[-1], 4),
         "macd_bullish_cross": macd_bullish_cross,
         "macd_bearish_cross": macd_bearish_cross,
+        # Bollinger Bands (20, 2)
+        "bb_upper": round(float(sma_20 + 2 * close.rolling(20).std().iloc[-1]) if n >= 20 else 0, 6),
+        "bb_lower": round(float(sma_20 - 2 * close.rolling(20).std().iloc[-1]) if n >= 20 else 0, 6),
+        "bb_mid": round(float(sma_20), 6),
+        "bb_width": round(float((4 * close.rolling(20).std().iloc[-1]) / sma_20 * 100) if n >= 20 and sma_20 > 0 else 0, 2),
     }
 
 

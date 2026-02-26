@@ -5,12 +5,13 @@ Probes 6 services every 60s, stores results, detects incidents.
 
 import threading
 import time
-import sqlite3
 import os
 import requests
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "searches.db")
+from db import IS_POSTGRES, query, query_one, execute
+
+P = "%s" if IS_POSTGRES else "?"
 
 # Cache for OpenRouter models list (avoid hitting API every 60s)
 _models_cache = {"data": None, "expires": 0}
@@ -40,17 +41,11 @@ SERVICES = {
         "name": "Flask Server",
         "category": "Application",
     },
-    "sqlite_db": {
-        "name": "SQLite Database",
+    "database": {
+        "name": "Database",
         "category": "Database",
     },
 }
-
-
-def _get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def _fetch_openrouter_models():
@@ -116,24 +111,16 @@ def check_flask_server() -> dict:
     return {"status": "operational", "response_time_ms": 0}
 
 
-def check_sqlite_db() -> dict:
-    """Check SQLite connectivity and table existence."""
+def check_database() -> dict:
+    """Check database connectivity."""
     start = time.time()
     try:
-        conn = _get_db()
-        conn.execute("SELECT 1").fetchone()
-        # Verify key tables exist
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()]
-        conn.close()
+        row = query_one("SELECT 1 as ok")
         elapsed = int((time.time() - start) * 1000)
-        required = {"searches", "journal_entries", "service_checks"}
-        missing = required - set(tables)
-        if missing:
-            return {"status": "degraded", "response_time_ms": elapsed,
-                    "error_message": f"Missing tables: {', '.join(missing)}"}
-        return {"status": "operational", "response_time_ms": elapsed}
+        if row:
+            return {"status": "operational", "response_time_ms": elapsed}
+        return {"status": "degraded", "response_time_ms": elapsed,
+                "error_message": "Query returned no result"}
     except Exception as e:
         elapsed = int((time.time() - start) * 1000)
         return {"status": "outage", "response_time_ms": elapsed,
@@ -150,74 +137,67 @@ def run_all_checks() -> dict:
 
     results["yahoo_finance"] = check_yahoo_finance()
     results["flask_server"] = check_flask_server()
-    results["sqlite_db"] = check_sqlite_db()
+    results["database"] = check_database()
 
     return results
 
 
 def store_check_results(results: dict):
     """Store check results in DB and detect incidents."""
-    conn = _get_db()
     now = datetime.now().isoformat()
 
     for service_name, result in results.items():
         # Store the check
-        conn.execute("""
-            INSERT INTO service_checks (service_name, status, response_time_ms, error_message, checked_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            service_name,
-            result["status"],
-            result.get("response_time_ms", 0),
-            result.get("error_message"),
-            now,
-        ))
+        execute(
+            f"INSERT INTO service_checks (service_name, status, response_time_ms, error_message, checked_at) "
+            f"VALUES ({P}, {P}, {P}, {P}, {P})",
+            (service_name, result["status"], result.get("response_time_ms", 0),
+             result.get("error_message"), now),
+        )
 
         # Incident detection: compare with previous check
-        prev = conn.execute("""
-            SELECT status FROM service_checks
-            WHERE service_name = ? AND checked_at < ?
-            ORDER BY checked_at DESC LIMIT 1
-        """, (service_name, now)).fetchone()
+        prev = query_one(
+            f"SELECT status FROM service_checks "
+            f"WHERE service_name = {P} AND checked_at < {P} "
+            f"ORDER BY checked_at DESC LIMIT 1",
+            (service_name, now),
+        )
 
         prev_status = prev["status"] if prev else "operational"
         curr_status = result["status"]
 
         # Transition to degraded/outage → open incident
         if prev_status == "operational" and curr_status in ("degraded", "outage"):
-            conn.execute("""
-                INSERT INTO service_incidents (service_name, incident_type, started_at, error_message, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (service_name, curr_status, now, result.get("error_message"), now))
+            execute(
+                f"INSERT INTO service_incidents (service_name, incident_type, started_at, error_message, created_at) "
+                f"VALUES ({P}, {P}, {P}, {P}, {P})",
+                (service_name, curr_status, now, result.get("error_message"), now),
+            )
 
         # Recovery → close open incident
         elif curr_status == "operational" and prev_status in ("degraded", "outage"):
-            open_incident = conn.execute("""
-                SELECT id, started_at FROM service_incidents
-                WHERE service_name = ? AND resolved_at IS NULL
-                ORDER BY started_at DESC LIMIT 1
-            """, (service_name,)).fetchone()
+            open_incident = query_one(
+                f"SELECT id, started_at FROM service_incidents "
+                f"WHERE service_name = {P} AND resolved_at IS NULL "
+                f"ORDER BY started_at DESC LIMIT 1",
+                (service_name,),
+            )
 
             if open_incident:
-                started = datetime.fromisoformat(open_incident["started_at"])
+                started = datetime.fromisoformat(str(open_incident["started_at"]))
                 duration = int((datetime.fromisoformat(now) - started).total_seconds())
-                conn.execute("""
-                    UPDATE service_incidents SET resolved_at = ?, duration_seconds = ?
-                    WHERE id = ?
-                """, (now, duration, open_incident["id"]))
-
-    conn.commit()
-    conn.close()
+                execute(
+                    f"UPDATE service_incidents SET resolved_at = {P}, duration_seconds = {P} "
+                    f"WHERE id = {P}",
+                    (now, duration, open_incident["id"]),
+                )
 
 
 def purge_old_checks(days: int = 90):
     """Remove checks older than N days."""
     try:
-        conn = _get_db()
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        conn.execute("DELETE FROM service_checks WHERE checked_at < ?", (cutoff,))
-        conn.commit()
-        conn.close()
+        execute(f"DELETE FROM service_checks WHERE checked_at < {P}", (cutoff,))
     except Exception:
         pass
 

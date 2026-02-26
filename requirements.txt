@@ -8,3 +8,11 @@ python-dotenv==1.1.0
 requests==2.32.3
 blofin
 websocket-client
+alpaca-py>=0.28.0
+webull-python-sdk-core>=0.1.18
+webull-python-sdk-trade>=0.1.18
+psycopg2-binary
+authlib
+flask-login
+cryptography
+gunicorn

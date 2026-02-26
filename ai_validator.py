@@ -133,8 +133,8 @@ Change: {analysis['change']} ({analysis['change_pct']}%)""")
         # Trendline R² and swing counts only for pattern/full context
         if context in ("pattern", "full"):
             pattern_text += f"""
-  Trendline R² (Upper): {pattern['upper_trendline']['r_squared']}
-  Trendline R² (Lower): {pattern['lower_trendline']['r_squared']}
+  Trendline R² (Upper): {pattern['upper_trendline'].get('r_squared', 'N/A')}
+  Trendline R² (Lower): {pattern['lower_trendline'].get('r_squared', 'N/A')}
   Swing Highs: {len(pattern.get('swing_highs', []))} points
   Swing Lows: {len(pattern.get('swing_lows', []))} points"""
 
