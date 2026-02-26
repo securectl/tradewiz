@@ -255,6 +255,36 @@ def _run_postgres(conn):
     logger.info("PostgreSQL tables created.")
 
 
+def _sqlite_recreate_if_pk_changed(conn, table, new_ddl):
+    """Recreate a SQLite table if its primary key doesn't include user_id.
+    Preserves data by copying rows into the new schema."""
+    try:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if "user_id" in cols:
+            return  # Already migrated
+        # Backup, drop, recreate, copy
+        old_cols = ", ".join(cols)
+        conn.execute(f"ALTER TABLE {table} RENAME TO _{table}_old")
+        conn.execute(new_ddl)
+        # Copy old data (user_id will be NULL)
+        conn.execute(f"INSERT INTO {table} ({old_cols}) SELECT {old_cols} FROM _{table}_old")
+        conn.execute(f"DROP TABLE _{table}_old")
+        logger.info(f"Recreated table {table} with new primary key")
+    except Exception as e:
+        logger.debug(f"Table recreate skipped ({table}): {e}")
+
+
+def _sqlite_add_column(conn, table, column, col_type):
+    """Add a column to a SQLite table if it doesn't exist."""
+    try:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            logger.info(f"Added column {column} to {table}")
+    except Exception as e:
+        logger.debug(f"Column migration skipped ({table}.{column}): {e}")
+
+
 def _run_sqlite(conn):
     """SQLite schema — mirrors the original init_db() plus new auth tables."""
     from crypto_bot.blofin_client import DEFAULT_COINS
@@ -454,6 +484,36 @@ def _run_sqlite(conn):
             PRIMARY KEY (user_id, date)
         )
     """)
+
+    # ── Migrate old tables: add user_id if missing ──────────────
+    _sqlite_add_column(conn, "bot_trades", "user_id", "INTEGER")
+    _sqlite_add_column(conn, "bot_log", "user_id", "INTEGER")
+    _sqlite_add_column(conn, "bot_log", "source", "TEXT DEFAULT 'crypto'")
+    _sqlite_add_column(conn, "searches", "user_id", "INTEGER")
+    _sqlite_add_column(conn, "journal_entries", "user_id", "INTEGER")
+    _sqlite_add_column(conn, "weekly_goals", "user_id", "INTEGER")
+
+    # Tables whose PRIMARY KEY changed (key → user_id,key) must be recreated
+    _sqlite_recreate_if_pk_changed(conn, "bot_config", """
+        CREATE TABLE bot_config (
+            user_id INTEGER, key TEXT NOT NULL, value TEXT NOT NULL,
+            PRIMARY KEY (user_id, key))""")
+    _sqlite_recreate_if_pk_changed(conn, "bot_daily_pnl", """
+        CREATE TABLE bot_daily_pnl (
+            user_id INTEGER, date TEXT NOT NULL,
+            total_pnl REAL DEFAULT 0, trade_count INTEGER DEFAULT 0,
+            win_count INTEGER DEFAULT 0, loss_count INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, date))""")
+    _sqlite_recreate_if_pk_changed(conn, "stock_daily_pnl", """
+        CREATE TABLE stock_daily_pnl (
+            user_id INTEGER, date TEXT NOT NULL,
+            total_pnl REAL DEFAULT 0, trade_count INTEGER DEFAULT 0,
+            win_count INTEGER DEFAULT 0, loss_count INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, date))""")
+    _sqlite_recreate_if_pk_changed(conn, "account_config", """
+        CREATE TABLE account_config (
+            user_id INTEGER, key TEXT NOT NULL, value TEXT NOT NULL,
+            PRIMARY KEY (user_id, key))""")
 
     logger.info("SQLite tables created.")
 
