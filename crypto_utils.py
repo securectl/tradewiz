@@ -8,12 +8,15 @@ from cryptography.fernet import Fernet
 
 _ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 
+# Auto-generate a key for local development if not set.
+# In production, ENCRYPTION_KEY must be set in environment variables.
+if not _ENCRYPTION_KEY:
+    _ENCRYPTION_KEY = Fernet.generate_key().decode()
+    os.environ["ENCRYPTION_KEY"] = _ENCRYPTION_KEY
+
 
 def _get_fernet():
-    key = _ENCRYPTION_KEY or os.getenv("ENCRYPTION_KEY", "")
-    if not key:
-        raise RuntimeError("ENCRYPTION_KEY environment variable not set")
-    return Fernet(key.encode() if isinstance(key, str) else key)
+    return Fernet(_ENCRYPTION_KEY.encode() if isinstance(_ENCRYPTION_KEY, str) else _ENCRYPTION_KEY)
 
 
 def encrypt(plaintext: str) -> str:

@@ -184,7 +184,8 @@ def callback():
 
 @auth_bp.route("/dev-login", methods=["POST"])
 def dev_login():
-    """Development-only login bypass (when Google OAuth is not configured)."""
+    """Development-only login bypass (when Google OAuth is not configured).
+    Auto-grants admin+trader roles so all features are accessible locally."""
     if os.getenv("GOOGLE_CLIENT_ID"):
         return jsonify({"error": "Dev login disabled when OAuth is configured"}), 403
 
@@ -192,6 +193,30 @@ def dev_login():
     name = request.form.get("name", "Developer")
 
     user = _upsert_user(f"dev-{email}", email, name, "")
+
+    # In dev mode, auto-grant admin + trader roles for full access
+    p = "%s" if IS_POSTGRES else "?"
+    conn = get_db()
+    try:
+        for role in ("admin", "trader"):
+            if role not in user.roles:
+                if IS_POSTGRES:
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"INSERT INTO user_roles (user_id, role) VALUES ({p}, {p}) ON CONFLICT DO NOTHING",
+                        (user.id, role),
+                    )
+                    cur.close()
+                else:
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO user_roles (user_id, role) VALUES ({p}, {p})",
+                        (user.id, role),
+                    )
+        conn.commit()
+        user.roles = list(set(user.roles + ["admin", "trader"]))
+    finally:
+        put_db(conn)
+
     login_user(user, remember=True)
     return redirect("/")
 
