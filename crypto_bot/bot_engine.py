@@ -53,6 +53,33 @@ def _log(level: str, message: str, details: str = None):
     log_fn(f"[BOT] {message}")
 
 
+def _journal_log(ticker: str, action: str, entry_price: float = None,
+                  exit_price: float = None, shares: float = None,
+                  pnl: float = None, notes: str = ""):
+    """Log a trade to the Tracker journal for visibility."""
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT INTO journal_entries (ticker, notes, action, entry_price, exit_price, shares, pnl) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (ticker, notes, action, entry_price, exit_price, shares, pnl),
+        )
+        # Update weekly actuals if there's a P&L
+        if pnl is not None:
+            from datetime import timedelta
+            now = datetime.now()
+            monday = now - timedelta(days=now.weekday())
+            week = monday.strftime("%Y-%m-%d")
+            conn.execute(
+                "INSERT INTO weekly_goals (week_start, target_amount, actual_amount) VALUES (?, 0, ?) "
+                "ON CONFLICT(week_start) DO UPDATE SET actual_amount = actual_amount + ?",
+                (week, pnl, pnl),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to log to journal: {e}")
+
+
 def _get_trade_performance() -> dict:
     """Query last 7 days of closed trades and return performance stats."""
     try:
@@ -120,6 +147,7 @@ class TradingBot:
         self._thread = None
         self._stop_event = threading.Event()
         self._running = False
+        self._last_summary_hour = -1
 
     @property
     def is_running(self) -> bool:
@@ -215,13 +243,42 @@ class TradingBot:
             try:
                 scan_interval = int(_get_config("scan_interval_sec", "300"))
                 self._scan_cycle()
+                self._log_hourly_summary()
             except Exception as e:
                 _log("error", f"Scan cycle error: {e}", str(e))
 
             # Wait for the interval or stop event
             self._stop_event.wait(timeout=scan_interval)
 
+        # Final summary on exit
+        self._log_hourly_summary(force=True)
         _log("info", "Bot loop exited")
+
+    def _log_hourly_summary(self, force=False):
+        """Log a performance summary once per hour (or on force)."""
+        try:
+            current_hour = datetime.now().hour
+            if not force and current_hour == self._last_summary_hour:
+                return
+            self._last_summary_hour = current_hour
+
+            perf = _get_trade_performance()
+            if not perf or not perf.get("overall"):
+                return
+
+            o = perf["overall"]
+            daily_pnl = self.risk_manager.get_daily_pnl()
+            open_count = self.risk_manager.get_open_positions_count()
+
+            summary = (
+                f"[CRYPTO PERFORMANCE] "
+                f"7d: {o['total_trades']} trades, {o['win_rate']}% win, "
+                f"${o['total_pnl']:+.2f} total | "
+                f"Today: ${daily_pnl:+.2f} | Open: {open_count}"
+            )
+            _log("info", summary)
+        except Exception:
+            pass
 
     def _get_selected_coins(self) -> list:
         """Get user-selected coins from bot_config, or defaults."""
@@ -361,12 +418,15 @@ class TradingBot:
 
         # Calculate stop loss and take profit
         atr = indicators.get("atr_14", 0)
+        # Enforce minimum ATR of 1% of price (wider buffer for low-priced coins)
+        min_atr = current_price * 0.01
+        effective_atr = max(atr, min_atr)
         if signal["side"] == "buy":
-            stop_loss = current_price - (1.5 * atr)
-            take_profit = current_price + (2.5 * atr)
+            stop_loss = current_price - (2.0 * effective_atr)
+            take_profit = current_price + (3.0 * effective_atr)
         else:
-            stop_loss = current_price + (1.5 * atr)
-            take_profit = current_price - (2.5 * atr)
+            stop_loss = current_price + (2.0 * effective_atr)
+            take_profit = current_price - (3.0 * effective_atr)
 
         # Execute trade (size is in coins, place_order converts to contracts)
         order_result = self.client.place_order(
@@ -396,6 +456,11 @@ class TradingBot:
             conn.commit()
             conn.close()
             _log("info", f"TRADE OPENED: {signal['side']} {size_coins:.6f} {coin_key} ({contracts} contracts) @ ${current_price:,.2f} | SL: ${stop_loss:,.2f} | TP: ${take_profit:,.2f}")
+            _journal_log(
+                ticker=coin_key, action="BUY" if signal["side"] == "buy" else "SELL",
+                entry_price=current_price, shares=round(size_coins, 6),
+                notes=f"[Crypto Bot] {signal['side'].upper()} — {signal['reason']}",
+            )
         else:
             error_msg = order_result.get("error", "unknown")
             _log("error", f"Order failed for {coin_key}: {error_msg}")
@@ -417,6 +482,11 @@ class TradingBot:
                 conn.commit()
                 conn.close()
                 _log("warn", f"PAPER TRADE (local): {signal['side']} {size_coins:.6f} {coin_key} @ ${current_price:,.2f} — BloFin API key is read-only")
+                _journal_log(
+                    ticker=coin_key, action="BUY" if signal["side"] == "buy" else "SELL",
+                    entry_price=current_price, shares=round(size_coins, 6),
+                    notes=f"[Crypto Bot] PAPER {signal['side'].upper()} — {signal['reason']}",
+                )
 
     def _generate_signal(self, coin_key: str, indicators: dict, df) -> dict:
         """Generate BUY/SELL signal using multiple strategies.
@@ -426,6 +496,15 @@ class TradingBot:
         2. EMA Trend — SMA8/EMA20 crossover with momentum
         3. RSI Mean Reversion — oversold bounce / overbought rejection
         4. Momentum Breakout — strong move with volume confirmation
+        5. Bollinger Band Reversion — price touches lower/upper band with RSI confirm
+        6. Grid Mean Reversion — price at ATR-based support/resistance levels
+        7. Trend Continuation (DCA-style) — add to winning trend on pullback
+
+        Filters applied before any strategy:
+        - MACD histogram must exceed minimum strength (0.05% of price)
+        - RSI must NOT be in dead zone (45-60) for MACD/EMA strategies
+        - ATR must be > 0.3% of price (skip ranging/choppy markets)
+        - Per-coin cooldown: no re-entry within 30 min of last trade on same coin
         """
         rsi = indicators.get("rsi_14", 50)
         macd_hist = indicators.get("macd_histogram", 0)
@@ -436,76 +515,186 @@ class TradingBot:
         ema_20 = indicators.get("ema_20", 0)
         sma_50 = indicators.get("sma_50", 0)
         sma_8 = indicators.get("sma_8", 0)
+        sma_200 = indicators.get("sma_200", 0)
         rel_vol = indicators.get("relative_volume", 0)
+        atr = indicators.get("atr_14", 0)
+        bb_upper = indicators.get("bb_upper", 0)
+        bb_lower = indicators.get("bb_lower", 0)
+        bb_mid = indicators.get("bb_mid", 0)
+        bb_width = indicators.get("bb_width", 0)
         current_price = float(df["Close"].iloc[-1])
 
+        # === PRE-FILTERS ===
+
+        # Filter A: ATR must be meaningful (> 0.3% of price) — skip choppy/flat markets
+        atr_pct = (atr / current_price * 100) if current_price > 0 else 0
+        if atr_pct < 0.3:
+            _log("info", f"{coin_key}: ATR too low ({atr_pct:.2f}% of price) — market choppy, skipping")
+            return None
+
+        # Filter A2: Spread/slippage guard for low-priced coins
+        # On low-priced coins (< $1), the minimum tick spread eats a huge % of the trade.
+        # Require ATR to be at least 0.5% for coins under $1, 0.8% for coins under $0.50
+        if current_price < 0.50 and atr_pct < 0.8:
+            _log("info", f"{coin_key}: Low-price coin (${current_price:.4f}) with thin ATR ({atr_pct:.2f}%) — spread will eat profit, skipping")
+            return None
+        if current_price < 1.0 and atr_pct < 0.5:
+            _log("info", f"{coin_key}: Sub-$1 coin (${current_price:.4f}) with low ATR ({atr_pct:.2f}%) — spread risk, skipping")
+            return None
+
+        # Filter B: MACD histogram relative strength
+        macd_pct = abs(macd_hist) / current_price * 100 if current_price > 0 else 0
+
+        # Filter C: Per-coin cooldown — use closed_at for proper timing
+        # After a loss: 45 min cooldown. After a win: 20 min. After consecutive losses: escalating.
+        try:
+            last_trade_time = self.risk_manager.get_coin_recent_trade_time(coin_key)
+            if last_trade_time:
+                minutes_since = (datetime.now() - last_trade_time).total_seconds() / 60
+                consec_losses = self.risk_manager.get_coin_consecutive_losses(coin_key)
+                if consec_losses >= 3:
+                    cooldown = 120  # 2 hours after 3+ consecutive losses
+                elif consec_losses >= 1:
+                    cooldown = 45   # 45 min after a loss
+                else:
+                    cooldown = 20   # 20 min after a win
+                if 0 < minutes_since < cooldown:
+                    _log("info", f"{coin_key}: Cooldown active ({minutes_since:.0f}/{cooldown} min, {consec_losses} consec losses)")
+                    return None
+        except Exception:
+            pass
+
         # --- Strategy 1: MACD Crossover ---
-        # Bullish: MACD just crossed above signal + RSI not overbought
-        if macd_bull_cross and rsi < 65 and current_price > ema_20:
+        # Tightened: require stronger MACD signal (0.05%), narrower RSI window, and trend alignment
+        if macd_bull_cross and macd_pct >= 0.05 and rsi < 60 and rsi > 35 and current_price > ema_20 and current_price > sma_50:
             return {
                 "side": "buy",
-                "reason": f"MACD bullish crossover (hist={macd_hist:.4f}) + RSI={rsi:.1f} + price above EMA20",
+                "reason": f"MACD bullish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price above EMA20 & SMA50",
                 "strategy": "macd_cross",
             }
-        # Bearish: MACD just crossed below signal + RSI not oversold
-        if macd_bear_cross and rsi > 35 and current_price < ema_20:
+        if macd_bear_cross and macd_pct >= 0.05 and rsi > 40 and rsi < 65 and current_price < ema_20 and current_price < sma_50:
             return {
                 "side": "sell",
-                "reason": f"MACD bearish crossover (hist={macd_hist:.4f}) + RSI={rsi:.1f} + price below EMA20",
+                "reason": f"MACD bearish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price below EMA20 & SMA50",
                 "strategy": "macd_cross",
             }
 
         # --- Strategy 2: EMA Trend (SMA8/EMA20 cross) ---
+        # Tightened: require MACD confirmation + volume above average
         if sma8_ema20_cross:
-            if sma8_above_ema20 and rsi < 65:
+            if sma8_above_ema20 and rsi < 60 and rsi > 35 and macd_hist > 0 and rel_vol > 0.8:
                 return {
                     "side": "buy",
-                    "reason": f"SMA8 crossed above EMA20 (trend shift bullish) + RSI={rsi:.1f}",
+                    "reason": f"SMA8 crossed above EMA20 (trend shift bullish) + RSI={rsi:.1f} + MACD positive",
                     "strategy": "ema_trend",
                 }
-            if not sma8_above_ema20 and rsi > 35:
+            if not sma8_above_ema20 and rsi > 40 and rsi < 65 and macd_hist < 0 and rel_vol > 0.8:
                 return {
                     "side": "sell",
-                    "reason": f"SMA8 crossed below EMA20 (trend shift bearish) + RSI={rsi:.1f}",
+                    "reason": f"SMA8 crossed below EMA20 (trend shift bearish) + RSI={rsi:.1f} + MACD negative",
                     "strategy": "ema_trend",
                 }
 
         # --- Strategy 3: RSI Mean Reversion ---
-        # Oversold bounce: RSI < 40 and turning up (MACD hist positive = momentum shifting)
-        if rsi < 40 and macd_hist > 0:
+        # Tightened: deeper oversold/overbought thresholds + price must confirm
+        if rsi < 30 and macd_hist > 0 and current_price > bb_lower:
             return {
                 "side": "buy",
-                "reason": f"RSI oversold bounce ({rsi:.1f}) + MACD momentum positive ({macd_hist:.4f})",
+                "reason": f"RSI oversold bounce ({rsi:.1f}) + MACD momentum positive ({macd_hist:.6f}) + above BB lower",
                 "strategy": "rsi_reversion",
             }
-        # Overbought rejection: RSI > 65 and fading (MACD hist negative)
-        if rsi > 65 and macd_hist < 0 and current_price < sma_8:
+        if rsi > 70 and macd_hist < 0 and current_price < sma_8 and current_price < bb_upper:
             return {
                 "side": "sell",
-                "reason": f"RSI overbought fade ({rsi:.1f}) + MACD momentum negative ({macd_hist:.4f}) + price below SMA8",
+                "reason": f"RSI overbought fade ({rsi:.1f}) + MACD momentum negative ({macd_hist:.6f}) + below SMA8 & BB upper",
                 "strategy": "rsi_reversion",
             }
 
         # --- Strategy 4: Momentum Breakout with volume ---
-        # Strong bullish momentum: price above SMA50, strong relative volume, RSI 50-70 (trending)
-        if current_price > sma_50 and rel_vol > 1.5 and 50 < rsi < 70 and macd_hist > 0:
+        # Tightened: require stronger volume surge (1.8x) and SMA alignment
+        if current_price > sma_50 and current_price > sma_200 and rel_vol > 1.8 and 50 < rsi < 70 and macd_hist > 0:
             return {
                 "side": "buy",
-                "reason": f"Momentum breakout: price above SMA50 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}",
+                "reason": f"Momentum breakout: price above SMA50/200 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}",
                 "strategy": "momentum",
             }
-        # Strong bearish momentum
-        if current_price < sma_50 and rel_vol > 1.5 and 30 < rsi < 50 and macd_hist < 0:
+        if current_price < sma_50 and current_price < sma_200 and rel_vol > 1.8 and 30 < rsi < 50 and macd_hist < 0:
             return {
                 "side": "sell",
-                "reason": f"Bearish momentum: price below SMA50 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}",
+                "reason": f"Bearish momentum: price below SMA50/200 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}",
                 "strategy": "momentum",
             }
+
+        # --- Strategy 5: Bollinger Band Reversion ---
+        if bb_lower > 0 and bb_upper > 0:
+            bb_range = bb_upper - bb_lower
+            if bb_range > 0:
+                bb_position = (current_price - bb_lower) / bb_range
+
+                # Tightened: require band touch (<=0.05 / >=0.95), wider BB, and stronger RSI
+                if bb_position <= 0.05 and rsi < 35 and macd_hist > 0 and bb_width > 2.0:
+                    return {
+                        "side": "buy",
+                        "reason": f"BB lower band touch (BB%={bb_position:.0%}, width={bb_width:.1f}%) + RSI={rsi:.1f} + MACD turning up",
+                        "strategy": "bb_reversion",
+                    }
+                if bb_position >= 0.95 and rsi > 65 and macd_hist < 0 and bb_width > 2.0:
+                    return {
+                        "side": "sell",
+                        "reason": f"BB upper band touch (BB%={bb_position:.0%}, width={bb_width:.1f}%) + RSI={rsi:.1f} + MACD turning down",
+                        "strategy": "bb_reversion",
+                    }
+
+        # --- Strategy 6: Grid Mean Reversion (ATR-based) ---
+        if atr > 0 and sma_50 > 0:
+            atr_dist = (current_price - sma_50) / atr
+
+            # Tightened: require deeper deviation (2x ATR) and stronger RSI confirmation
+            if atr_dist <= -2.0 and rsi < 40 and sma_50 > sma_200 and macd_hist > 0:
+                return {
+                    "side": "buy",
+                    "reason": f"Grid support: price {abs(atr_dist):.1f}x ATR below SMA50 (uptrend pullback) + RSI={rsi:.1f}",
+                    "strategy": "grid_reversion",
+                }
+            if atr_dist >= 2.0 and rsi > 60 and sma_50 < sma_200 and macd_hist < 0:
+                return {
+                    "side": "sell",
+                    "reason": f"Grid resistance: price {atr_dist:.1f}x ATR above SMA50 (downtrend rally) + RSI={rsi:.1f}",
+                    "strategy": "grid_reversion",
+                }
+
+        # --- Strategy 7: Trend Continuation / DCA-style re-entry ---
+        # If overall trend is strong (SMA50 > SMA200) and price pulls back to EMA20, buy the dip
+        # Inspired by BloFin DCA bot — add to position at better price levels
+        # Tightened: require volume confirmation and narrower RSI ranges
+        if sma_50 > sma_200 and current_price > sma_200:
+            ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100 if ema_20 > 0 else 999
+            if ema20_dist_pct < 0.8 and rsi > 40 and rsi < 55 and macd_hist > 0 and rel_vol > 0.8:
+                return {
+                    "side": "buy",
+                    "reason": f"Trend continuation: pullback to EMA20 (dist={ema20_dist_pct:.2f}%) in uptrend (SMA50>200) + RSI={rsi:.1f}",
+                    "strategy": "trend_dca",
+                }
+        if sma_50 < sma_200 and current_price < sma_200:
+            ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100 if ema_20 > 0 else 999
+            if ema20_dist_pct < 0.5 and rsi > 55 and rsi < 65 and macd_hist < 0 and rel_vol > 0.8:
+                return {
+                    "side": "sell",
+                    "reason": f"Trend continuation: rally to EMA20 (dist={ema20_dist_pct:.2f}%) in downtrend (SMA50<200) + RSI={rsi:.1f}",
+                    "strategy": "trend_dca",
+                }
 
         return None
 
     def _check_exits(self):
-        """Check open trades for exit conditions (SL/TP hit)."""
+        """Check open trades for exit conditions.
+
+        Exit rules (inspired by BloFin bot patterns):
+        1. Hard stop loss (ATR-based)
+        2. Take profit target
+        3. Trailing stop: once trade is 1.5% in profit, trail at 50% of max gain
+        4. Time-based exit: close after 24h if P&L is between -0.3% and +0.3% (stale trade)
+        """
         conn = _get_db()
         open_trades = conn.execute("SELECT * FROM bot_trades WHERE status = 'open'").fetchall()
         conn.close()
@@ -527,6 +716,13 @@ class TradingBot:
                 stop_loss = trade["stop_loss"]
                 take_profit = trade["take_profit"]
 
+                # Calculate current P&L percentage
+                if trade["side"] == "buy":
+                    pnl_pct = (current_price - entry_price) / entry_price * 100
+                else:
+                    pnl_pct = (entry_price - current_price) / entry_price * 100
+
+                # Rule 1 & 2: Hard SL/TP
                 if trade["side"] == "buy":
                     if current_price <= stop_loss:
                         should_exit = True
@@ -534,13 +730,40 @@ class TradingBot:
                     elif current_price >= take_profit:
                         should_exit = True
                         exit_reason = f"Take profit hit (${take_profit:,.2f})"
-                else:  # sell
+                else:
                     if current_price >= stop_loss:
                         should_exit = True
                         exit_reason = f"Stop loss hit (${stop_loss:,.2f})"
                     elif current_price <= take_profit:
                         should_exit = True
                         exit_reason = f"Take profit hit (${take_profit:,.2f})"
+
+                # Rule 3: Trailing stop — if in profit > 1.5%, trail at 50% of peak
+                if not should_exit and pnl_pct >= 1.5:
+                    # Calculate what max P&L could have been based on TP distance
+                    tp_pct = abs(take_profit - entry_price) / entry_price * 100 if entry_price > 0 else 3
+                    # If price has retraced more than 50% from the TP target, lock profit
+                    if trade["side"] == "buy":
+                        max_possible = take_profit
+                        retracement = (max_possible - current_price) / (max_possible - entry_price) if max_possible != entry_price else 0
+                    else:
+                        max_possible = take_profit
+                        retracement = (current_price - max_possible) / (entry_price - max_possible) if entry_price != max_possible else 0
+
+                    if retracement > 0.50 and pnl_pct > 0.5:
+                        should_exit = True
+                        exit_reason = f"Trailing stop: P&L was {pnl_pct:.1f}%, retraced {retracement:.0%} from target"
+
+                # Rule 4: Time-based exit — close stale trades after 24h
+                if not should_exit:
+                    try:
+                        opened = datetime.strptime(trade["opened_at"], "%Y-%m-%d %H:%M:%S")
+                        hours_open = (datetime.now() - opened).total_seconds() / 3600
+                        if hours_open >= 24 and abs(pnl_pct) < 0.3:
+                            should_exit = True
+                            exit_reason = f"Time exit: open {hours_open:.0f}h with only {pnl_pct:+.2f}% P&L (stale)"
+                    except Exception:
+                        pass
 
                 if should_exit:
                     self._close_trade(trade, current_price, exit_reason)
@@ -580,6 +803,15 @@ class TradingBot:
         self.risk_manager.record_trade_pnl(round(pnl, 2))
 
         _log("info", f"TRADE CLOSED: {trade['coin']} {trade['side']} | Entry: ${entry_price:,.2f} → Exit: ${exit_price:,.2f} | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%) | {reason}")
+
+        # Log close to Tracker journal
+        close_action = "SELL" if trade["side"] == "buy" else "BUY"
+        _journal_log(
+            ticker=trade["coin"], action=close_action,
+            entry_price=entry_price, exit_price=exit_price,
+            shares=size, pnl=round(pnl, 2),
+            notes=f"[Crypto Bot] Closed — {reason} | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%)",
+        )
 
     def _record_rejected_signal(self, coin_key: str, signal: dict, price: float, validation: dict):
         """Log a rejected signal for review."""

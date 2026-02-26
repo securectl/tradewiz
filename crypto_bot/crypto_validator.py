@@ -136,16 +136,13 @@ Historical Performance (last 7 days):
         if coin_stats:
             ctx += f"\n- This coin ({coin}): {coin_stats['trades']} trades, {coin_stats['win_rate']}% win rate, avg P&L ${coin_stats['avg_pnl']}"
 
-        if overall["win_rate"] < 40:
-            ctx += "\n\nWARNING: Overall win rate is BELOW 40%. Be MORE SELECTIVE — only approve trades with strong confluence."
-
-    ctx += "\n\nThis is a PAPER TRADING bot running on demo API. Evaluate the trade setup quality."
+    ctx += "\n\nThis is a PAPER TRADING bot. Evaluate trade quality critically. If a coin or strategy has a poor recent track record (low win rate, negative avg P&L), that is a STRONG signal to reject. Do not ignore historical performance."
     return ctx
 
 
 def _validate_ollama(trade_context: str) -> dict:
     """Gate 1: Local Ollama validation — fast, free filter."""
-    prompt = f"""You are a strict crypto trading risk analyst. Evaluate this trade signal and decide if it should execute.
+    prompt = f"""You are a crypto trading analyst for a paper trading bot. Evaluate this trade signal.
 
 {trade_context}
 
@@ -157,12 +154,13 @@ Respond in JSON format ONLY:
     "risk_level": "low/medium/high/extreme"
 }}
 
-Be SELECTIVE. Only approve trades where multiple indicators clearly align in the same direction. Reject if:
-- RSI contradicts the trade direction (e.g. overbought for a buy, oversold for a sell)
-- MACD histogram is weak or flat
-- Historical win rate is poor (below 40%)
-- The signal lacks strong confluence across at least 2-3 indicators
-Return execute=true ONLY for high-quality setups with clear edge.
+Approve ONLY if at least 3 indicators clearly support the trade direction. Reject if:
+- RSI contradicts the direction (>65 for buy, <35 for sell)
+- Indicators are mixed with weak agreement
+- The setup has marginal edge or relies on a single indicator
+- Historical performance for this coin or strategy shows consistent losses
+- The coin has low win rate (<30%) in recent history
+Default to execute=false unless the setup is strong and well-confirmed.
 """
     return _call_ollama(prompt)
 
@@ -170,7 +168,7 @@ Return execute=true ONLY for high-quality setups with clear edge.
 def _validate_sentiment(trade_context: str) -> dict:
     """Gate 2a: OpenRouter sentiment analysis."""
     messages = [
-        {"role": "system", "content": "You are a strict crypto market sentiment analyst. You protect capital by only approving high-conviction setups. Respond in JSON only."},
+        {"role": "system", "content": "You are a critical crypto market analyst. Evaluate trade setups rigorously. Your job is to filter out weak trades. Respond in JSON only."},
         {"role": "user", "content": f"""{trade_context}
 
 Evaluate the SENTIMENT and MOMENTUM of this trade. Respond in JSON:
@@ -182,7 +180,12 @@ Evaluate the SENTIMENT and MOMENTUM of this trade. Respond in JSON:
     "reasoning": "brief explanation"
 }}
 
-Only approve if momentum CLEARLY supports the trade direction with strong indicator alignment. If historical performance shows a losing streak or low win rate, require STRONG confluence before approving. Reject if momentum is ambiguous, indicators conflict, or confidence is below 0.6."""}
+Approve ONLY if momentum clearly supports the trade direction and at least 3 indicators align strongly. Reject if:
+- Indicators give mixed signals or only weakly support the direction
+- Historical performance for this coin/strategy shows consistent losses (win rate < 30%)
+- The trade is fighting the higher timeframe trend
+- Momentum is neutral or contradicts the trade side
+Default to execute=false unless the case is compelling."""}
     ]
     raw = _call_openrouter(LLM_BOT_SENTIMENT, messages)
     return _parse_json(raw)
@@ -191,10 +194,10 @@ Only approve if momentum CLEARLY supports the trade direction with strong indica
 def _validate_risk(trade_context: str) -> dict:
     """Gate 2b: OpenRouter risk analysis."""
     messages = [
-        {"role": "system", "content": "You are a conservative crypto trading risk manager. Your PRIMARY job is to protect capital and prevent losses. Respond in JSON only."},
+        {"role": "system", "content": "You are a conservative crypto trading risk analyst. Your job is to protect capital by rejecting marginal trades. Respond in JSON only."},
         {"role": "user", "content": f"""{trade_context}
 
-Evaluate the RISK of this trade. Consider: overextension, false signal probability, volatility risk, position timing, and historical performance. Respond in JSON:
+Evaluate the RISK of this trade. Consider: overextension, false signal probability, indicator alignment, and historical performance. Respond in JSON:
 {{
     "execute": true/false,
     "risk_score": 0-100,
@@ -204,12 +207,13 @@ Evaluate the RISK of this trade. Consider: overextension, false signal probabili
     "reasoning": "brief explanation"
 }}
 
-Be CONSERVATIVE. If historical performance shows a low win rate, raise the bar significantly. Reject when:
-- Risk/reward ratio is unclear or unfavorable
+Reject when ANY of these apply:
+- Risk score is above 60 (high risk)
+- Historical win rate for this coin or strategy is below 30%
+- Indicators give mixed or weak confirmation
+- The trade is counter-trend on higher timeframe
 - False signal probability exceeds 0.5
-- Risk score is above 60
-- The setup relies on a single weak indicator
-Only approve trades with clear risk/reward edge and strong technical backing."""}
+Only approve if the risk/reward is clearly favorable and multiple indicators confirm."""}
     ]
     raw = _call_openrouter(LLM_BOT_RISK, messages)
     return _parse_json(raw)
@@ -426,7 +430,7 @@ def validate_trade(coin: str, side: str, price: float,
     ollama_result = _validate_ollama(trade_context)
     result["ollama"] = ollama_result
 
-    ollama_available = ollama_result.get("error") != "ollama_unreachable"
+    ollama_available = "error" not in ollama_result
     ollama_approved = ollama_result.get("execute") is True
 
     # Gate 2: OpenRouter — 2 models in parallel
@@ -459,11 +463,11 @@ def validate_trade(coin: str, side: str, price: float,
     if risk_error:
         total_voters -= 1
 
-    # If no validators available at all, approve for paper trading
+    # If no validators available at all, REJECT — don't trade blind
     if total_voters == 0:
-        result["approved"] = True
-        result["summary"] = "All validators unreachable — auto-approved (paper trading)"
-    elif votes_for >= max(1, (total_voters + 1) // 2):
+        result["approved"] = False
+        result["summary"] = "All validators unreachable — rejected (no validation available)"
+    elif votes_for >= max(2, (total_voters + 1) // 2):
         # Majority approves (at least half, minimum 1)
         result["approved"] = True
         approvers = []

@@ -96,6 +96,56 @@ class RiskManager:
         conn.close()
         return row["cnt"] > 0 if row else False
 
+    def get_coin_consecutive_losses(self, coin: str) -> int:
+        """Count consecutive losses for a coin (most recent trades first)."""
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT pnl FROM bot_trades WHERE coin = ? AND status = 'closed' ORDER BY id DESC LIMIT 20",
+            (coin,),
+        ).fetchall()
+        conn.close()
+        streak = 0
+        for r in rows:
+            if (r["pnl"] or 0) < 0:
+                streak += 1
+            else:
+                break
+        return streak
+
+    def get_coin_daily_pnl(self, coin: str) -> float:
+        """Get today's P&L for a specific coin."""
+        conn = _get_db()
+        today = datetime.now().strftime("%Y-%m-%d")
+        row = conn.execute(
+            "SELECT COALESCE(SUM(pnl), 0) as total FROM bot_trades "
+            "WHERE coin = ? AND status = 'closed' AND closed_at >= ?",
+            (coin, today),
+        ).fetchone()
+        conn.close()
+        return float(row["total"]) if row else 0.0
+
+    def get_coin_recent_trade_time(self, coin: str) -> datetime | None:
+        """Get the most recent trade close time for a coin."""
+        conn = _get_db()
+        row = conn.execute(
+            "SELECT closed_at, opened_at FROM bot_trades WHERE coin = ? ORDER BY id DESC LIMIT 1",
+            (coin,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        # Prefer closed_at (most recent activity), fall back to opened_at
+        time_str = row["closed_at"] or row["opened_at"]
+        if not time_str:
+            return None
+        try:
+            return datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%f")
+        except ValueError:
+            try:
+                return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return None
+
     def can_open_position(self, coin: str, size_usd: float, balance: float) -> dict:
         """Check all risk gates before opening a position.
 
@@ -146,6 +196,30 @@ class RiskManager:
             return {"allowed": False, "reason": f"Already have an open position for {coin}"}
 
         conn.close()
+
+        # Gate 8: Per-coin consecutive loss circuit breaker
+        # After 3 consecutive losses, pause this coin for 2 hours
+        consec_losses = self.get_coin_consecutive_losses(coin)
+        if consec_losses >= 3:
+            last_trade_time = self.get_coin_recent_trade_time(coin)
+            cooldown_hours = min(2 * (consec_losses // 3), 12)  # Escalating: 2h, 4h, 6h... max 12h
+            if last_trade_time:
+                hours_since = (datetime.now() - last_trade_time).total_seconds() / 3600
+                if hours_since < cooldown_hours:
+                    return {
+                        "allowed": False,
+                        "reason": f"{coin}: {consec_losses} consecutive losses — paused for {cooldown_hours}h ({hours_since:.1f}h elapsed)",
+                    }
+
+        # Gate 9: Per-coin daily loss cap ($30 per coin)
+        coin_daily_pnl = self.get_coin_daily_pnl(coin)
+        coin_daily_limit = 30.0
+        if coin_daily_pnl <= -coin_daily_limit:
+            return {
+                "allowed": False,
+                "reason": f"{coin}: Daily coin loss cap hit (${coin_daily_pnl:.2f} / -${coin_daily_limit:.2f})",
+            }
+
         return {"allowed": True, "reason": "All risk gates passed"}
 
     def record_trade_pnl(self, pnl: float):
