@@ -1,0 +1,118 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Configuration</h1>
+<p class="lead">All environment variables, LLM model settings, and API key configuration.</p>
+
+<h2>Environment Variables</h2>
+
+<p>All configuration is done via environment variables, typically in a <code>.env</code> file at the project root.</p>
+
+<h3>Core Settings</h3>
+
+<table>
+    <thead>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>SECRET_KEY</code></td><td><code>dev-secret-key-change-me</code></td><td>Flask session secret key. <strong>Change in production.</strong></td></tr>
+        <tr><td><code>DATABASE_URL</code></td><td><em>empty</em></td><td>PostgreSQL URL. If empty, uses local SQLite.</td></tr>
+        <tr><td><code>ENCRYPTION_KEY</code></td><td><em>auto-generated</em></td><td>Fernet key for encrypting stored API credentials. Auto-generated on first run and written to <code>.env</code>.</td></tr>
+    </tbody>
+</table>
+
+<h3>Authentication</h3>
+
+<table>
+    <thead>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>GOOGLE_CLIENT_ID</code></td><td><em>empty</em></td><td>Google OAuth client ID. If not set, dev login mode is enabled.</td></tr>
+        <tr><td><code>GOOGLE_CLIENT_SECRET</code></td><td><em>empty</em></td><td>Google OAuth client secret.</td></tr>
+        <tr><td><code>ADMIN_EMAIL</code></td><td><em>empty</em></td><td>Email address that automatically receives admin role on login.</td></tr>
+    </tbody>
+</table>
+
+<h3>AI / LLM Configuration</h3>
+
+<table>
+    <thead>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>OPENROUTER_API_KEY</code></td><td><em>empty</em></td><td>OpenRouter API key. Required for all AI features.</td></tr>
+        <tr><td><code>LLM_RESEARCH</code></td><td><code>anthropic/claude-sonnet-4-6</code></td><td>Model for deep research and analysis.</td></tr>
+        <tr><td><code>LLM_RESEARCH_FAST</code></td><td><code>google/gemini-2.5-flash</code></td><td>Fast model for research tasks.</td></tr>
+        <tr><td><code>LLM_PATTERN</code></td><td><code>google/gemini-2.5-pro-preview</code></td><td>Model for pattern recognition.</td></tr>
+        <tr><td><code>LLM_PREDICTION</code></td><td><code>deepseek/deepseek-chat-v3-0324</code></td><td>Model for 12-month price predictions.</td></tr>
+        <tr><td><code>LLM_SCREENER</code></td><td><code>google/gemini-2.5-flash</code></td><td>Model for the AI stock screener.</td></tr>
+        <tr><td><code>LLM_BOT_SENTIMENT</code></td><td><code>google/gemini-2.5-flash</code></td><td>Model for bot trade sentiment analysis.</td></tr>
+        <tr><td><code>LLM_BOT_RISK</code></td><td><code>deepseek/deepseek-chat-v3-0324</code></td><td>Model for bot trade risk assessment.</td></tr>
+        <tr><td><code>LLM_MAX_TOKENS</code></td><td><code>2048</code></td><td>Maximum tokens for LLM responses.</td></tr>
+        <tr><td><code>LLM_TEMPERATURE</code></td><td><code>0.2</code></td><td>LLM sampling temperature.</td></tr>
+        <tr><td><code>LLM_FAST_MODE</code></td><td><code>0</code></td><td>Set to <code>1</code> to use faster, cheaper models.</td></tr>
+        <tr><td><code>OLLAMA_URL</code></td><td><code>http://localhost:11434</code></td><td>URL for local Ollama server.</td></tr>
+        <tr><td><code>OLLAMA_MODEL</code></td><td><code>llama3.1:8b</code></td><td>Local Ollama model for bot validation.</td></tr>
+    </tbody>
+</table>
+
+<h3>Crypto Bot (BloFin)</h3>
+
+<table>
+    <thead>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>BLOFIN_API_KEY</code></td><td><em>empty</em></td><td>BloFin exchange API key.</td></tr>
+        <tr><td><code>BLOFIN_API_SECRET</code></td><td><em>empty</em></td><td>BloFin exchange API secret.</td></tr>
+        <tr><td><code>BLOFIN_PASSPHRASE</code></td><td><em>empty</em></td><td>BloFin API passphrase.</td></tr>
+        <tr><td><code>BLOFIN_DEMO</code></td><td><code>1</code></td><td><code>1</code> = demo/paper trading, <code>0</code> = live. <strong>Always use <code>1</code>.</strong></td></tr>
+    </tbody>
+</table>
+
+<h3>Stock Bot (Alpaca / Webull)</h3>
+
+<table>
+    <thead>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>ALPACA_API_KEY</code></td><td><em>empty</em></td><td>Alpaca broker API key.</td></tr>
+        <tr><td><code>ALPACA_SECRET_KEY</code></td><td><em>empty</em></td><td>Alpaca broker secret key.</td></tr>
+        <tr><td><code>WEBULL_APP_KEY</code></td><td><em>empty</em></td><td>Webull app key.</td></tr>
+        <tr><td><code>WEBULL_APP_SECRET</code></td><td><em>empty</em></td><td>Webull app secret.</td></tr>
+        <tr><td><code>WEBULL_ACCOUNT_ID</code></td><td><em>empty</em></td><td>Webull account ID.</td></tr>
+        <tr><td><code>WEBULL_SANDBOX</code></td><td><code>1</code></td><td><code>1</code> = sandbox mode, <code>0</code> = production.</td></tr>
+    </tbody>
+</table>
+
+<div class="docs-admonition danger">
+    <div class="docs-admonition-title">Security</div>
+    <p>Never commit your <code>.env</code> file to version control. API keys and secrets are encrypted at rest using the <code>ENCRYPTION_KEY</code> when stored per-user in the database.</p>
+</div>
+
+<h2>LLM Model Configuration</h2>
+
+<p>The platform uses different LLM models for different tasks, each optimized for cost vs. quality. You can change any model by setting the corresponding environment variable to an <a href="https://openrouter.ai/models">OpenRouter model ID</a>.</p>
+
+<h3>Model Roles</h3>
+
+<table>
+    <thead>
+        <tr><th>Role</th><th>Used For</th><th>Priority</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Research</td><td>Deep stock analysis, comprehensive reports</td><td>Quality over speed</td></tr>
+        <tr><td>Research Fast</td><td>Quick analysis tasks</td><td>Speed over quality</td></tr>
+        <tr><td>Pattern</td><td>Chart pattern recognition, breakout detection</td><td>Visual/spatial reasoning</td></tr>
+        <tr><td>Prediction</td><td>12-month price predictions</td><td>Reasoning capability</td></tr>
+        <tr><td>Screener</td><td>Stock screening and filtering</td><td>Speed + cost efficiency</td></tr>
+        <tr><td>Bot Sentiment</td><td>Trade signal sentiment validation</td><td>Speed (real-time)</td></tr>
+        <tr><td>Bot Risk</td><td>Trade risk assessment</td><td>Reasoning accuracy</td></tr>
+    </tbody>
+</table>
+
+<h3>Hot-Reloading Models</h3>
+
+<p>Admin users can update LLM models at runtime via the <strong>Admin</strong> tab without restarting the server. Changes take effect immediately for all subsequent AI calls.</p>
+{% endblock %}

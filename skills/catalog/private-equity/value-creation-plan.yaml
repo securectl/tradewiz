@@ -1,0 +1,52 @@
+id: value-creation-plan
+name: Value Creation Plan
+domain: Private Equity
+description: >
+  Build a post-acquisition value creation plan for a portfolio company. Identifies
+  revenue growth levers, margin expansion opportunities, operational improvements,
+  add-on acquisition targets, and management KPIs with 100-day and 3-year horizons.
+icon: "rocket"
+tier_required: pro
+estimated_minutes: 4
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker / Company Name
+    required: true
+    placeholder: "e.g. PLTR or private company name"
+  - name: context
+    type: textarea
+    label: Deal Context (optional)
+    required: false
+    placeholder: "e.g. $500M EV, 8x EBITDA, SaaS model, 40% gross margins..."
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering company financial data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_income_statements
+        description: Fetch income statements
+      - type: fetch_balance_sheet
+        description: Fetch balance sheet
+  - name: Analysis
+    description: Computing financial metrics
+    actions:
+      - type: compute_ratios
+        description: Calculate financial ratios
+  - name: Value Creation Analysis
+    description: AI building value creation plan
+    actions:
+      - type: llm_value_creation
+        description: Generate value creation plan
+  - name: Quality Review
+    description: Reviewing plan quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

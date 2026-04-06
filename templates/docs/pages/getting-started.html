@@ -1,0 +1,87 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Getting Started</h1>
+<p class="lead">Get AI Stock Analyst running locally in under 5 minutes.</p>
+
+<h2>Prerequisites</h2>
+
+<ul>
+    <li><strong>Python 3.11+</strong> — Required runtime</li>
+    <li><strong>pip</strong> — Python package manager</li>
+    <li><strong>Git</strong> — To clone the repository</li>
+    <li><strong>OpenRouter API key</strong> — For AI features (optional for basic analysis)</li>
+</ul>
+
+<h2>Installation</h2>
+
+<h3>1. Clone the repository</h3>
+<pre><code>git clone &lt;your-repo-url&gt;
+cd ai_stock_analyst</code></pre>
+
+<h3>2. Install dependencies</h3>
+<pre><code>pip install -r requirements.txt</code></pre>
+
+<h3>3. Create your environment file</h3>
+<pre><code>cp .env.example .env</code></pre>
+
+<p>Edit <code>.env</code> with your settings. For local development, the minimum configuration is:</p>
+
+<pre><code># Minimum .env for local dev
+SECRET_KEY=any-random-string-here
+ENCRYPTION_KEY=          # Auto-generated on first run
+DATABASE_URL=            # Leave empty to use SQLite</code></pre>
+
+<div class="docs-admonition tip">
+    <div class="docs-admonition-title">Tip</div>
+    <p>When <code>GOOGLE_CLIENT_ID</code> is not set, the app automatically enables <strong>dev login mode</strong> — you can log in with any email, no Google OAuth needed.</p>
+</div>
+
+<h3>4. Initialize the database and run</h3>
+<pre><code>python migrations.py
+python app.py</code></pre>
+
+<p>The app starts on <a href="http://localhost:5001">http://localhost:5001</a>.</p>
+
+<h2>First Login (Dev Mode)</h2>
+
+<ol>
+    <li>Open <a href="http://localhost:5001">http://localhost:5001</a></li>
+    <li>You'll see the dev login form (since Google OAuth is not configured)</li>
+    <li>Enter any email address and click <strong>Login</strong></li>
+    <li>You'll be logged in with <strong>admin + trader</strong> roles automatically</li>
+</ol>
+
+<h2>Your First Analysis</h2>
+
+<ol>
+    <li>On the <strong>Analyzer</strong> tab, type a ticker symbol (e.g., <code>AAPL</code>)</li>
+    <li>Click <strong>Analyze</strong> — this runs technical analysis using price data</li>
+    <li>View the results: chart, indicators, signal, and AI analysis</li>
+    <li>If you have an <code>OPENROUTER_API_KEY</code>, click <strong>Validate with AI</strong> for multi-model consensus</li>
+</ol>
+
+<h2>Optional: Enable AI Features</h2>
+
+<p>To enable AI-powered analysis and validation, add your OpenRouter API key:</p>
+
+<pre><code>OPENROUTER_API_KEY=sk-or-v1-your-key-here</code></pre>
+
+<p>This unlocks:</p>
+<ul>
+    <li>AI stock analysis and predictions</li>
+    <li>Multi-model validation (Claude, Gemini, DeepSeek)</li>
+    <li>AI-powered stock screener</li>
+    <li>Bot trade validation via LLM consensus</li>
+</ul>
+
+<p>See <a href="/docs/configuration">Configuration</a> for all available environment variables.</p>
+
+<h2>Next Steps</h2>
+
+<ul>
+    <li><a href="/docs/configuration">Configuration</a> — Set up all environment variables and LLM models</li>
+    <li><a href="/docs/authentication">Authentication</a> — Configure Google OAuth for production</li>
+    <li><a href="/docs/crypto-bot">Crypto Trading Bot</a> — Set up automated crypto trading</li>
+    <li><a href="/docs/deployment">Deployment</a> — Deploy to Railway</li>
+</ul>
+{% endblock %}

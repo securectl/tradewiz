@@ -1,8 +1,11 @@
 """
 Multi-Cap Stock Screener — AI-Vetted Opportunities
 Supports Low-Cap ($2-$15), Mid-Cap ($15-$100), Large-Cap ($50+), ETFs,
-Metals & Mining, Crypto, and AI (Artificial Intelligence).
+Metals & Mining, Crypto, and AI (Artificial Intelligence), Top Gainers, and Top Losers.
 Each category uses tailored AI vetting prompts.
+
+Top Gainers/Losers scans ~2000 tickers across S&P 500, Russell 2000, NASDAQ 100
+and existing curated lists with configurable timeframes (1d, 1w, 3mo).
 
 Risk Warning: Small-cap stocks carry elevated risk.
 Never allocate more than 2% of account per position for low-caps.
@@ -23,7 +26,19 @@ except ImportError:
 
 from ai_validator import (
     is_configured, _call_openrouter, _parse_json_response,
-    LLM_SCREENER,
+    LLM_SCREENER, LLM_SUPERVISOR,
+)
+from shared.prompts.screener import (
+    LOWCAP_SYSTEM, LOWCAP_USER_TEMPLATE,
+    MIDCAP_SYSTEM, MIDCAP_USER_TEMPLATE,
+    LARGECAP_SYSTEM, LARGECAP_USER_TEMPLATE,
+    ETF_SYSTEM, ETF_USER_TEMPLATE,
+    METALS_MINING_SYSTEM, METALS_MINING_USER_TEMPLATE,
+    CRYPTO_SYSTEM, CRYPTO_USER_TEMPLATE,
+    AI_SYSTEM, AI_USER_TEMPLATE,
+    GAINERS_SYSTEM, GAINERS_USER_TEMPLATE,
+    LOSERS_SYSTEM, LOSERS_USER_TEMPLATE,
+    HOT_SECTORS_SYSTEM, HOT_SECTORS_USER_TEMPLATE,
 )
 
 # ─── Curated Ticker Lists ─────────────────────────────────────
@@ -192,6 +207,95 @@ AI_TICKERS = [
     # AI Security
     "CRWD", "ZS", "S",
 ]
+
+# ─── Extended Universe for Top Gainers / Top Losers ──────────
+
+# S&P 500 tickers (representative sample ~200)
+SP500_TICKERS = [
+    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "BRK-B", "UNH", "JNJ",
+    "V", "XOM", "JPM", "PG", "MA", "HD", "CVX", "MRK", "ABBV", "LLY",
+    "PEP", "KO", "COST", "AVGO", "WMT", "TMO", "MCD", "CSCO", "ACN", "ABT",
+    "DHR", "CRM", "NKE", "TXN", "PM", "LIN", "NEE", "BMY", "UNP", "RTX",
+    "QCOM", "ORCL", "LOW", "HON", "AMGN", "INTC", "INTU", "SCHW", "GS", "BLK",
+    "ADP", "SBUX", "MDLZ", "GILD", "ADI", "ISRG", "VRTX", "NOW", "CME", "AMT",
+    "GE", "DE", "SYK", "MO", "DUK", "SO", "CL", "REGN", "ZTS", "TMUS",
+    "CB", "PLD", "CI", "MMC", "FISV", "HUM", "ICE", "AON", "SLB", "EMR",
+    "APD", "USB", "FDX", "WM", "GM", "F", "AIG", "PNC", "TGT", "CMG",
+    "PXD", "MPC", "PSA", "CCI", "SRE", "NSC", "MCK", "EW", "CARR", "FCX",
+    "KMB", "AEP", "D", "OKE", "SPG", "DXCM", "HCA", "ALL", "AZO", "IDXX",
+    "FTNT", "PCAR", "TEL", "MCHP", "GPN", "BK", "CTAS", "MSCI", "CDNS", "SNPS",
+    "SHW", "A", "ON", "EL", "KEYS", "DAL", "GIS", "HSY", "DD", "DOW",
+    "KDP", "HPQ", "WBA", "DVN", "HAL", "VLO", "MRO", "APA", "CZR", "WYNN",
+    "MGM", "LVS", "NCLH", "RCL", "CCL", "UAL", "AAL", "ABNB", "BKNG", "MAR",
+    "HLT", "LUV", "ALK", "DRI", "YUM", "SBUX", "WEN", "QSR", "CMG", "DPZ",
+    "PANW", "ZS", "CRWD", "OKTA", "NET", "DDOG", "SNOW", "MDB", "TEAM", "WDAY",
+    "TTD", "PINS", "SNAP", "UBER", "LYFT", "DASH", "COIN", "SQ", "PYPL", "SHOP",
+    "ENPH", "FSLR", "SEDG", "RUN", "NEE", "AES", "CEG", "VST", "PCG", "EIX",
+    "ET", "EPD", "KMI", "WMB", "LNG", "PSX", "VLO", "MPC", "HES", "COP",
+]
+
+# Russell 2000 top components (~300 representative)
+RUSSELL2000_TOP = [
+    "SMCI", "CELH", "CAVA", "DUOL", "WING", "BROS", "TOST", "DV", "GLBE", "FOUR",
+    "CWAN", "BRZE", "GTLB", "CFLT", "ESTC", "DOCN", "PATH", "MNDY", "PCOR", "BILL",
+    "HUBS", "PAYC", "WEX", "EVTC", "OLLI", "FIVE", "PLAY", "BURL", "BOOT", "DECK",
+    "CROX", "SKX", "ON", "DIOD", "AMBA", "SLAB", "CRUS", "SWKS", "QRVO", "WOLF",
+    "IRDM", "GSAT", "ASTS", "RKLB", "LUNR", "RDW", "SPCE", "JOBY", "ACHR", "EVTL",
+    "IONQ", "RGTI", "QUBT", "ANET", "SMCI", "PSTG", "NTAP", "NTNX", "BOX", "ZUO",
+    "TENB", "QLYS", "RPD", "VRNS", "S", "KNBE", "PRCH", "TASK", "OPFI", "RELY",
+    "PAYO", "PSFE", "PAGS", "STNE", "NU", "AFRM", "SOFI", "UPST", "LC", "TREE",
+    "TGTX", "RVMD", "AXSM", "KURA", "IMVT", "VRNA", "DAWN", "GERN", "INVA", "PRTA",
+    "DCPH", "NVCR", "INSP", "GMED", "NVST", "ALGN", "TFX", "NEOG", "OMIC", "TWST",
+    "BWEN", "SHLS", "ARRY", "STEM", "MAXN", "RUN", "NOVA", "AMPS", "EVGO", "CHPT",
+    "BLNK", "CLNE", "FCEL", "PLUG", "BE", "MP", "LAC", "PLL", "GATO", "FSM",
+    "EXK", "MAG", "SSRM", "CDE", "ORLA", "AG", "DRD", "GFI", "HMY", "BTG",
+    "UEC", "DNN", "UUUU", "NXE", "CCJ", "SQM", "ALB", "WPM", "FNV", "RGLD",
+    "HIMS", "CLAR", "BIRD", "BARK", "WOOF", "CHWY", "SFIX", "REAL", "PRPL", "LOVE",
+    "DTC", "TLRY", "CGC", "ACB", "CRON", "GOEV", "LCID", "RIVN", "NKLA", "WKHS",
+    "REE", "FUBO", "IQ", "CURI", "GENI", "ALLT", "MAPS", "CEVA", "ZETA", "BIGC",
+    "AI", "BBAI", "SOUN", "PLTR", "PRCT", "IIPR", "SAFE", "LAND", "GOOD", "KTOS",
+    "BKSY", "AXON", "TT", "NDSN", "RBC", "FSS", "GNRC", "AZTA", "DKNG", "PENN",
+    "RSI", "GNOG", "CHDN", "BYD", "CZR", "WYNN", "RRR", "DNUT", "LOCO", "JACK",
+    "TXRH", "CAKE", "RUTH", "BJRI", "ARCO", "SHAK", "CARG", "CVNA", "ANGI", "OPEN",
+    "RDFN", "GRPN", "FVRR", "UPWK", "FIVERR", "ETSY", "W", "OSTK", "WISH", "POSH",
+    "CPNG", "SE", "GRAB", "BABA", "JD", "PDD", "NIO", "LI", "XPEV", "BIDU",
+    "BILI", "TME", "TIGR", "FUTU", "ZH", "MNSO", "TUYA", "GDS", "VNET", "KC",
+    "VIR", "VERV", "EDIT", "NTLA", "CRSP", "BEAM", "PCVX", "MRNA", "BNTX", "NVAX",
+    "DLO", "LSPD", "GLOB", "DLOCF", "CAAP", "MELI", "STNE", "PAGS", "XP", "VTEX",
+    "INTA", "SWI", "RPM", "GMS", "SITE", "SUM", "VMC", "MLM", "CRH", "EXP",
+    "ASPN", "BLDR", "TREX", "AZEK", "AWI", "DOOR", "FBIN", "MAS", "OC", "BLD",
+    "POWL", "GVA", "PRIM", "MTZ", "FIX", "EMCOR", "APG", "AIT", "MSA", "MIDD",
+    "WTS", "RXO", "XPO", "SAIA", "ODFL", "JBHT", "WERN", "LSTR", "KNX", "SNDR",
+]
+
+# NASDAQ 100 extra tickers not in other lists
+NASDAQ100_EXTRA = [
+    "ASML", "LRCX", "AMAT", "KLAC", "ARM", "MRVL", "ADI", "NXPI", "MPWR", "GFS",
+    "ANSS", "PTC", "FROG", "MANH", "VRSK", "ILMN", "BIIB", "REGN", "SGEN", "DXCM",
+    "EXC", "XEL", "WEC", "ED", "AWK", "TRGP", "FANG", "CTRA", "EOG", "OXY",
+    "ADP", "PAYX", "FI", "GPN", "BR", "WTW", "CPRT", "ROST", "ORLY", "TSCO",
+    "MKTX", "CBOE", "NDAQ", "CME", "SPGI", "MSCI", "MCO", "INFO", "FDS", "VRSK",
+]
+
+
+def _get_full_universe() -> list:
+    """Build deduplicated ticker universe (~2000 tickers) for top movers scan.
+    Excludes crypto tickers (ending in -USD)."""
+    all_tickers = (
+        LOWCAP_TICKERS + MIDCAP_TICKERS + LARGECAP_TICKERS + ETF_TICKERS +
+        METALS_MINING_TICKERS + AI_TICKERS + SP500_TICKERS +
+        RUSSELL2000_TOP + NASDAQ100_EXTRA
+    )
+    seen = set()
+    universe = []
+    for t in all_tickers:
+        if t.endswith("-USD"):
+            continue
+        t_upper = t.upper()
+        if t_upper not in seen:
+            seen.add(t_upper)
+            universe.append(t_upper)
+    return universe
 
 
 # ─── Scan Functions ────────────────────────────────────────────
@@ -447,6 +551,110 @@ def scan_ai_candidates(limit: int = 30) -> list:
     return enriched
 
 
+def scan_top_movers(direction: str = "gainers", period: str = "1d",
+                    limit: int = 20) -> list:
+    """Scan full universe for top gainers or losers over a given period.
+
+    Args:
+        direction: 'gainers' or 'losers'
+        period: '1d', '1w', or '3mo'
+        limit: max results to return (enriched with fundamentals)
+    """
+    if not HAS_YFINANCE:
+        return []
+
+    period_map = {"1d": "2d", "1w": "5d", "3mo": "3mo"}
+    yf_period = period_map.get(period, "2d")
+
+    universe = _get_full_universe()
+    movers = []
+    batch_size = 100
+
+    try:
+        for i in range(0, len(universe), batch_size):
+            batch = universe[i:i + batch_size]
+            try:
+                tickers_str = " ".join(batch)
+                data = yf.download(tickers_str, period=yf_period, progress=False, threads=True)
+                if data.empty:
+                    continue
+
+                close_data = data.get("Close")
+                if close_data is None:
+                    continue
+
+                if len(batch) == 1:
+                    col = close_data.dropna()
+                    if len(col) >= 2:
+                        first_price = float(col.iloc[0])
+                        last_price = float(col.iloc[-1])
+                        if first_price > 0:
+                            pct_change = ((last_price - first_price) / first_price) * 100
+                            movers.append({
+                                "ticker": batch[0], "price": round(last_price, 2),
+                                "pct_change": round(pct_change, 2),
+                            })
+                else:
+                    for ticker in batch:
+                        try:
+                            if ticker not in close_data.columns:
+                                continue
+                            col = close_data[ticker].dropna()
+                            if len(col) < 2:
+                                continue
+                            first_price = float(col.iloc[0])
+                            last_price = float(col.iloc[-1])
+                            if first_price > 0:
+                                pct_change = ((last_price - first_price) / first_price) * 100
+                                movers.append({
+                                    "ticker": ticker, "price": round(last_price, 2),
+                                    "pct_change": round(pct_change, 2),
+                                })
+                        except (KeyError, IndexError, TypeError):
+                            continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Sort: descending for gainers, ascending for losers
+    if direction == "gainers":
+        movers.sort(key=lambda x: x["pct_change"], reverse=True)
+    else:
+        movers.sort(key=lambda x: x["pct_change"])
+
+    # Take top N*3 for enrichment, then trim to limit
+    top_candidates = movers[:limit * 3]
+
+    # Enrich with fundamentals, filter out micro-caps < $100M
+    enriched = []
+    for c in top_candidates:
+        try:
+            t = yf.Ticker(c["ticker"])
+            info = t.info or {}
+            mkt_cap = info.get("marketCap", 0) or 0
+            if mkt_cap < 100_000_000:
+                continue
+            enriched.append({
+                "ticker": c["ticker"],
+                "price": c["price"],
+                "pct_change": c["pct_change"],
+                "market_cap": mkt_cap,
+                "name": info.get("shortName", info.get("longName", c["ticker"])),
+                "sector": info.get("sector", "Unknown"),
+                "industry": info.get("industry", "Unknown"),
+                "volume": info.get("averageVolume", 0),
+                "forward_pe": info.get("forwardPE"),
+                "revenue_growth": info.get("revenueGrowth"),
+                "profit_margins": info.get("profitMargins"),
+            })
+            if len(enriched) >= limit:
+                break
+        except Exception:
+            continue
+    return enriched
+
+
 # ─── AI Vet Functions ──────────────────────────────────────────
 
 def vet_candidate(candidate: dict) -> dict:
@@ -485,17 +693,8 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         pass
 
     messages = [
-        {"role": "system", "content": "You are a small-cap risk analyst. Focus on: dilution risk, liquidity, bankruptcy, insider activity, reverse splits, pump-and-dump. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Vet this low-cap stock for investment. Risk management is #1. Never allocate >2% per position for small-caps.
-
-{summary}
-
-Check: 1) Dilution risk (share offerings, ATM programs) 2) Liquidity (can you exit?) 3) Bankruptcy/restructuring risk 4) Insider selling 5) Reverse split history 6) Pump-and-dump signals 7) Revenue trajectory 8) Cash runway
-
-Respond with ONLY this JSON:
-{{"verdict":"OPPORTUNITY","confidence":65,"survival_12m":80,"growth_catalysts":["catalyst1"],"red_flags":["flag1"],"dilution_risk":"LOW","liquidity_risk":"LOW","fair_value":0.00,"upside_pct":25,"risk_score":40,"position_limit_pct":2,"summary":"1-2 sentences"}}
-
-verdict must be one of: OPPORTUNITY, RISKY, AVOID"""}
+        {"role": "system", "content": LOWCAP_SYSTEM},
+        {"role": "user", "content": LOWCAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -541,17 +740,8 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         pass
 
     messages = [
-        {"role": "system", "content": "You are a mid-cap growth/value analyst. Balance growth potential with valuation discipline. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Evaluate this mid-cap stock for investment. Look for strong growth at reasonable valuations.
-
-{summary}
-
-Evaluate: 1) Revenue growth sustainability 2) Earnings trajectory 3) Competitive position 4) Valuation vs growth rate 5) Margin expansion potential 6) Institutional interest 7) Key risks 8) Total addressable market
-
-Respond with ONLY this JSON:
-{{"verdict":"OPPORTUNITY","confidence":65,"growth_catalysts":["catalyst1"],"red_flags":["flag1"],"revenue_growth_trend":"ACCELERATING","earnings_momentum":"POSITIVE","moat_strength":"MODERATE","fair_value":0.00,"upside_pct":25,"risk_score":40,"position_limit_pct":5,"summary":"1-2 sentences"}}
-
-verdict must be one of: OPPORTUNITY, RISKY, AVOID"""}
+        {"role": "system", "content": MIDCAP_SYSTEM},
+        {"role": "user", "content": MIDCAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -599,17 +789,8 @@ Recommendation: {info.get('recommendationKey', 'N/A')}"""
         pass
 
     messages = [
-        {"role": "system", "content": "You are a large-cap growth investor. Focus on revenue acceleration, earnings growth trajectory, market share gains, competitive moat, and TAM expansion. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Evaluate this large-cap stock for growth investing. Focus on whether this company is accelerating growth and can sustain market leadership.
-
-{summary}
-
-Evaluate: 1) Revenue acceleration vs deceleration 2) Earnings growth trajectory 3) Market share gains 4) Competitive moat strength 5) TAM expansion opportunities 6) Margin expansion potential 7) Growth catalysts in next 12 months 8) Valuation relative to growth rate
-
-Respond with ONLY this JSON:
-{{"verdict":"STRONG GROWTH","confidence":70,"revenue_growth_trend":"ACCELERATING","earnings_momentum":"STRONG","moat_strength":"WIDE","growth_catalysts":["catalyst1"],"risks":["risk1"],"fair_value":0.00,"upside_pct":15,"position_limit_pct":10,"summary":"1-2 sentences"}}
-
-verdict must be one of: STRONG GROWTH, STEADY, SLOWING"""}
+        {"role": "system", "content": LARGECAP_SYSTEM},
+        {"role": "user", "content": LARGECAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -647,17 +828,8 @@ YTD Return: {ytd_str}
 3-Year Avg Return: {three_yr_str}"""
 
     messages = [
-        {"role": "system", "content": "You are a growth ETF analyst. Focus on sector momentum, thematic tailwinds, expense efficiency, liquidity, and holdings quality. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Evaluate this ETF for growth investing. Focus on whether this ETF captures strong secular growth themes.
-
-{summary}
-
-Evaluate: 1) Sector/theme momentum 2) Thematic tailwinds vs headwinds 3) Expense ratio efficiency 4) Liquidity (AUM, volume) 5) Holdings quality and concentration 6) Growth catalysts 7) Correlation to overall growth theme 8) Risk-adjusted returns
-
-Respond with ONLY this JSON:
-{{"verdict":"STRONG BUY","confidence":70,"sector_momentum":"STRONG","thematic_strength":"HIGH","expense_efficiency":"GOOD","top_holdings_quality":"HIGH","growth_catalysts":["catalyst1"],"risks":["risk1"],"target_allocation_pct":5,"summary":"1-2 sentences"}}
-
-verdict must be one of: STRONG BUY, ACCUMULATE, HOLD"""}
+        {"role": "system", "content": ETF_SYSTEM},
+        {"role": "user", "content": ETF_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -700,17 +872,8 @@ Debt/Equity: {info.get('debtToEquity', 'N/A')}
         pass
 
     messages = [
-        {"role": "system", "content": "You are a metals & mining analyst. Focus on commodity price sensitivity, production costs, reserve life, and jurisdictional risk. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Evaluate this metals/mining stock for investment.
-
-{summary}
-
-Evaluate: 1) Commodity price sensitivity and outlook 2) Production growth trajectory 3) Reserve quality and mine life 4) Cost structure (AISC for gold/silver, C1 for copper) 5) Balance sheet / debt load 6) Political/jurisdictional risk 7) Exploration pipeline 8) Dividend sustainability (if any)
-
-Respond with ONLY this JSON:
-{{"verdict":"OPPORTUNITY","confidence":65,"commodity_outlook":"BULLISH","production_trend":"GROWING","reserve_quality":"STRONG","growth_catalysts":["catalyst1"],"risks":["risk1"],"fair_value":0.00,"upside_pct":25,"risk_score":40,"position_limit_pct":5,"summary":"1-2 sentences"}}
-
-verdict must be one of: OPPORTUNITY, RISKY, AVOID"""}
+        {"role": "system", "content": METALS_MINING_SYSTEM},
+        {"role": "user", "content": METALS_MINING_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -737,17 +900,8 @@ Category: {candidate.get('sector', 'N/A')}
 Avg Volume: {candidate.get('volume', 0):,.0f}"""
 
     messages = [
-        {"role": "system", "content": "You are a crypto analyst. Focus on network adoption, tokenomics, developer activity, regulatory risk, and market cycle positioning. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Evaluate this cryptocurrency for investment.
-
-{summary}
-
-Evaluate: 1) Network adoption and usage metrics 2) Developer activity / ecosystem growth 3) TVL and DeFi metrics (if applicable) 4) Tokenomics (supply schedule, inflation, staking yield) 5) Market cycle position (accumulation, markup, distribution) 6) BTC correlation and narrative strength 7) Regulatory risk / exchange listing breadth 8) Transaction volume trends
-
-Respond with ONLY this JSON:
-{{"verdict":"BULLISH","confidence":65,"network_strength":"STRONG","adoption_trend":"GROWING","tokenomics_rating":"GOOD","growth_catalysts":["catalyst1"],"risks":["risk1"],"fair_value":0.00,"upside_pct":25,"summary":"1-2 sentences"}}
-
-verdict must be one of: BULLISH, NEUTRAL, BEARISH"""}
+        {"role": "system", "content": CRYPTO_SYSTEM},
+        {"role": "user", "content": CRYPTO_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -791,17 +945,8 @@ ROE: {info.get('returnOnEquity', 'N/A')}
         pass
 
     messages = [
-        {"role": "system", "content": "You are an AI/Artificial Intelligence sector analyst. Focus on AI revenue exposure, competitive moat in AI, GPU/compute positioning, and valuation relative to AI growth trajectory. Respond with ONLY valid JSON."},
-        {"role": "user", "content": f"""Evaluate this AI-related stock for investment.
-
-{summary}
-
-Evaluate: 1) AI revenue as % of total revenue 2) AI product pipeline and roadmap 3) Competitive moat in AI (data, models, distribution) 4) GPU/compute dependency and costs 5) Partnership ecosystem (cloud, enterprise) 6) Enterprise AI adoption rate 7) Valuation relative to AI growth trajectory 8) Key risks (competition, regulation, commoditization)
-
-Respond with ONLY this JSON:
-{{"verdict":"OPPORTUNITY","confidence":65,"ai_exposure":"HIGH","growth_trajectory":"ACCELERATING","competitive_position":"STRONG","growth_catalysts":["catalyst1"],"risks":["risk1"],"fair_value":0.00,"upside_pct":25,"risk_score":40,"position_limit_pct":5,"summary":"1-2 sentences"}}
-
-verdict must be one of: OPPORTUNITY, RISKY, AVOID"""}
+        {"role": "system", "content": AI_SYSTEM},
+        {"role": "user", "content": AI_USER_TEMPLATE.format(summary=summary)},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
@@ -814,15 +959,83 @@ verdict must be one of: OPPORTUNITY, RISKY, AVOID"""}
     return result
 
 
+def vet_mover_candidate(candidate: dict, direction: str = "gainers",
+                        period: str = "1d") -> dict:
+    """AI vetting for top gainers/losers — momentum or recovery analysis."""
+    if not is_configured():
+        return {"error": "AI not configured", "ticker": candidate.get("ticker")}
+
+    ticker = candidate.get("ticker", "???")
+    pct_change = candidate.get("pct_change", 0)
+    period_labels = {"1d": "1 day", "1w": "1 week", "3mo": "3 months"}
+    period_label = period_labels.get(period, "1 day")
+
+    summary = f"""STOCK: {ticker}
+Name: {candidate.get('name', 'N/A')}
+Price: ${candidate.get('price', 0)}
+Change ({period_label}): {pct_change:+.2f}%
+Market Cap: ${candidate.get('market_cap', 0):,.0f}
+Sector: {candidate.get('sector', 'N/A')} | Industry: {candidate.get('industry', 'N/A')}
+Avg Volume: {candidate.get('volume', 0):,.0f}
+Forward P/E: {candidate.get('forward_pe', 'N/A')}
+Revenue Growth: {candidate.get('revenue_growth', 'N/A')}
+Profit Margins: {candidate.get('profit_margins', 'N/A')}"""
+
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info or {}
+        summary += f"""
+52W Low: ${info.get('fiftyTwoWeekLow', 'N/A')} | 52W High: ${info.get('fiftyTwoWeekHigh', 'N/A')}
+Beta: {info.get('beta', 'N/A')}
+Short Ratio: {info.get('shortRatio', 'N/A')}
+Analyst Target: ${info.get('targetMeanPrice', 'N/A')}"""
+    except Exception:
+        pass
+
+    if direction == "gainers":
+        system_msg = GAINERS_SYSTEM
+        user_msg = GAINERS_USER_TEMPLATE.format(pct_change=pct_change, period_label=period_label, summary=summary)
+    else:
+        system_msg = LOSERS_SYSTEM
+        user_msg = LOSERS_USER_TEMPLATE.format(pct_change=pct_change, period_label=period_label, summary=summary)
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_msg},
+    ]
+
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    result = _parse_json_response(raw, f"screener_{direction}_vet")
+    result["ticker"] = ticker
+    result["price"] = candidate.get("price")
+    result["pct_change"] = pct_change
+    result["market_cap"] = candidate.get("market_cap")
+    result["name"] = candidate.get("name")
+    result["sector"] = candidate.get("sector")
+    return result
+
+
 # ─── Main Screener Pipeline ───────────────────────────────────
 
 def _parallel_vet(candidates: list, vet_fn, batch_size: int = 5) -> list:
     """Run AI vetting in parallel batches."""
+    # Capture thread-local LLM user context for propagation into child threads
+    try:
+        from rate_limiter import get_llm_user, set_llm_user
+        _ctx_uid, _ctx_src = get_llm_user()
+    except Exception:
+        _ctx_uid, _ctx_src = None, None
+
+    def _run_with_context(c):
+        if _ctx_uid:
+            set_llm_user(_ctx_uid, _ctx_src)
+        return vet_fn(c)
+
     vetted = []
     for i in range(0, len(candidates), batch_size):
         batch = candidates[i:i + batch_size]
         with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
-            futures = {executor.submit(vet_fn, c): c for c in batch}
+            futures = {executor.submit(_run_with_context, c): c for c in batch}
             for future in concurrent.futures.as_completed(futures):
                 try:
                     result = future.result()
@@ -869,16 +1082,8 @@ def get_hot_sectors(period: str = "1mo") -> dict:
     label = period_labels.get(period, "past month")
 
     messages = [
-        {"role": "system", "content": "You are a senior market strategist. Return ONLY valid JSON."},
-        {"role": "user", "content": f"""Identify the top 6 hottest stock market sectors/themes over the {label}.
-Return JSON: {{"sectors": [
-  {{"rank":1,"name":"...","trend":"bullish|bearish|neutral",
-    "momentum":"strong|moderate|fading",
-    "catalysts":["...","..."],
-    "top_tickers":["SYM1","SYM2","SYM3"],
-    "outlook":"1-2 sentence forward outlook"}}
-]}}
-Consider: sector rotation, earnings trends, macro catalysts, fund flows, regulatory changes."""}
+        {"role": "system", "content": HOT_SECTORS_SYSTEM},
+        {"role": "user", "content": HOT_SECTORS_USER_TEMPLATE.format(label=label)},
     ]
 
     try:
@@ -900,10 +1105,10 @@ Consider: sector rotation, earnings trends, macro catalysts, fund flows, regulat
 
 def run_screener(min_price: float = 2.0, max_price: float = 15.0,
                  limit: int = 20, category: str = "lowcap",
-                 sectors: list = None) -> dict:
+                 sectors: list = None, timeframe: str = "1d") -> dict:
     """
     Full screener pipeline: scan -> parallel AI vet -> categorize -> return.
-    Supports categories: lowcap, midcap, largecap, etf.
+    Supports categories: lowcap, midcap, largecap, etf, metals_mining, crypto, ai, gainers, losers.
     """
     if not is_configured():
         return {
@@ -943,6 +1148,16 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
         vet_fn = vet_ai_candidate
         positive = ["OPPORTUNITY"]
         cautious = ["RISKY"]
+    elif category == "gainers":
+        candidates = scan_top_movers("gainers", timeframe, limit=limit)
+        vet_fn = lambda c: vet_mover_candidate(c, "gainers", timeframe)
+        positive = ["MOMENTUM BUY"]
+        cautious = ["WATCH"]
+    elif category == "losers":
+        candidates = scan_top_movers("losers", timeframe, limit=limit)
+        vet_fn = lambda c: vet_mover_candidate(c, "losers", timeframe)
+        positive = ["RECOVERY BUY"]
+        cautious = ["WATCH"]
     else:  # lowcap
         candidates = scan_lowcap_candidates(min_price, max_price, limit=limit)
         vet_fn = vet_candidate
@@ -968,6 +1183,29 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
 
     vetted = _parallel_vet(candidates, vet_fn)
     result = _categorize_results(vetted, positive, cautious)
+
+    # Supervisor post-filter — only if LLM_SUPERVISOR is configured
+    if LLM_SUPERVISOR:
+        try:
+            from ai_validator import _validate_supervisor
+            filtered_opps = []
+            supervisor_vetoed = 0
+            for opp in result["opportunities"]:
+                sv = _validate_supervisor(
+                    f"{opp.get('ticker')}: verdict={opp.get('verdict')}, confidence={opp.get('confidence')}, summary={opp.get('summary', '')}",
+                    {"verdict": opp.get("verdict"), "confidence": opp.get("confidence"),
+                     "ticker": opp.get("ticker"), "category": category},
+                    layer="screener",
+                )
+                if sv.get("override") is True:
+                    supervisor_vetoed += 1
+                else:
+                    opp["supervisor"] = "approved"
+                    filtered_opps.append(opp)
+            result["opportunities"] = filtered_opps
+            result["avoided"] += supervisor_vetoed
+        except Exception:
+            pass  # Graceful degradation
 
     return {
         "candidates_scanned": len(candidates),

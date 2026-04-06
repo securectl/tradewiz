@@ -1,0 +1,57 @@
+id: comparable-analysis
+name: Comparable Company Analysis
+domain: Financial Analysis
+description: >
+  Relative valuation using comparable company multiples (P/E, EV/EBITDA, P/S, P/B).
+  Compares target against peers to determine if trading at premium or discount.
+icon: "balance-scale"
+tier_required: pro
+estimated_minutes: 5
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+  - name: peer_tickers
+    type: text
+    label: Peer Tickers (comma-separated)
+    required: true
+    placeholder: "e.g. MSFT, GOOGL, META, AMZN"
+output_types:
+  - json
+  - docx
+  - xlsx
+phases:
+  - name: Target Data
+    description: Fetching target company data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch target fundamentals
+      - type: fetch_prices
+        description: Fetch target price data
+        config:
+          period: "1y"
+  - name: Peer Data
+    description: Fetching peer company data
+    actions:
+      - type: fetch_peers
+        description: Fetch peer fundamentals
+  - name: Ratio Computation
+    description: Computing valuation multiples
+    actions:
+      - type: compute_ratios
+        description: Calculate target ratios
+  - name: Comparable Analysis
+    description: AI running comparable analysis
+    actions:
+      - type: llm_comps
+        description: LLM performs relative valuation
+  - name: Quality Review
+    description: Reviewing analysis quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

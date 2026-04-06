@@ -1,0 +1,72 @@
+id: investment-proposal
+name: Investment Proposal
+domain: Wealth Management
+description: >
+  Generate a client investment proposal with portfolio allocation recommendations,
+  risk assessment, expected returns, and fee disclosure. Tailored to client
+  risk tolerance and investment horizon.
+icon: "file-text"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Portfolio Tickers (comma-separated)
+    required: true
+    placeholder: "e.g. AAPL, MSFT, VTI, BND"
+  - name: risk_tolerance
+    type: select
+    label: Client Risk Tolerance
+    required: true
+    default: moderate
+    options:
+      - label: Conservative
+        value: conservative
+      - label: Moderate
+        value: moderate
+      - label: Aggressive
+        value: aggressive
+  - name: investment_horizon
+    type: select
+    label: Investment Horizon
+    required: false
+    default: "5-10 years"
+    options:
+      - label: 1-3 years
+        value: "1-3 years"
+      - label: 3-5 years
+        value: "3-5 years"
+      - label: 5-10 years
+        value: "5-10 years"
+      - label: 10+ years
+        value: "10+ years"
+  - name: portfolio_csv
+    type: file
+    label: Portfolio CSV (optional)
+    required: false
+    accept: ".csv,.tsv,.txt"
+    placeholder: "Upload CSV with holdings (ticker, shares, cost_basis...)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering portfolio data
+    actions:
+      - type: fetch_fundamentals
+        description: Fetch fundamental data for holdings
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "2y"
+  - name: Proposal Generation
+    description: AI generating investment proposal
+    actions:
+      - type: llm_investment_proposal
+        description: Generate investment proposal
+  - name: Quality Review
+    description: Reviewing proposal quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

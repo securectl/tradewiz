@@ -1,0 +1,43 @@
+# Cloud Build config for TradeWiz deployment to Cloud Run
+# Usage: gcloud builds submit --config=cloudbuild.yaml
+
+steps:
+  # Build web app image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.cloudrun', '-t', 'gcr.io/$PROJECT_ID/tradewiz-web', '.']
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/tradewiz-web']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tradewiz-web'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/tradewiz-web'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '10'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '300'
+      - '--concurrency'
+      - '80'
+      - '--set-env-vars'
+      - 'USE_VERTEX_AI=1,GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1'
+
+images:
+  - 'gcr.io/$PROJECT_ID/tradewiz-web'
+
+timeout: '600s'

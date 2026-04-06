@@ -1,0 +1,40 @@
+id: morning-note
+name: Morning Note
+domain: Equity Research
+description: >
+  Draft a morning meeting note summarizing overnight developments, pre-market movers,
+  key economic data releases, earnings reports, sector rotation, and actionable trade
+  ideas for the day. Formatted for a 2-minute read at the morning meeting.
+icon: "sunrise"
+tier_required: basic
+estimated_minutes: 2
+llm_calls_required: 1
+input_schema:
+  - name: tickers
+    type: text
+    label: Focus Tickers (optional)
+    required: false
+    placeholder: "e.g. AAPL, NVDA, TSLA (leave blank for broad market)"
+  - name: sectors
+    type: text
+    label: Focus Sectors (optional)
+    required: false
+    placeholder: "e.g. Tech, Energy, Healthcare"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Market Data Collection
+    description: Fetching market overview data
+    actions:
+      - type: fetch_prices
+        description: Fetch SPY, QQQ, VIX data
+        config:
+          period: "5d"
+      - type: fetch_indicators
+        description: Calculate market indicators
+  - name: AI Morning Note
+    description: AI drafting morning note
+    actions:
+      - type: llm_morning_note
+        description: Generate morning meeting note

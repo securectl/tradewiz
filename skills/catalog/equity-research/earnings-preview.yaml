@@ -1,0 +1,53 @@
+id: earnings-preview
+name: Earnings Preview
+domain: Equity Research
+description: >
+  Pre-earnings scenario analysis for an upcoming quarterly report. Models bull/base/bear
+  scenarios for revenue, EPS, and guidance. Identifies key metrics to watch, consensus
+  expectations, historical beat/miss patterns, and options-implied move.
+icon: "eye"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. NVDA"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering earnings data and estimates
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_income_statements
+        description: Fetch quarterly income statements
+        config:
+          quarterly: true
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "1y"
+      - type: fetch_indicators
+        description: Calculate technical indicators
+  - name: Analysis
+    description: Computing ratios and trends
+    actions:
+      - type: compute_ratios
+        description: Calculate financial ratios
+  - name: AI Earnings Preview
+    description: AI building earnings preview scenarios
+    actions:
+      - type: llm_earnings_preview
+        description: Generate earnings preview with scenarios
+  - name: Quality Review
+    description: Reviewing preview quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

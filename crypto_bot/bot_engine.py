@@ -19,9 +19,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from db import get_db, put_db, IS_POSTGRES, query, query_one, execute
-from crypto_bot.blofin_client import BloFinClient, COIN_MAP, DEFAULT_COINS
+from crypto_bot.blofin_client import BloFinClient, COIN_MAP, DEFAULT_COINS, ensure_coin_in_map
 from crypto_bot.risk_manager import RiskManager
 from crypto_bot.crypto_validator import validate_trade, detect_direction
+from market_sensor import check_market_health
 
 P = "%s" if IS_POSTGRES else "?"
 
@@ -49,10 +50,11 @@ def _journal_log(user_id, ticker: str, action: str, entry_price: float = None,
                   pnl: float = None, notes: str = ""):
     """Log a trade to the Tracker journal for visibility."""
     try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         execute(
-            f"INSERT INTO journal_entries (user_id, ticker, notes, action, entry_price, exit_price, shares, pnl) "
-            f"VALUES ({P}, {P}, {P}, {P}, {P}, {P}, {P}, {P})",
-            (user_id, ticker, notes, action, entry_price, exit_price, shares, pnl),
+            f"INSERT INTO journal_entries (user_id, ticker, notes, action, entry_price, exit_price, shares, pnl, created_at) "
+            f"VALUES ({P}, {P}, {P}, {P}, {P}, {P}, {P}, {P}, {P})",
+            (user_id, ticker, notes, action, entry_price, exit_price, shares, pnl, now),
         )
         if pnl is not None:
             from datetime import timedelta
@@ -120,17 +122,101 @@ def _get_trade_performance(user_id) -> dict:
         return {}
 
 
+def _load_user_keys(user_id, provider):
+    """Load decrypted API keys for a user from user_api_keys table."""
+    try:
+        from crypto_utils import decrypt
+        rows = query(
+            f"SELECT key_name, encrypted_value FROM user_api_keys WHERE user_id = {P} AND provider = {P}",
+            (user_id, provider),
+        )
+        return {r["key_name"]: decrypt(r["encrypted_value"]) for r in rows}
+    except Exception as e:
+        logger.warning(f"Failed to load user keys for provider {provider}: {e}")
+        return {}
+
+
+def _get_daily_goal_progress(user_id) -> dict:
+    """Check progress toward $500 daily goal."""
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        row = query_one(
+            f"SELECT COALESCE(SUM(pnl), 0) as total FROM bot_trades WHERE user_id = {P} AND status = 'closed' AND asset_type = 'crypto' AND DATE(closed_at) = {P}",
+            (user_id, today),
+        )
+        realized = float(row["total"]) if row else 0.0
+        daily_goal = float(_get_config(user_id, "daily_goal", "500"))
+        return {"realized": realized, "goal": daily_goal, "remaining": daily_goal - realized, "pct": round(realized / daily_goal * 100, 1) if daily_goal > 0 else 0}
+    except Exception:
+        return {"realized": 0, "goal": 500, "remaining": 500, "pct": 0}
+
+
+def _get_adaptive_params(user_id) -> dict:
+    """Self-learning: adjust trading parameters based on recent performance."""
+    perf = _get_trade_performance(user_id)
+    params = {
+        "position_scale": 1.0,  # Multiplier for position size
+        "blacklisted_strategies": [],
+        "hot_strategies": [],
+        "confidence_threshold": 0.45,  # Default CAUTION mode threshold
+    }
+    if not perf or not perf.get("overall"):
+        return params
+
+    overall = perf["overall"]
+    win_rate = overall.get("win_rate", 50)
+
+    # Adaptive position sizing: scale up when winning, scale down when losing
+    if win_rate >= 60:
+        params["position_scale"] = 1.3  # Increase size on hot streak
+    elif win_rate >= 50:
+        params["position_scale"] = 1.1
+    elif win_rate < 35:
+        params["position_scale"] = 0.7  # Reduce size on cold streak
+    elif win_rate < 45:
+        params["position_scale"] = 0.85
+
+    # Strategy-level learning: blacklist strategies with <20% win rate (min 5 trades)
+    # Swing strategies are exempt — they need time to prove themselves on longer timeframes
+    swing_strategies = {"swing_vcp", "swing_htf", "swing_breakout", "swing_trend"}
+    for strat, stats in perf.get("by_strategy", {}).items():
+        if strat in swing_strategies:
+            continue  # Never blacklist swing strategies
+        if stats["trades"] >= 5 and stats["win_rate"] < 20:
+            params["blacklisted_strategies"].append(strat)
+        elif stats["trades"] >= 3 and stats["win_rate"] >= 65:
+            params["hot_strategies"].append(strat)
+
+    # Adaptive confidence threshold: lower when winning, raise when losing
+    if win_rate >= 55:
+        params["confidence_threshold"] = 0.35
+    elif win_rate < 35:
+        params["confidence_threshold"] = 0.55
+
+    return params
+
+
 class TradingBot:
     """Autonomous crypto trading bot — paper trading only."""
 
     def __init__(self, user_id=None):
         self.user_id = user_id
-        self.client = BloFinClient()
+        # Load per-user BloFin keys if available
+        keys = _load_user_keys(user_id, "blofin") if user_id else {}
+        self.client = BloFinClient(
+            api_key=keys.get("api_key"),
+            api_secret=keys.get("api_secret"),
+            passphrase=keys.get("passphrase"),
+        )
         self.risk_manager = RiskManager(user_id=user_id)
         self._thread = None
         self._stop_event = threading.Event()
         self._running = False
         self._last_summary_hour = -1
+        self._last_sensor = None
+        self._adaptive_params = {}
+        self._last_adaptive_refresh = None
+        self._kill_switch_time = None
 
     @property
     def is_running(self) -> bool:
@@ -160,6 +246,7 @@ class TradingBot:
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="crypto-bot")
         self._thread.start()
         _log(self.user_id, "info", "Trading bot started")
+        self._start_watchdog()
 
     def stop(self):
         self._running = False
@@ -209,6 +296,8 @@ class TradingBot:
         daily_pnl = self.risk_manager.get_daily_pnl()
         config = self.risk_manager.refresh_config()
 
+        goal = _get_daily_goal_progress(self.user_id)
+
         return {
             "running": self.is_running,
             "kill_switch": self.risk_manager.is_kill_switch_active(),
@@ -218,21 +307,46 @@ class TradingBot:
             "open_trades": self.risk_manager.get_open_positions_count(),
             "config": config,
             "blofin_configured": self.client.is_configured(),
+            "market_sensor": self._last_sensor,
+            "daily_goal": goal,
+            "adaptive": self._adaptive_params,
         }
 
     def _run_loop(self):
-        _log(self.user_id, "info", "Bot loop started — scanning every cycle")
-        while not self._stop_event.is_set():
-            scan_interval = 300
-            try:
-                scan_interval = int(_get_config(self.user_id, "scan_interval_sec", "300"))
-                self._scan_cycle()
-                self._log_hourly_summary()
-            except Exception as e:
-                _log(self.user_id, "error", f"Scan cycle error: {e}", str(e))
-            self._stop_event.wait(timeout=scan_interval)
-        self._log_hourly_summary(force=True)
-        _log(self.user_id, "info", "Bot loop exited")
+        try:
+            _log(self.user_id, "info", "Bot loop started — scanning every cycle")
+            while not self._stop_event.is_set():
+                scan_interval = 300
+                try:
+                    scan_interval = int(_get_config(self.user_id, "scan_interval_sec", "300"))
+                    self._scan_cycle()
+                    self._log_hourly_summary()
+                except Exception as e:
+                    _log(self.user_id, "error", f"Scan cycle error: {e}", str(e))
+                self._stop_event.wait(timeout=scan_interval)
+            self._log_hourly_summary(force=True)
+            _log(self.user_id, "info", "Bot loop exited")
+        except Exception as e:
+            _log(self.user_id, "error", f"FATAL: Bot loop crashed — {e}", str(e))
+            logger.exception("FATAL: Crypto bot loop crashed")
+        finally:
+            self._running = False
+
+    def _start_watchdog(self):
+        """Daemon thread that restarts the bot loop if it dies unexpectedly."""
+        def _watchdog():
+            while True:
+                time.sleep(60)
+                if not self._running:
+                    return  # Bot was intentionally stopped
+                if self._thread is None or not self._thread.is_alive():
+                    _log(self.user_id, "warn", "WATCHDOG: Bot thread died — restarting")
+                    logger.warning("WATCHDOG: Crypto bot thread died, restarting")
+                    self._thread = threading.Thread(target=self._run_loop, daemon=True, name="crypto-bot")
+                    self._running = True
+                    self._thread.start()
+        t = threading.Thread(target=_watchdog, daemon=True, name="crypto-bot-watchdog")
+        t.start()
 
     def _log_hourly_summary(self, force=False):
         try:
@@ -264,15 +378,88 @@ class TradingBot:
         if raw:
             try:
                 selected = json.loads(raw)
-                return [c for c in selected if c in COIN_MAP]
+                # Ensure all custom coins are registered in COIN_MAP
+                valid = []
+                for c in selected:
+                    key = ensure_coin_in_map(c)
+                    if key:
+                        valid.append(key)
+                return valid if valid else list(DEFAULT_COINS)
             except Exception:
                 pass
         return list(DEFAULT_COINS)
 
+    def _refresh_adaptive(self):
+        """Refresh adaptive parameters every 30 minutes."""
+        now = datetime.now()
+        if self._last_adaptive_refresh and (now - self._last_adaptive_refresh).total_seconds() < 1800:
+            return
+        self._adaptive_params = _get_adaptive_params(self.user_id)
+        self._last_adaptive_refresh = now
+        if self._adaptive_params.get("blacklisted_strategies"):
+            _log(self.user_id, "info", f"Self-learning: blacklisted strategies (low win rate): {self._adaptive_params['blacklisted_strategies']}")
+        if self._adaptive_params.get("hot_strategies"):
+            _log(self.user_id, "info", f"Self-learning: hot strategies: {self._adaptive_params['hot_strategies']}")
+        _log(self.user_id, "info", f"Self-learning: position scale={self._adaptive_params['position_scale']:.2f}")
+
+    def _self_heal(self):
+        """Auto-recover from kill switch after 30 min cooldown."""
+        if not self.risk_manager.is_kill_switch_active():
+            return False
+        if self._kill_switch_time is None:
+            self._kill_switch_time = datetime.now()
+            return True
+        elapsed = (datetime.now() - self._kill_switch_time).total_seconds() / 60
+        if elapsed >= 30:
+            _log(self.user_id, "info", f"Self-healing: auto-recovering from kill switch after {elapsed:.0f} min cooldown")
+            self.risk_manager.deactivate_kill_switch()
+            self._kill_switch_time = None
+            return False
+        return True
+
     def _scan_cycle(self):
         if self.risk_manager.is_kill_switch_active():
-            _log(self.user_id, "warn", "Kill switch active — skipping scan")
+            if self._self_heal():
+                _log(self.user_id, "warn", "Kill switch active — waiting for self-heal cooldown")
+                return
+
+        self._refresh_adaptive()
+
+        # Daily goal progress check
+        goal = _get_daily_goal_progress(self.user_id)
+        if goal["pct"] >= 100:
+            _log(self.user_id, "info", f"Daily goal reached! ${goal['realized']:.2f} / ${goal['goal']:.2f} ({goal['pct']}%) — reducing aggression")
+
+        # Market sensor pre-check
+        sensor = check_market_health("crypto")
+        self._last_sensor = sensor
+
+        # PANIC: market crash detected — auto-liquidate ALL positions to preserve capital
+        if sensor["status"] == "PANIC":
+            _log(self.user_id, "error", f"PANIC KILL SWITCH: {sensor['reasoning']}")
+            _log(self.user_id, "error", "Auto-liquidating all crypto positions to preserve capital!")
+            try:
+                results = self.client.close_all()
+                for r in results:
+                    _log(self.user_id, "warn", f"Panic close: {r.get('coin', '?')} — success: {r.get('success')}")
+                # Mark all open trades as panic-closed
+                execute(
+                    f"UPDATE bot_trades SET status = 'panic_closed', closed_at = {P} WHERE user_id = {P} AND status = 'open' AND asset_type = 'crypto'",
+                    (datetime.now().isoformat(), self.user_id),
+                )
+                self.risk_manager.activate_kill_switch()
+            except Exception as e:
+                _log(self.user_id, "error", f"Panic liquidation failed: {e}")
             return
+
+        if sensor["status"] == "DANGER":
+            _log(self.user_id, "warn", f"Market sensor: DANGER — {sensor['reasoning']} — skipping entire scan cycle")
+            return
+
+        if sensor["status"] == "CAUTION":
+            _log(self.user_id, "info", f"Market sensor: CAUTION — {sensor['reasoning']} — only high-confidence trades allowed")
+
+        _log(self.user_id, "info", f"Market sensor: {sensor['status']} (cached={sensor['cached']})")
 
         selected = self._get_selected_coins()
         _log(self.user_id, "info", f"Starting scan cycle ({len(selected)} coins)...")
@@ -282,42 +469,104 @@ class TradingBot:
             if not coin_info:
                 continue
             try:
-                self._process_coin(coin_key, coin_info)
+                self._process_coin(coin_key, coin_info, sensor=sensor)
             except Exception as e:
                 _log(self.user_id, "error", f"Error processing {coin_key}: {e}")
 
         self._check_exits()
         _log(self.user_id, "info", "Scan cycle complete")
 
-    def _process_coin(self, coin_key: str, coin_info: dict):
+    def _process_coin(self, coin_key: str, coin_info: dict, sensor: dict = None):
         yf_ticker = coin_info["yf"]
         blofin_id = coin_info["blofin"]
 
         _log(self.user_id, "info", f"Scanning {coin_key}...")
 
-        try:
-            import yfinance as yf
-            from analysis_engine import calculate_indicators
+        trade_mode = _get_config(self.user_id, "trade_mode", "scalp")  # "scalp", "swing", "hybrid"
 
-            ticker_data = yf.Ticker(yf_ticker)
-            df = ticker_data.history(period="1mo", interval="1h")
+        signal = None
+        indicators = {}
+        df = None
 
-            if df.empty or len(df) < 50:
-                _log(self.user_id, "warn", f"{coin_key}: Insufficient data ({len(df)} bars)")
+        # --- Swing / Hybrid: fetch daily data and generate swing signals ---
+        if trade_mode in ("swing", "hybrid"):
+            try:
+                import yfinance as yf
+                from analysis_engine import calculate_indicators
+
+                ticker_data = yf.Ticker(yf_ticker)
+                df_daily = ticker_data.history(period="3mo", interval="1d")
+
+                if df_daily is not None and len(df_daily) >= 50:
+                    daily_indicators = calculate_indicators(df_daily)
+                    swing_signal = self._generate_swing_signal(coin_key, daily_indicators, df_daily)
+                    if swing_signal:
+                        # Check max 3 open swing positions
+                        swing_open = query_one(
+                            f"SELECT COUNT(*) as cnt FROM bot_trades WHERE user_id = {P} AND status = 'open' AND asset_type = 'crypto' AND strategy LIKE 'swing_%'",
+                            (self.user_id,),
+                        )
+                        swing_count = int(swing_open["cnt"]) if swing_open else 0
+                        if swing_count >= 3:
+                            _log(self.user_id, "info", f"{coin_key}: Swing signal found but max swing positions (3) reached — skipping")
+                        else:
+                            signal = swing_signal
+                            indicators = daily_indicators
+                            df = df_daily
+                            _log(self.user_id, "info", f"{coin_key}: Swing signal on daily TF — {swing_signal['strategy']}")
+                else:
+                    _log(self.user_id, "warn", f"{coin_key}: Insufficient daily data for swing analysis ({len(df_daily) if df_daily is not None else 0} bars)")
+            except Exception as e:
+                _log(self.user_id, "error", f"Failed to fetch daily data for {coin_key}: {e}")
+
+        # --- Scalp / Hybrid: fetch hourly data and generate scalp signals ---
+        if signal is None and trade_mode in ("scalp", "hybrid"):
+            try:
+                import yfinance as yf
+                from analysis_engine import calculate_indicators
+
+                ticker_data = yf.Ticker(yf_ticker)
+                df = ticker_data.history(period="1mo", interval="1h")
+
+                if df.empty or len(df) < 50:
+                    _log(self.user_id, "warn", f"{coin_key}: Insufficient data ({len(df)} bars)")
+                    return
+
+                indicators = calculate_indicators(df)
+            except Exception as e:
+                _log(self.user_id, "error", f"Failed to fetch data for {coin_key}: {e}")
                 return
 
-            indicators = calculate_indicators(df)
-        except Exception as e:
-            _log(self.user_id, "error", f"Failed to fetch data for {coin_key}: {e}")
+            signal = self._generate_signal(coin_key, indicators, df)
+
+        # If swing-only mode and no swing signal, also need hourly data for logging
+        if signal is None and trade_mode == "swing":
+            try:
+                import yfinance as yf
+                from analysis_engine import calculate_indicators
+
+                ticker_data = yf.Ticker(yf_ticker)
+                df = ticker_data.history(period="1mo", interval="1h")
+                if df is not None and len(df) >= 50:
+                    indicators = calculate_indicators(df)
+            except Exception:
+                pass
+
+        if not signal:
+            try:
+                rsi = indicators.get('rsi_14', '?')
+                macd_h = indicators.get('macd_histogram', '?')
+                sma50 = indicators.get('sma_50', '?')
+                price = float(df["Close"].iloc[-1])
+                _log(self.user_id, "info", f"{coin_key}: No signal (RSI={rsi}, MACD_H={macd_h}, SMA50={sma50}, Price=${price:,.2f})")
+            except Exception:
+                _log(self.user_id, "info", f"{coin_key}: No signal (no indicator data available)")
             return
 
-        signal = self._generate_signal(coin_key, indicators, df)
-        if not signal:
-            rsi = indicators.get('rsi_14', '?')
-            macd_h = indicators.get('macd_histogram', '?')
-            sma50 = indicators.get('sma_50', '?')
-            price = float(df["Close"].iloc[-1])
-            _log(self.user_id, "info", f"{coin_key}: No signal (RSI={rsi}, MACD_H={macd_h}, SMA50={sma50}, Price=${price:,.2f})")
+        # Self-learning: skip blacklisted strategies
+        strategy_name = signal.get("strategy", "unknown")
+        if strategy_name in self._adaptive_params.get("blacklisted_strategies", []):
+            _log(self.user_id, "info", f"{coin_key}: Strategy '{strategy_name}' blacklisted by self-learning (low win rate) — skipping")
             return
 
         _log(self.user_id, "info", f"{coin_key} signal: {signal['side']} — {signal['reason']}")
@@ -351,8 +600,15 @@ class TradingBot:
             _log(self.user_id, "warn", f"No balance available (equity: {equity})")
             return
 
-        max_pct = float(_get_config(self.user_id, "max_position_pct", "10"))
-        size_usd = equity * (max_pct / 100)
+        is_swing = signal.get("timeframe") == "daily"
+        if is_swing:
+            base_size = equity * 0.25  # 25% position for swing trades
+        else:
+            max_pct = float(_get_config(self.user_id, "max_position_pct", "10"))
+            base_size = equity * (max_pct / 100)
+        # Self-learning: adaptive position sizing (scale down on cold streak, full size on hot)
+        pos_scale = min(self._adaptive_params.get("position_scale", 1.0), 1.0)
+        size_usd = base_size * pos_scale if pos_scale < 1.0 else base_size
         size_coins = size_usd / current_price if current_price > 0 else 0
 
         risk_check = self.risk_manager.can_open_position(coin_key, size_usd, equity)
@@ -360,31 +616,84 @@ class TradingBot:
             _log(self.user_id, "info", f"{coin_key}: Risk gate blocked — {risk_check['reason']}")
             return
 
-        _log(self.user_id, "info", f"{coin_key}: Running LLM validation...")
-        perf_history = _get_trade_performance(self.user_id)
-        strategy_name = signal.get("strategy", "unknown")
-        validation = validate_trade(
-            coin=coin_key, side=signal["side"], price=current_price,
-            indicators=indicators, signal_reason=signal["reason"],
-            performance_history=perf_history, strategy_name=strategy_name,
-        )
+        # Quick Trade Mode: bypass LLM gating for high-conviction signals
+        quick_mode = _get_config(self.user_id, "quick_trade_mode", "0") == "1"
+        bypass_llm = False
+        if quick_mode:
+            rsi = indicators.get("rsi_14", 50)
+            rel_vol = indicators.get("relative_volume", 0)
+            strategy = signal.get("strategy", "")
+            # Bypass conditions: Volume surge + RSI in swing zone, or Momentum strategy
+            if rel_vol >= 1.5 and 30 <= rsi <= 60:
+                bypass_llm = True
+                _log(self.user_id, "info", f"{coin_key}: Quick Trade Mode — bypassing LLM (vol={rel_vol:.1f}x, RSI={rsi:.1f})")
+            elif strategy == "momentum":
+                bypass_llm = True
+                _log(self.user_id, "info", f"{coin_key}: Quick Trade Mode — bypassing LLM (momentum strategy)")
 
-        if not validation["approved"]:
-            _log(self.user_id, "info", f"{coin_key}: LLM validation rejected — {validation['summary']}")
-            self._record_rejected_signal(coin_key, signal, current_price, validation)
-            return
+        if bypass_llm:
+            validation = {"approved": True, "summary": "Quick Trade Mode — LLM bypassed", "confidence": 0.7}
+        else:
+            # Check rate limit before LLM validation
+            try:
+                from rate_limiter import check_rate_limit as _check_rl, set_llm_user
+                rl = _check_rl(self.user_id)
+                if not rl["allowed"]:
+                    _log(self.user_id, "info", f"{coin_key}: Rate limit reached ({rl['used']}/{rl['limit']}) — skipping LLM validation")
+                    return
+                set_llm_user(self.user_id, "bot_trade")
+            except Exception:
+                pass
+
+            _log(self.user_id, "info", f"{coin_key}: Running LLM validation...")
+            perf_history = _get_trade_performance(self.user_id)
+            strategy_name = signal.get("strategy", "unknown")
+            validation = validate_trade(
+                coin=coin_key, side=signal["side"], price=current_price,
+                indicators=indicators, signal_reason=signal["reason"],
+                performance_history=perf_history, strategy_name=strategy_name,
+            )
+
+            if not validation["approved"]:
+                _log(self.user_id, "info", f"{coin_key}: LLM validation rejected — {validation['summary']}")
+                self._record_rejected_signal(coin_key, signal, current_price, validation)
+                return
+
+            # CAUTION mode: adaptive confidence threshold
+            if sensor and sensor.get("status") == "CAUTION":
+                confidence = validation.get("confidence", 0)
+                threshold = self._adaptive_params.get("confidence_threshold", 0.45)
+                if confidence < threshold:
+                    _log(self.user_id, "info", f"{coin_key}: Market CAUTION — LLM confidence {confidence:.0%} < {threshold:.0%} threshold — skipping")
+                    return
 
         _log(self.user_id, "info", f"{coin_key}: LLM approved — executing {signal['side']}")
 
         atr = indicators.get("atr_14", 0)
         min_atr = current_price * 0.01
         effective_atr = max(atr, min_atr)
-        if signal["side"] == "buy":
-            stop_loss = current_price - (2.0 * effective_atr)
-            take_profit = current_price + (3.0 * effective_atr)
+
+        if is_swing:
+            # Swing trades: wider SL (8% below entry) and wider TP (25% above entry)
+            if signal["side"] == "buy":
+                stop_loss = current_price * 0.92   # 8% below
+                take_profit = current_price * 1.25  # 25% above
+            else:
+                stop_loss = current_price * 1.08   # 8% above
+                take_profit = current_price * 0.75  # 25% below
         else:
-            stop_loss = current_price + (2.0 * effective_atr)
-            take_profit = current_price - (3.0 * effective_atr)
+            # Fee-aware SL/TP: fees are ~0.16% round-trip, so TP must clear that
+            # SL 1.5x ATR (tighter — cut losses fast), TP 3.5x ATR (wider — let winners run)
+            # This gives ~1:2.3 R:R which is profitable at 35%+ win rate even after fees
+            sl_mult = 1.5
+            tp_mult = 3.5
+
+            if signal["side"] == "buy":
+                stop_loss = current_price - (sl_mult * effective_atr)
+                take_profit = current_price + (tp_mult * effective_atr)
+            else:
+                stop_loss = current_price + (sl_mult * effective_atr)
+                take_profit = current_price - (tp_mult * effective_atr)
 
         order_result = self.client.place_order(
             inst_id=blofin_id, side=signal["side"], size=size_coins,
@@ -451,14 +760,14 @@ class TradingBot:
 
         # === PRE-FILTERS ===
         atr_pct = (atr / current_price * 100) if current_price > 0 else 0
-        if atr_pct < 0.3:
-            _log(self.user_id, "info", f"{coin_key}: ATR too low ({atr_pct:.2f}% of price) — market choppy, skipping")
+        if atr_pct < 0.15:
+            _log(self.user_id, "info", f"{coin_key}: ATR too low ({atr_pct:.2f}% of price) — market dead, skipping")
             return None
 
-        if current_price < 0.50 and atr_pct < 0.8:
+        if current_price < 0.50 and atr_pct < 0.4:
             _log(self.user_id, "info", f"{coin_key}: Low-price coin (${current_price:.4f}) with thin ATR ({atr_pct:.2f}%) — spread will eat profit, skipping")
             return None
-        if current_price < 1.0 and atr_pct < 0.5:
+        if current_price < 1.0 and atr_pct < 0.25:
             _log(self.user_id, "info", f"{coin_key}: Sub-$1 coin (${current_price:.4f}) with low ATR ({atr_pct:.2f}%) — spread risk, skipping")
             return None
 
@@ -469,12 +778,14 @@ class TradingBot:
             if last_trade_time:
                 minutes_since = (datetime.now() - last_trade_time).total_seconds() / 60
                 consec_losses = self.risk_manager.get_coin_consecutive_losses(coin_key)
-                if consec_losses >= 3:
-                    cooldown = 120
+                if consec_losses >= 5:
+                    cooldown = 60
+                elif consec_losses >= 3:
+                    cooldown = 30
                 elif consec_losses >= 1:
-                    cooldown = 45
+                    cooldown = 15
                 else:
-                    cooldown = 20
+                    cooldown = 10
                 if 0 < minutes_since < cooldown:
                     _log(self.user_id, "info", f"{coin_key}: Cooldown active ({minutes_since:.0f}/{cooldown} min, {consec_losses} consec losses)")
                     return None
@@ -482,57 +793,190 @@ class TradingBot:
             pass
 
         # --- Strategy 1: MACD Crossover ---
-        if macd_bull_cross and macd_pct >= 0.05 and rsi < 60 and rsi > 35 and current_price > ema_20 and current_price > sma_50:
-            return {"side": "buy", "reason": f"MACD bullish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price above EMA20 & SMA50", "strategy": "macd_cross"}
-        if macd_bear_cross and macd_pct >= 0.05 and rsi > 40 and rsi < 65 and current_price < ema_20 and current_price < sma_50:
-            return {"side": "sell", "reason": f"MACD bearish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price below EMA20 & SMA50", "strategy": "macd_cross"}
+        if macd_bull_cross and macd_pct >= 0.02 and rsi < 68 and rsi > 28 and current_price > ema_20:
+            return {"side": "buy", "reason": f"MACD bullish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price above EMA20", "strategy": "macd_cross"}
+        if macd_bear_cross and macd_pct >= 0.02 and rsi > 32 and rsi < 72 and current_price < ema_20:
+            return {"side": "sell", "reason": f"MACD bearish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price below EMA20", "strategy": "macd_cross"}
 
         # --- Strategy 2: EMA Trend ---
         if sma8_ema20_cross:
-            if sma8_above_ema20 and rsi < 60 and rsi > 35 and macd_hist > 0 and rel_vol > 0.8:
+            if sma8_above_ema20 and rsi < 68 and rsi > 28 and macd_hist > 0:
                 return {"side": "buy", "reason": f"SMA8 crossed above EMA20 (trend shift bullish) + RSI={rsi:.1f} + MACD positive", "strategy": "ema_trend"}
-            if not sma8_above_ema20 and rsi > 40 and rsi < 65 and macd_hist < 0 and rel_vol > 0.8:
+            if not sma8_above_ema20 and rsi > 32 and rsi < 72 and macd_hist < 0:
                 return {"side": "sell", "reason": f"SMA8 crossed below EMA20 (trend shift bearish) + RSI={rsi:.1f} + MACD negative", "strategy": "ema_trend"}
 
         # --- Strategy 3: RSI Mean Reversion ---
-        if rsi < 30 and macd_hist > 0 and current_price > bb_lower:
-            return {"side": "buy", "reason": f"RSI oversold bounce ({rsi:.1f}) + MACD momentum positive ({macd_hist:.6f}) + above BB lower", "strategy": "rsi_reversion"}
-        if rsi > 70 and macd_hist < 0 and current_price < sma_8 and current_price < bb_upper:
-            return {"side": "sell", "reason": f"RSI overbought fade ({rsi:.1f}) + MACD momentum negative ({macd_hist:.6f}) + below SMA8 & BB upper", "strategy": "rsi_reversion"}
+        if rsi < 35 and macd_hist > 0:
+            return {"side": "buy", "reason": f"RSI oversold bounce ({rsi:.1f}) + MACD momentum positive ({macd_hist:.6f})", "strategy": "rsi_reversion"}
+        if rsi > 65 and macd_hist < 0 and current_price < sma_8:
+            return {"side": "sell", "reason": f"RSI overbought fade ({rsi:.1f}) + MACD momentum negative ({macd_hist:.6f}) + below SMA8", "strategy": "rsi_reversion"}
 
         # --- Strategy 4: Momentum Breakout ---
-        if current_price > sma_50 and current_price > sma_200 and rel_vol > 1.8 and 50 < rsi < 70 and macd_hist > 0:
-            return {"side": "buy", "reason": f"Momentum breakout: price above SMA50/200 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}", "strategy": "momentum"}
-        if current_price < sma_50 and current_price < sma_200 and rel_vol > 1.8 and 30 < rsi < 50 and macd_hist < 0:
-            return {"side": "sell", "reason": f"Bearish momentum: price below SMA50/200 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}", "strategy": "momentum"}
+        if current_price > sma_50 and rel_vol > 1.2 and 45 < rsi < 75 and macd_hist > 0:
+            return {"side": "buy", "reason": f"Momentum breakout: price above SMA50 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}", "strategy": "momentum"}
+        if current_price < sma_50 and rel_vol > 1.2 and 25 < rsi < 55 and macd_hist < 0:
+            return {"side": "sell", "reason": f"Bearish momentum: price below SMA50 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}", "strategy": "momentum"}
 
         # --- Strategy 5: Bollinger Band Reversion ---
         if bb_lower > 0 and bb_upper > 0:
             bb_range = bb_upper - bb_lower
             if bb_range > 0:
                 bb_position = (current_price - bb_lower) / bb_range
-                if bb_position <= 0.05 and rsi < 35 and macd_hist > 0 and bb_width > 2.0:
+                if bb_position <= 0.10 and rsi < 40 and macd_hist > 0:
                     return {"side": "buy", "reason": f"BB lower band touch (BB%={bb_position:.0%}, width={bb_width:.1f}%) + RSI={rsi:.1f} + MACD turning up", "strategy": "bb_reversion"}
-                if bb_position >= 0.95 and rsi > 65 and macd_hist < 0 and bb_width > 2.0:
+                if bb_position >= 0.90 and rsi > 60 and macd_hist < 0:
                     return {"side": "sell", "reason": f"BB upper band touch (BB%={bb_position:.0%}, width={bb_width:.1f}%) + RSI={rsi:.1f} + MACD turning down", "strategy": "bb_reversion"}
 
         # --- Strategy 6: Grid Mean Reversion ---
         if atr > 0 and sma_50 > 0:
             atr_dist = (current_price - sma_50) / atr
-            if atr_dist <= -2.0 and rsi < 40 and sma_50 > sma_200 and macd_hist > 0:
+            if atr_dist <= -1.5 and rsi < 45 and sma_50 > sma_200:
                 return {"side": "buy", "reason": f"Grid support: price {abs(atr_dist):.1f}x ATR below SMA50 (uptrend pullback) + RSI={rsi:.1f}", "strategy": "grid_reversion"}
-            if atr_dist >= 2.0 and rsi > 60 and sma_50 < sma_200 and macd_hist < 0:
+            if atr_dist >= 1.5 and rsi > 55 and sma_50 < sma_200:
                 return {"side": "sell", "reason": f"Grid resistance: price {atr_dist:.1f}x ATR above SMA50 (downtrend rally) + RSI={rsi:.1f}", "strategy": "grid_reversion"}
 
         # --- Strategy 7: Trend Continuation ---
         if sma_50 > sma_200 and current_price > sma_200:
             ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100 if ema_20 > 0 else 999
-            if ema20_dist_pct < 0.8 and rsi > 40 and rsi < 55 and macd_hist > 0 and rel_vol > 0.8:
+            if ema20_dist_pct < 1.2 and rsi > 35 and rsi < 60 and macd_hist > 0:
                 return {"side": "buy", "reason": f"Trend continuation: pullback to EMA20 (dist={ema20_dist_pct:.2f}%) in uptrend (SMA50>200) + RSI={rsi:.1f}", "strategy": "trend_dca"}
         if sma_50 < sma_200 and current_price < sma_200:
             ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100 if ema_20 > 0 else 999
-            if ema20_dist_pct < 0.5 and rsi > 55 and rsi < 65 and macd_hist < 0 and rel_vol > 0.8:
+            if ema20_dist_pct < 1.0 and rsi > 45 and rsi < 68 and macd_hist < 0:
                 return {"side": "sell", "reason": f"Trend continuation: rally to EMA20 (dist={ema20_dist_pct:.2f}%) in downtrend (SMA50<200) + RSI={rsi:.1f}", "strategy": "trend_dca"}
+
+        # --- Strategy 8: Doji Reversal ---
+        if len(df) >= 2:
+            c_open = float(df["Open"].iloc[-1])
+            c_high = float(df["High"].iloc[-1])
+            c_low = float(df["Low"].iloc[-1])
+            c_range = c_high - c_low
+            c_body = abs(current_price - c_open)
+            if c_range > 0 and c_body < c_range * 0.10:
+                prev_open = float(df["Open"].iloc[-2])
+                prev_close = float(df["Close"].iloc[-2])
+                if rsi < 40 and current_price < ema_20 and prev_close < prev_open:
+                    return {"side": "buy", "reason": f"Doji reversal: doji candle + RSI={rsi:.1f} + price below EMA20 + prior bearish candle", "strategy": "doji_reversal"}
+                if rsi > 60 and current_price > ema_20 and prev_close > prev_open:
+                    return {"side": "sell", "reason": f"Doji reversal: doji candle + RSI={rsi:.1f} + price above EMA20 + prior bullish candle", "strategy": "doji_reversal"}
+
+        # --- Strategy 9: Pump on Close ---
+        if len(df) >= 2 and atr > 0:
+            c_open = float(df["Open"].iloc[-1])
+            c_high = float(df["High"].iloc[-1])
+            c_low = float(df["Low"].iloc[-1])
+            c_range = c_high - c_low
+            c_body = abs(current_price - c_open)
+            if rel_vol >= 1.5 and c_body > atr * 0.4 and c_range > 0:
+                close_pos = (current_price - c_low) / c_range
+                if close_pos >= 0.75 and rsi < 70 and current_price > sma_50:
+                    return {"side": "buy", "reason": f"Pump on close: vol surge ({rel_vol:.1f}x) + large body + close in upper 25% + RSI={rsi:.1f} + above SMA50", "strategy": "pump_on_close"}
+                if close_pos <= 0.25 and rsi > 30 and current_price < sma_50:
+                    return {"side": "sell", "reason": f"Dump on close: vol surge ({rel_vol:.1f}x) + large body + close in lower 25% + RSI={rsi:.1f} + below SMA50", "strategy": "pump_on_close"}
+
+        return None
+
+    def _generate_swing_signal(self, coin_key: str, indicators: dict, df) -> dict:
+        """Generate swing trade signals on DAILY timeframes using 50+ daily candles."""
+        if df is None or df.empty or len(df) < 50:
+            return None
+
+        current_price = float(df["Close"].iloc[-1])
+        sma_50 = indicators.get("sma_50", 0)
+        sma_200 = indicators.get("sma_200", 0)
+        ema_20 = indicators.get("ema_20", 0)
+        rsi = indicators.get("rsi_14", 50)
+        rel_vol = indicators.get("relative_volume", 0)
+
+        # --- Swing Strategy 1: VCP (Volatility Contraction Pattern) ---
+        # Price within 3% of 10-day SMA, successive range contractions, volume declining
+        try:
+            sma_10 = df["Close"].rolling(10).mean().iloc[-1]
+            dist_to_sma10 = abs(current_price - sma_10) / sma_10 * 100 if sma_10 > 0 else 999
+
+            if dist_to_sma10 <= 3.0 and len(df) >= 30:
+                # Check for successive range contractions (3 windows of 5 bars)
+                ranges = []
+                for i in range(3):
+                    start = -(15 - i * 5)
+                    end = -(10 - i * 5) if (10 - i * 5) > 0 else None
+                    window = df.iloc[start:end] if end else df.iloc[start:]
+                    if len(window) > 0:
+                        r = (window["High"].max() - window["Low"].min()) / current_price * 100
+                        ranges.append(r)
+
+                # Volume declining over last 3 weeks
+                vol_windows = []
+                for i in range(3):
+                    start = -(15 - i * 5)
+                    end = -(10 - i * 5) if (10 - i * 5) > 0 else None
+                    window = df.iloc[start:end] if end else df.iloc[start:]
+                    if len(window) > 0:
+                        vol_windows.append(window["Volume"].mean())
+
+                range_contracting = len(ranges) == 3 and ranges[0] > ranges[1] > ranges[2]
+                vol_declining = len(vol_windows) == 3 and vol_windows[0] > vol_windows[1] > vol_windows[2]
+
+                if range_contracting and vol_declining:
+                    return {
+                        "side": "buy",
+                        "reason": f"VCP: price within {dist_to_sma10:.1f}% of SMA10, ranges contracting ({ranges[0]:.1f}%→{ranges[1]:.1f}%→{ranges[2]:.1f}%), volume declining",
+                        "strategy": "swing_vcp",
+                        "timeframe": "daily",
+                    }
+        except Exception:
+            pass
+
+        # --- Swing Strategy 2: HTF (High Tight Flag) ---
+        # 30%+ run-up from recent low, pullback <15%, tight range
+        try:
+            recent_low = df["Low"].iloc[-50:].min()
+            recent_high = df["High"].iloc[-20:].max()
+            runup_pct = (recent_high - recent_low) / recent_low * 100 if recent_low > 0 else 0
+            pullback_pct = (recent_high - current_price) / recent_high * 100 if recent_high > 0 else 999
+
+            if runup_pct >= 30 and pullback_pct < 15:
+                # Check tight range in last 5 days
+                last5_range = (df["High"].iloc[-5:].max() - df["Low"].iloc[-5:].min()) / current_price * 100
+                if last5_range < 8:
+                    return {
+                        "side": "buy",
+                        "reason": f"HTF: {runup_pct:.0f}% run-up, pullback only {pullback_pct:.1f}%, tight 5d range ({last5_range:.1f}%)",
+                        "strategy": "swing_htf",
+                        "timeframe": "daily",
+                    }
+        except Exception:
+            pass
+
+        # --- Swing Strategy 3: Breakout ---
+        # Price breaks above 20-day high with 1.5x volume
+        try:
+            high_20d = df["High"].iloc[-21:-1].max()  # 20-day high excluding today
+            if current_price > high_20d and rel_vol >= 1.5:
+                breakout_pct = (current_price - high_20d) / high_20d * 100
+                return {
+                    "side": "buy",
+                    "reason": f"Breakout: price ${current_price:,.2f} broke above 20d high ${high_20d:,.2f} (+{breakout_pct:.1f}%) on {rel_vol:.1f}x volume",
+                    "strategy": "swing_breakout",
+                    "timeframe": "daily",
+                }
+        except Exception:
+            pass
+
+        # --- Swing Strategy 4: Trend Continuation ---
+        # Price pulling back to rising 20 EMA in uptrend (SMA50 > SMA200), RSI 40-60
+        try:
+            if sma_50 > sma_200 and sma_50 > 0 and ema_20 > 0:
+                ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100
+                if ema20_dist_pct < 2.0 and 40 <= rsi <= 60:
+                    return {
+                        "side": "buy",
+                        "reason": f"Swing trend: pullback to EMA20 (dist={ema20_dist_pct:.1f}%) in uptrend (SMA50>200), RSI={rsi:.1f}",
+                        "strategy": "swing_trend",
+                        "timeframe": "daily",
+                    }
+        except Exception:
+            pass
 
         return None
 
@@ -572,12 +1016,34 @@ class TradingBot:
                     elif current_price <= take_profit:
                         should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
 
-                if not should_exit and pnl_pct >= 1.5:
+                is_swing_trade = str(trade.get("strategy", "")).startswith("swing_")
+
+                # Trailing stop logic
+                if not should_exit and is_swing_trade:
+                    # Swing trades: lock in 50% of max unrealized profit
+                    if pnl_pct >= 5.0:
+                        # Calculate max possible profit (distance to TP)
+                        if trade["side"] == "buy":
+                            max_profit_pct = (take_profit - entry_price) / entry_price * 100
+                        else:
+                            max_profit_pct = (entry_price - take_profit) / entry_price * 100
+                        # If price has retraced and given back more than 50% of peak unrealized
+                        locked_floor = pnl_pct * 0.50  # lock 50% of current unrealized
+                        # Check if we've retraced significantly from what we had
+                        if trade["side"] == "buy":
+                            peak_price_approx = entry_price * (1 + max_profit_pct / 100 * (pnl_pct / max_profit_pct if max_profit_pct > 0 else 0))
+                            retracement_from_peak = (peak_price_approx - current_price) / (peak_price_approx - entry_price) if peak_price_approx != entry_price else 0
+                        else:
+                            retracement_from_peak = 0.0  # simplified
+                        if retracement_from_peak > 0.50 and pnl_pct > 2.0:
+                            should_exit, exit_reason = True, f"Swing trailing stop: locking profit at {pnl_pct:.1f}% (retraced {retracement_from_peak:.0%} from peak)"
+                elif not should_exit and pnl_pct >= 2.0:
+                    # Scalp trailing stop: only if profit is meaningful (above fee drag)
                     if trade["side"] == "buy":
                         retracement = (take_profit - current_price) / (take_profit - entry_price) if take_profit != entry_price else 0
                     else:
                         retracement = (current_price - take_profit) / (entry_price - take_profit) if entry_price != take_profit else 0
-                    if retracement > 0.50 and pnl_pct > 0.5:
+                    if retracement > 0.50 and pnl_pct > 0.8:
                         should_exit, exit_reason = True, f"Trailing stop: P&L was {pnl_pct:.1f}%, retraced {retracement:.0%} from target"
 
                 if not should_exit:
@@ -588,8 +1054,16 @@ class TradingBot:
                         except ValueError:
                             opened = datetime.fromisoformat(opened_str)
                         hours_open = (datetime.now() - opened).total_seconds() / 3600
-                        if hours_open >= 24 and abs(pnl_pct) < 0.3:
-                            should_exit, exit_reason = True, f"Time exit: open {hours_open:.0f}h with only {pnl_pct:+.2f}% P&L (stale)"
+
+                        if is_swing_trade:
+                            # Swing time exit: 14 days
+                            if hours_open >= 336 and abs(pnl_pct) < 2.0:
+                                should_exit, exit_reason = True, f"Swing time exit: open {hours_open / 24:.0f}d with only {pnl_pct:+.2f}% P&L (stale swing trade)"
+                        else:
+                            # Scalp time exit: close stale trades, but only if P&L won't just pay fees
+                            # Fee drag is ~0.16% round-trip, so < 0.5% P&L after 24h = not worth holding
+                            if hours_open >= 24 and abs(pnl_pct) < 0.5:
+                                should_exit, exit_reason = True, f"Time exit: open {hours_open:.0f}h with only {pnl_pct:+.2f}% P&L (below fee threshold, stale)"
                     except Exception:
                         pass
 
@@ -607,29 +1081,40 @@ class TradingBot:
         entry_price = trade["entry_price"]
         size = trade["size"]
         if trade["side"] == "buy":
-            pnl = (exit_price - entry_price) * size
+            gross_pnl = (exit_price - entry_price) * size
         else:
-            pnl = (entry_price - exit_price) * size
+            gross_pnl = (entry_price - exit_price) * size
 
         pnl_pct = ((exit_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
         if trade["side"] == "sell":
             pnl_pct = -pnl_pct
 
+        # Trading fees: entry + exit (0.06% maker / 0.1% taker — use 0.08% avg per side)
+        fee_rate = 0.0008
+        fee = round((entry_price * size * fee_rate) + (exit_price * size * fee_rate), 4)
+
+        # NET P&L = gross minus fees — this is the REAL number
+        pnl = round(gross_pnl - fee, 2)
+        fee_pct = (fee / (entry_price * size) * 100) if entry_price * size > 0 else 0
+        net_pnl_pct = round(pnl_pct - fee_pct, 2)
+
         execute(
-            f"UPDATE bot_trades SET exit_price = {P}, pnl = {P}, pnl_pct = {P}, status = 'closed', closed_at = {P} WHERE id = {P}",
-            (exit_price, round(pnl, 2), round(pnl_pct, 2), datetime.now().isoformat(), trade["id"]),
+            f"UPDATE bot_trades SET exit_price = {P}, pnl = {P}, pnl_pct = {P}, fee = {P}, status = 'closed', closed_at = {P} WHERE id = {P}",
+            (exit_price, pnl, net_pnl_pct, fee, datetime.now().isoformat(), trade["id"]),
         )
 
-        self.risk_manager.record_trade_pnl(round(pnl, 2))
+        self.risk_manager.record_trade_pnl(pnl)
 
-        _log(self.user_id, "info", f"TRADE CLOSED: {trade['coin']} {trade['side']} | Entry: ${entry_price:,.2f} → Exit: ${exit_price:,.2f} | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%) | {reason}")
+        _log(self.user_id, "info",
+             f"TRADE CLOSED: {trade['coin']} {trade['side']} | Entry: ${entry_price:,.2f} → Exit: ${exit_price:,.2f} | "
+             f"Gross: ${gross_pnl:,.2f} | Fee: ${fee:,.2f} ({fee_pct:.2f}%) | Net P&L: ${pnl:,.2f} ({net_pnl_pct:+.1f}%) | {reason}")
 
         close_action = "SELL" if trade["side"] == "buy" else "BUY"
         _journal_log(self.user_id,
             ticker=trade["coin"], action=close_action,
             entry_price=entry_price, exit_price=exit_price,
-            shares=size, pnl=round(pnl, 2),
-            notes=f"[Crypto Bot] Closed — {reason} | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%)",
+            shares=size, pnl=pnl,
+            notes=f"[Crypto Bot] Closed — {reason} | Gross: ${gross_pnl:,.2f} | Fee: ${fee:,.2f} | Net: ${pnl:,.2f} ({net_pnl_pct:+.1f}%)",
         )
 
     def _record_rejected_signal(self, coin_key: str, signal: dict, price: float, validation: dict):
@@ -637,14 +1122,13 @@ class TradingBot:
              json.dumps({"signal": signal, "validation": validation}))
 
 
-# Global bot instance
-_bot_instance = None
+# Per-user bot instances keyed by user_id
+_bot_instances = {}
 _bot_lock = threading.Lock()
 
 
-def get_bot() -> TradingBot:
-    global _bot_instance
+def get_bot(user_id=None) -> TradingBot:
     with _bot_lock:
-        if _bot_instance is None:
-            _bot_instance = TradingBot()
-        return _bot_instance
+        if user_id not in _bot_instances:
+            _bot_instances[user_id] = TradingBot(user_id=user_id)
+        return _bot_instances[user_id]

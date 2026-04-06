@@ -1,0 +1,49 @@
+id: sector-analysis
+name: Sector Analysis
+domain: Equity Research
+description: >
+  Analyzes a company's competitive position within its sector. Covers sector outlook,
+  competitive moat, relative valuation, macro sensitivity, and ESG considerations.
+icon: "industry"
+tier_required: basic
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+output_types:
+  - json
+  - docx
+  - xlsx
+phases:
+  - name: Data Collection
+    description: Fetching company and sector data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview and sector info
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_prices
+        description: Fetch price data
+        config:
+          period: "1y"
+      - type: fetch_indicators
+        description: Calculate technical indicators
+  - name: Analysis
+    description: Computing financial ratios
+    actions:
+      - type: compute_ratios
+        description: Calculate key ratios
+  - name: AI Sector Analysis
+    description: AI analyzing sector positioning
+    actions:
+      - type: llm_sector
+        description: LLM sector and competitive analysis
+  - name: Quality Review
+    description: Reviewing analysis quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

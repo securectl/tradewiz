@@ -1,0 +1,138 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Deployment</h1>
+<p class="lead">Deploy AI Stock Analyst to Railway with PostgreSQL, Google OAuth, and a custom domain.</p>
+
+<h2>Railway Setup</h2>
+
+<h3>1. Create a Railway Project</h3>
+<ol>
+    <li>Go to <a href="https://railway.app">railway.app</a> and sign in</li>
+    <li>Click <strong>New Project</strong></li>
+    <li>Select <strong>Deploy from GitHub repo</strong></li>
+    <li>Connect your repository</li>
+</ol>
+
+<h3>2. Add PostgreSQL</h3>
+<ol>
+    <li>In your Railway project, click <strong>New Service &rarr; Database &rarr; PostgreSQL</strong></li>
+    <li>Railway will provision a PostgreSQL instance</li>
+    <li>Copy the <code>DATABASE_URL</code> from the PostgreSQL service's <strong>Connect</strong> tab</li>
+    <li>Add it to your app service's environment variables</li>
+</ol>
+
+<div class="docs-admonition tip">
+    <div class="docs-admonition-title">Tip</div>
+    <p>Railway can automatically inject <code>DATABASE_URL</code> using variable references: <code>{% raw %}${{Postgres.DATABASE_URL}}{% endraw %}</code>. This is the recommended approach.</p>
+</div>
+
+<h3>3. Configure Environment Variables</h3>
+
+<p>Set the following in your Railway app service's <strong>Variables</strong> tab:</p>
+
+<table>
+    <thead>
+        <tr><th>Variable</th><th>Required</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>DATABASE_URL</code></td><td>Yes</td><td>Reference from Postgres plugin</td></tr>
+        <tr><td><code>SECRET_KEY</code></td><td>Yes</td><td>Random string, at least 32 chars</td></tr>
+        <tr><td><code>ENCRYPTION_KEY</code></td><td>No</td><td>Auto-generated on first run</td></tr>
+        <tr><td><code>GOOGLE_CLIENT_ID</code></td><td>Yes</td><td>From Google Cloud Console</td></tr>
+        <tr><td><code>GOOGLE_CLIENT_SECRET</code></td><td>Yes</td><td>From Google Cloud Console</td></tr>
+        <tr><td><code>ADMIN_EMAIL</code></td><td>Yes</td><td>Your Google account email</td></tr>
+        <tr><td><code>OPENROUTER_API_KEY</code></td><td>Recommended</td><td>Required for AI features</td></tr>
+    </tbody>
+</table>
+
+<h3>4. Deploy</h3>
+
+<p>Railway auto-deploys on push to your main branch. The app detects <code>DATABASE_URL</code> and uses PostgreSQL automatically. The <code>migrations.py</code> script runs on startup to create/update tables.</p>
+
+<h2>Google Cloud Console Setup</h2>
+
+<h3>1. Create OAuth Credentials</h3>
+<ol>
+    <li>Go to <a href="https://console.cloud.google.com/">Google Cloud Console</a></li>
+    <li>Select or create a project</li>
+    <li>Navigate to <strong>APIs &amp; Services &rarr; Credentials</strong></li>
+    <li>Click <strong>Create Credentials &rarr; OAuth client ID</strong></li>
+    <li>Application type: <strong>Web application</strong></li>
+</ol>
+
+<h3>2. Configure Redirect URIs</h3>
+<p>Add the following authorized redirect URI:</p>
+<pre><code>https://your-app.up.railway.app/auth/callback</code></pre>
+
+<p>If you have a custom domain:</p>
+<pre><code>https://your-domain.com/auth/callback</code></pre>
+
+<div class="docs-admonition warning">
+    <div class="docs-admonition-title">Important</div>
+    <p>The redirect URI must exactly match what Google sends back. Include <code>https://</code> and the exact path <code>/auth/callback</code>. No trailing slash.</p>
+</div>
+
+<h3>3. Configure Consent Screen</h3>
+<ol>
+    <li>Go to <strong>APIs &amp; Services &rarr; OAuth consent screen</strong></li>
+    <li>User type: <strong>External</strong> (or Internal for Google Workspace)</li>
+    <li>Add scopes: <code>email</code>, <code>profile</code>, <code>openid</code></li>
+    <li>Add test users if in testing mode</li>
+    <li>Publish the app when ready for production use</li>
+</ol>
+
+<h2>Environment Variables Checklist</h2>
+
+<p>Complete checklist for production deployment:</p>
+
+<table>
+    <thead>
+        <tr><th>Category</th><th>Variable</th><th>Set?</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Core</td><td><code>SECRET_KEY</code></td><td></td></tr>
+        <tr><td>Core</td><td><code>DATABASE_URL</code></td><td></td></tr>
+        <tr><td>Auth</td><td><code>GOOGLE_CLIENT_ID</code></td><td></td></tr>
+        <tr><td>Auth</td><td><code>GOOGLE_CLIENT_SECRET</code></td><td></td></tr>
+        <tr><td>Auth</td><td><code>ADMIN_EMAIL</code></td><td></td></tr>
+        <tr><td>AI</td><td><code>OPENROUTER_API_KEY</code></td><td></td></tr>
+        <tr><td>Crypto</td><td><code>BLOFIN_API_KEY</code> (if using crypto bot)</td><td></td></tr>
+        <tr><td>Crypto</td><td><code>BLOFIN_API_SECRET</code></td><td></td></tr>
+        <tr><td>Crypto</td><td><code>BLOFIN_PASSPHRASE</code></td><td></td></tr>
+        <tr><td>Crypto</td><td><code>BLOFIN_DEMO=1</code></td><td></td></tr>
+        <tr><td>Stock</td><td><code>ALPACA_API_KEY</code> (if using stock bot)</td><td></td></tr>
+        <tr><td>Stock</td><td><code>ALPACA_SECRET_KEY</code></td><td></td></tr>
+    </tbody>
+</table>
+
+<h2>Custom Domain</h2>
+
+<p>To use a custom domain on Railway:</p>
+<ol>
+    <li>In your Railway project, go to your app service's <strong>Settings</strong></li>
+    <li>Under <strong>Networking &rarr; Custom Domain</strong>, add your domain</li>
+    <li>Configure DNS: add the CNAME record Railway provides</li>
+    <li>Update your Google OAuth redirect URI to use the new domain</li>
+    <li>Railway handles SSL/TLS automatically</li>
+</ol>
+
+<h2>Troubleshooting</h2>
+
+<h3>App crashes on startup</h3>
+<ul>
+    <li>Check Railway logs for Python import errors — a missing dependency in <code>requirements.txt</code></li>
+    <li>Ensure <code>DATABASE_URL</code> is correctly set and the PostgreSQL service is running</li>
+</ul>
+
+<h3>Google OAuth redirect error</h3>
+<ul>
+    <li>Verify the redirect URI in Google Cloud Console exactly matches your deployed URL + <code>/auth/callback</code></li>
+    <li>Ensure the OAuth consent screen is published (not in testing mode with restricted users)</li>
+</ul>
+
+<h3>Database migration issues</h3>
+<ul>
+    <li><code>migrations.py</code> runs automatically on startup and handles both fresh installs and upgrades</li>
+    <li>If you see table errors, check Railway's PostgreSQL version compatibility</li>
+</ul>
+{% endblock %}

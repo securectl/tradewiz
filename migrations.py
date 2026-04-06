@@ -89,11 +89,16 @@ def _run_postgres(conn):
         CREATE TABLE IF NOT EXISTS invites (
             email TEXT PRIMARY KEY,
             role TEXT NOT NULL DEFAULT 'trader',
+            tier TEXT NOT NULL DEFAULT 'free',
+            bot_access TEXT NOT NULL DEFAULT 'none',
             invited_by INTEGER REFERENCES users(id),
             invited_at TIMESTAMP DEFAULT NOW(),
             accepted_at TIMESTAMP
         )
     """)
+    # Add tier/bot_access columns to existing invites tables
+    cur.execute("ALTER TABLE invites ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'free'")
+    cur.execute("ALTER TABLE invites ADD COLUMN IF NOT EXISTS bot_access TEXT NOT NULL DEFAULT 'none'")
 
     # ── Search History ───────────────────────────────────────────
     cur.execute("""
@@ -208,11 +213,17 @@ def _run_postgres(conn):
             blofin_order_id TEXT,
             strategy TEXT,
             asset_type TEXT DEFAULT 'crypto',
-            direction_bias TEXT
+            direction_bias TEXT,
+            fee REAL DEFAULT 0
         )
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_user ON bot_trades(user_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_status ON bot_trades(status)")
+    # Compound indexes for dashboard queries (critique R2 recommendation)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_user_status_asset ON bot_trades(user_id, status, asset_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_user_closed ON bot_trades(user_id, closed_at) WHERE status = 'closed'")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_user_open ON bot_trades(user_id, coin) WHERE status = 'open'")
+    cur.execute("ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS fee REAL DEFAULT 0")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS bot_daily_pnl (
@@ -249,6 +260,120 @@ def _run_postgres(conn):
             loss_count INTEGER DEFAULT 0,
             PRIMARY KEY (user_id, date)
         )
+    """)
+
+    # ── Subscriptions & Usage ─────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+            tier TEXT NOT NULL DEFAULT 'free',
+            stripe_customer_id TEXT,
+            stripe_subscription_id TEXT,
+            stripe_price_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            current_period_start TIMESTAMP,
+            current_period_end TIMESTAMP,
+            cancel_at_period_end BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS llm_usage_log (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            call_source TEXT,
+            model TEXT,
+            called_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+
+    # Add bot_access column to user_subscriptions
+    cur.execute("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS bot_access TEXT NOT NULL DEFAULT 'none'")
+
+    # Rename 'starter' tier to 'basic'
+    cur.execute("UPDATE user_subscriptions SET tier = 'basic' WHERE tier = 'starter'")
+
+    # Seed free tier for existing users without a subscription row
+    cur.execute("""
+        INSERT INTO user_subscriptions (user_id, tier, status)
+        SELECT id, 'free', 'active' FROM users
+        WHERE id NOT IN (SELECT user_id FROM user_subscriptions)
+    """)
+
+    # ── Skill Jobs ─────────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS skill_jobs (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            skill_id TEXT NOT NULL,
+            inputs_json TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress REAL DEFAULT 0,
+            current_phase TEXT DEFAULT '',
+            message TEXT DEFAULT '',
+            result_json TEXT,
+            error TEXT DEFAULT '',
+            output_files_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_skill_jobs_user ON skill_jobs(user_id)")
+
+    # ── Auth columns for email/password + TOTP ──────────────────
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE")
+    # Relax google_id NOT NULL so email-registered users can have NULL
+    try:
+        cur.execute("ALTER TABLE users ALTER COLUMN google_id DROP NOT NULL")
+    except Exception:
+        pass  # Already nullable or constraint doesn't exist
+
+    # Support requests table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS support_requests (
+            id SERIAL PRIMARY KEY,
+            ticket_id TEXT UNIQUE,
+            name TEXT,
+            email TEXT,
+            issue_type TEXT,
+            message TEXT,
+            status TEXT DEFAULT 'open',
+            admin_notes TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            resolved_at TIMESTAMP
+        )
+    """)
+
+    # ── Trump Mood History ──────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trump_mood_history (
+            id SERIAL PRIMARY KEY,
+            mood REAL NOT NULL,
+            label TEXT NOT NULL,
+            description TEXT,
+            pattern_trend TEXT,
+            pattern_acceleration REAL,
+            day_scores TEXT,
+            top_signals TEXT,
+            notable_posts TEXT,
+            posts_analyzed INTEGER DEFAULT 0,
+            src_truth INTEGER DEFAULT 0,
+            src_news INTEGER DEFAULT 0,
+            src_whitehouse INTEGER DEFAULT 0,
+            ai_prediction TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_trump_mood_created
+        ON trump_mood_history (created_at DESC)
     """)
 
     cur.close()
@@ -294,10 +419,12 @@ def _run_sqlite(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            google_id TEXT UNIQUE NOT NULL,
+            google_id TEXT UNIQUE,
             email TEXT UNIQUE NOT NULL,
             name TEXT,
             picture_url TEXT,
+            password_hash TEXT,
+            totp_secret TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP
         )
@@ -329,6 +456,8 @@ def _run_sqlite(conn):
         CREATE TABLE IF NOT EXISTS invites (
             email TEXT PRIMARY KEY,
             role TEXT NOT NULL DEFAULT 'trader',
+            tier TEXT NOT NULL DEFAULT 'free',
+            bot_access TEXT NOT NULL DEFAULT 'none',
             invited_by INTEGER,
             invited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             accepted_at TIMESTAMP
@@ -445,7 +574,8 @@ def _run_sqlite(conn):
             blofin_order_id TEXT,
             strategy TEXT,
             asset_type TEXT DEFAULT 'crypto',
-            direction_bias TEXT
+            direction_bias TEXT,
+            fee REAL DEFAULT 0
         )
     """)
 
@@ -485,10 +615,47 @@ def _run_sqlite(conn):
         )
     """)
 
+    # ── Subscriptions & Usage ────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            tier TEXT NOT NULL DEFAULT 'free',
+            stripe_customer_id TEXT,
+            stripe_subscription_id TEXT,
+            stripe_price_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            current_period_start TIMESTAMP,
+            current_period_end TIMESTAMP,
+            cancel_at_period_end INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS llm_usage_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            call_source TEXT,
+            model TEXT,
+            called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+
+    # Seed free tier for existing users without a subscription row
+    conn.execute("""
+        INSERT OR IGNORE INTO user_subscriptions (user_id, tier, status)
+        SELECT id, 'free', 'active' FROM users
+        WHERE id NOT IN (SELECT user_id FROM user_subscriptions)
+    """)
+
     # ── Migrate old tables: add user_id if missing ──────────────
     _sqlite_add_column(conn, "bot_trades", "user_id", "INTEGER")
     _sqlite_add_column(conn, "bot_log", "user_id", "INTEGER")
     _sqlite_add_column(conn, "bot_log", "source", "TEXT DEFAULT 'crypto'")
+    _sqlite_add_column(conn, "bot_trades", "fee", "REAL DEFAULT 0")
     _sqlite_add_column(conn, "searches", "user_id", "INTEGER")
     _sqlite_add_column(conn, "journal_entries", "user_id", "INTEGER")
     _sqlite_add_column(conn, "weekly_goals", "user_id", "INTEGER")
@@ -514,6 +681,80 @@ def _run_sqlite(conn):
         CREATE TABLE account_config (
             user_id INTEGER, key TEXT NOT NULL, value TEXT NOT NULL,
             PRIMARY KEY (user_id, key))""")
+
+    # ── Invite tier/bot_access columns ──
+    _sqlite_add_column(conn, "invites", "tier", "TEXT DEFAULT 'free'")
+    _sqlite_add_column(conn, "invites", "bot_access", "TEXT DEFAULT 'none'")
+    _sqlite_add_column(conn, "user_subscriptions", "bot_access", "TEXT DEFAULT 'none'")
+
+    # Rename 'starter' tier to 'basic'
+    try:
+        conn.execute("UPDATE user_subscriptions SET tier = 'basic' WHERE tier = 'starter'")
+    except Exception:
+        pass
+
+    # ── Skill Jobs ────────────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS skill_jobs (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            skill_id TEXT NOT NULL,
+            inputs_json TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress REAL DEFAULT 0,
+            current_phase TEXT DEFAULT '',
+            message TEXT DEFAULT '',
+            result_json TEXT,
+            error TEXT DEFAULT '',
+            output_files_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_skill_jobs_user ON skill_jobs(user_id)")
+
+    # ── Auth columns for email/password + TOTP (existing DBs) ──
+    _sqlite_add_column(conn, "users", "password_hash", "TEXT")
+    _sqlite_add_column(conn, "users", "totp_secret", "TEXT")
+    _sqlite_add_column(conn, "users", "is_locked", "INTEGER DEFAULT 0")
+
+    # Support requests table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS support_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id TEXT UNIQUE,
+            name TEXT,
+            email TEXT,
+            issue_type TEXT,
+            message TEXT,
+            status TEXT DEFAULT 'open',
+            admin_notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP
+        )
+    """)
+
+    # ── Trump Mood History ──────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trump_mood_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mood REAL NOT NULL,
+            label TEXT NOT NULL,
+            description TEXT,
+            pattern_trend TEXT,
+            pattern_acceleration REAL,
+            day_scores TEXT,
+            top_signals TEXT,
+            notable_posts TEXT,
+            posts_analyzed INTEGER DEFAULT 0,
+            src_truth INTEGER DEFAULT 0,
+            src_news INTEGER DEFAULT 0,
+            src_whitehouse INTEGER DEFAULT 0,
+            ai_prediction TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     logger.info("SQLite tables created.")
 

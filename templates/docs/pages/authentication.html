@@ -1,0 +1,127 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Authentication</h1>
+<p class="lead">Google OAuth setup, dev mode, user roles, and the invite system.</p>
+
+<h2>Authentication Modes</h2>
+
+<p>The app supports two authentication modes:</p>
+
+<table>
+    <thead>
+        <tr><th>Mode</th><th>When</th><th>Use Case</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>Dev Login</strong></td><td><code>GOOGLE_CLIENT_ID</code> is not set</td><td>Local development — log in with any email</td></tr>
+        <tr><td><strong>Google OAuth</strong></td><td><code>GOOGLE_CLIENT_ID</code> is set</td><td>Production — requires Google account</td></tr>
+    </tbody>
+</table>
+
+<h2>Dev Login Mode</h2>
+
+<p>When no Google OAuth credentials are configured, the app shows a simple email form. Enter any email to log in instantly with <strong>admin + trader</strong> roles. This is designed for local development only.</p>
+
+<div class="docs-admonition warning">
+    <div class="docs-admonition-title">Warning</div>
+    <p>Dev login mode bypasses all authentication. Never deploy to production without setting <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.</p>
+</div>
+
+<h2>Google OAuth Setup</h2>
+
+<h3>1. Create a Google Cloud Project</h3>
+<ol>
+    <li>Go to the <a href="https://console.cloud.google.com/">Google Cloud Console</a></li>
+    <li>Create a new project or select an existing one</li>
+    <li>Navigate to <strong>APIs &amp; Services &rarr; OAuth consent screen</strong></li>
+    <li>Configure the consent screen (External user type for most cases)</li>
+    <li>Add scopes: <code>email</code>, <code>profile</code>, <code>openid</code></li>
+</ol>
+
+<h3>2. Create OAuth Credentials</h3>
+<ol>
+    <li>Go to <strong>APIs &amp; Services &rarr; Credentials</strong></li>
+    <li>Click <strong>Create Credentials &rarr; OAuth client ID</strong></li>
+    <li>Application type: <strong>Web application</strong></li>
+    <li>Add authorized redirect URI: <code>https://your-domain.com/auth/callback</code></li>
+    <li>For local dev: <code>http://localhost:5001/auth/callback</code></li>
+    <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong></li>
+</ol>
+
+<h3>3. Configure Environment</h3>
+<pre><code>GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+ADMIN_EMAIL=your-email@gmail.com</code></pre>
+
+<h2>OAuth Flow</h2>
+
+<pre><code>User visits /
+  │
+  ▼
+Not authenticated? ──► Redirect to /auth/login
+  │                         │
+  │                         ▼
+  │                    Click "Sign in with Google"
+  │                         │
+  │                         ▼
+  │                    /auth/google ──► Google OAuth consent
+  │                                         │
+  │                                         ▼
+  │                                    /auth/callback
+  │                                         │
+  │                                         ▼
+  │                                    Upsert user in DB
+  │                                    Apply invite roles
+  │                                    Check ADMIN_EMAIL
+  │                                         │
+  ▼                                         ▼
+Authenticated ◄─────────────────────── Redirect to /</code></pre>
+
+<h2>User Roles</h2>
+
+<p>The app uses a simple role-based access control system with three roles:</p>
+
+<table>
+    <thead>
+        <tr><th>Role</th><th>Permissions</th><th>How to Get</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>user</strong></td>
+            <td>Analysis, screener, tracker, search history, settings</td>
+            <td>Default role on first login</td>
+        </tr>
+        <tr>
+            <td><strong>trader</strong></td>
+            <td>Everything in <em>user</em> + crypto bot + stock bot</td>
+            <td>Granted via invite or admin assignment</td>
+        </tr>
+        <tr>
+            <td><strong>admin</strong></td>
+            <td>Everything in <em>trader</em> + user management + system config</td>
+            <td><code>ADMIN_EMAIL</code> match or admin assignment</td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">Role Hierarchy</div>
+    <p>Admins automatically have all trader permissions. Traders automatically have all user permissions. You don't need to assign multiple roles.</p>
+</div>
+
+<h2>Invite System</h2>
+
+<p>Admins can pre-authorize users before they sign up:</p>
+
+<ol>
+    <li>Go to the <strong>Admin</strong> tab</li>
+    <li>Enter the user's email and select a role (<code>user</code>, <code>trader</code>, or <code>admin</code>)</li>
+    <li>Click <strong>Invite</strong></li>
+    <li>When the user logs in with that email via Google OAuth, the role is automatically applied</li>
+</ol>
+
+<p>Users who log in without an invite receive the default <code>user</code> role. The admin can later upgrade their role from the Admin panel.</p>
+
+<h2>ADMIN_EMAIL</h2>
+
+<p>The email address set in <code>ADMIN_EMAIL</code> automatically receives the <code>admin</code> role on every login. This ensures the primary admin can never be locked out, even if roles are misconfigured in the database.</p>
+{% endblock %}

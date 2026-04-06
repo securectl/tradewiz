@@ -1,0 +1,278 @@
+/* Admin Panel */
+.admin-content {
+    padding: 20px 24px;
+    overflow-y: auto;
+    height: calc(100vh - 93px);
+}
+
+.admin-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    max-width: 1200px;
+}
+
+.admin-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.admin-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Export Grid */
+.admin-export-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+}
+.btn-export {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.btn-export:hover {
+    border-color: var(--accent-blue);
+    background: rgba(41,98,255,0.08);
+}
+.export-icon { font-size: 18px; }
+.export-label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.export-desc { font-size: 10px; color: var(--text-secondary); text-align: center; }
+
+.admin-invite-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.admin-invite-form input[type="email"] {
+    flex: 1;
+    min-width: 180px;
+}
+
+.invite-bot-checkboxes {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.invite-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.invite-checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.admin-invite-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.admin-invite-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.admin-invite-item .invite-email {
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.admin-invite-item .invite-role {
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+/* Tier badges */
+.invite-tier {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tier-free { background: var(--bg-tertiary); color: var(--text-secondary); }
+.tier-basic { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.tier-pro { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+.tier-admin { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+
+/* Bot access badges */
+.invite-badge {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 500;
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+}
+
+.admin-invite-item .btn-revoke {
+    background: none;
+    border: none;
+    color: var(--accent-red);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+
+.invite-accepted-badge {
+    font-size: 10px;
+    color: var(--accent-green, #4ade80);
+    background: rgba(34, 197, 94, 0.1);
+    padding: 1px 6px;
+    border-radius: 3px;
+}
+
+/* Tier toggle button group */
+.tier-toggle-group {
+    display: inline-flex;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.tier-toggle-group.tier-toggle-sm .tier-toggle-btn {
+    padding: 2px 8px;
+    font-size: 10px;
+}
+
+.tier-toggle-btn {
+    background: var(--bg-tertiary);
+    border: none;
+    color: var(--text-secondary);
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border-right: 1px solid var(--border-color);
+}
+
+.tier-toggle-btn:last-child { border-right: none; }
+
+.tier-toggle-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+
+.tier-toggle-btn.active[data-tier="free"] { background: var(--bg-secondary); color: var(--text-primary); }
+.tier-toggle-btn.active[data-tier="basic"] { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+.tier-toggle-btn.active[data-tier="pro"] { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+
+/* Bot access toggle button group */
+.bot-toggle-group {
+    display: inline-flex;
+    gap: 4px;
+    transition: opacity 0.15s;
+}
+
+.bot-toggle-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 2px 10px;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.bot-toggle-btn:hover { border-color: var(--text-secondary); }
+
+.bot-toggle-btn.active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+/* Save buttons */
+.btn-save-user, .btn-save-invite {
+    background: var(--accent-blue, #3b82f6);
+    color: #fff;
+    border: none;
+    padding: 3px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+}
+
+.btn-save-user:hover, .btn-save-invite:hover { opacity: 0.85; }
+.btn-save-user:disabled, .btn-save-invite:disabled { opacity: 0.5; cursor: default; }
+
+/* API key setup instructions */
+.api-instructions {
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.api-instructions summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-primary);
+    padding: 4px 0;
+}
+
+.api-instructions ol {
+    margin: 6px 0 0 16px;
+    padding: 0;
+    line-height: 1.8;
+}
+
+.api-instructions a {
+    color: var(--accent-blue);
+    text-decoration: none;
+}
+
+.api-instructions a:hover {
+    text-decoration: underline;
+}
+
+.admin-config-form .settings-row {
+    margin-bottom: 8px;
+}
+
+.admin-config-form .settings-row label {
+    min-width: 120px;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .admin-grid {
+        grid-template-columns: 1fr;
+    }
+}

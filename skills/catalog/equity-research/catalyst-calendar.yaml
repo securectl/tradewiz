@@ -1,0 +1,44 @@
+id: catalyst-calendar
+name: Catalyst Calendar
+domain: Equity Research
+description: >
+  Build a forward-looking catalyst calendar for a stock or sector. Maps upcoming earnings,
+  FDA dates, product launches, conferences, macro events, regulatory decisions, and
+  technical levels. Ranks catalysts by expected price impact and probability.
+icon: "calendar"
+tier_required: basic
+estimated_minutes: 2
+llm_calls_required: 1
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+  - name: timeframe
+    type: text
+    label: Timeframe (optional)
+    required: false
+    placeholder: "e.g. 30d, 90d, 6mo (default: 90d)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering company and market data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "6mo"
+      - type: fetch_indicators
+        description: Calculate technical indicators
+  - name: AI Catalyst Analysis
+    description: AI identifying upcoming catalysts
+    actions:
+      - type: llm_catalyst_calendar
+        description: Build catalyst calendar with impact rankings

@@ -1,0 +1,146 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Admin Guide</h1>
+<p class="lead">User management, invites, role assignment, and system configuration.</p>
+
+<h2>Accessing the Admin Panel</h2>
+
+<p>The Admin tab is only visible to users with the <code>admin</code> role. You get admin access by:</p>
+<ul>
+    <li>Setting <code>ADMIN_EMAIL</code> to your email in <code>.env</code></li>
+    <li>Being assigned admin by another admin</li>
+    <li>Using dev login mode (auto-grants admin)</li>
+</ul>
+
+<h2>User Management</h2>
+
+<h3>Viewing Users</h3>
+<p>The Admin panel shows all registered users with their email, name, roles, and last login date.</p>
+
+<h3>Assigning Roles</h3>
+<p>To change a user's role:</p>
+<ol>
+    <li>Find the user in the Admin panel</li>
+    <li>Click the role button to add or remove a role</li>
+    <li>Available roles: <code>user</code>, <code>trader</code>, <code>admin</code></li>
+</ol>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">Role Hierarchy</div>
+    <p><code>admin</code> inherits all <code>trader</code> permissions. <code>trader</code> inherits all <code>user</code> permissions. You only need to assign the highest role needed.</p>
+</div>
+
+<h2>Invite System</h2>
+
+<p>Pre-authorize users before they sign up to give them specific roles on first login.</p>
+
+<h3>Creating an Invite</h3>
+<ol>
+    <li>In the Admin panel, enter the user's email address</li>
+    <li>Select the role to grant (<code>user</code>, <code>trader</code>, or <code>admin</code>)</li>
+    <li>Click <strong>Invite</strong></li>
+</ol>
+
+<p>When the invited user logs in via Google OAuth with that email, the role is automatically applied. If the user already exists, their role is updated.</p>
+
+<h3>Managing Invites</h3>
+<ul>
+    <li><strong>View all invites</strong> — Listed in the Admin panel with email, role, and creation date</li>
+    <li><strong>Update an invite</strong> — Re-invite the same email with a different role (upserts)</li>
+    <li><strong>Delete an invite</strong> — Remove a pending invite before the user logs in</li>
+</ul>
+
+<h2>System LLM Configuration</h2>
+
+<p>Admins can update LLM model settings at runtime without restarting the server:</p>
+
+<ol>
+    <li>Go to the Admin panel</li>
+    <li>Find the LLM Configuration section</li>
+    <li>Update any of the following:
+        <ul>
+            <li><code>OPENROUTER_API_KEY</code> — API key for all AI features</li>
+            <li><code>LLM_RESEARCH</code> — Model for deep analysis</li>
+            <li><code>LLM_RESEARCH_FAST</code> — Fast analysis model</li>
+            <li><code>LLM_PATTERN</code> — Pattern recognition model</li>
+            <li><code>LLM_PREDICTION</code> — Prediction model</li>
+            <li><code>LLM_SCREENER</code> — Screener model</li>
+            <li><code>LLM_BOT_SENTIMENT</code> — Bot sentiment model</li>
+            <li><code>LLM_BOT_RISK</code> — Bot risk model</li>
+            <li><code>OLLAMA_URL</code> — Local Ollama server URL</li>
+            <li><code>OLLAMA_MODEL</code> — Local Ollama model</li>
+        </ul>
+    </li>
+    <li>Click <strong>Save</strong> — Changes take effect immediately</li>
+</ol>
+
+<div class="docs-admonition tip">
+    <div class="docs-admonition-title">Tip</div>
+    <p>Hot-reloaded LLM settings are stored as environment variables for the running process. They persist until the server is restarted, at which point values from <code>.env</code> are used again.</p>
+</div>
+
+<h2>API Endpoints</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/admin/users</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List all users with their roles.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/admin/users/&lt;id&gt;/role</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Add or remove a role for a user.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/admin/invite</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List all invites.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/admin/invite</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Create or update an invite for an email with a role.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method delete">DELETE</span>
+        <span class="docs-endpoint-path">/api/admin/invite/&lt;email&gt;</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Delete a pending invite.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/admin/config</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get current LLM/OpenRouter config (API key is masked).</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/admin/config</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update LLM models and API keys. Changes take effect immediately.</div>
+</div>
+{% endblock %}

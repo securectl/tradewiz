@@ -1,0 +1,88 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>AI Stock Analyst</h1>
+<p class="lead">An AI-powered stock and crypto analysis platform with automated trading bots, multi-model AI validation, and comprehensive portfolio tracking.</p>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">What is this?</div>
+    <p>AI Stock Analyst combines technical analysis, AI-powered validation from multiple LLMs, and automated trading into a single self-hosted platform. Analyze stocks, scan for breakout patterns, and run paper-trading bots — all from a dark TradingView-inspired interface.</p>
+</div>
+
+<h2>Key Features</h2>
+
+<div class="docs-card-grid">
+    <a href="/docs/stock-analysis" class="docs-card">
+        <div class="docs-card-title">Stock Analysis</div>
+        <div class="docs-card-desc">Technical indicators, breakout detection, and AI-powered analysis with support/resistance levels.</div>
+    </a>
+    <a href="/docs/ai-validation" class="docs-card">
+        <div class="docs-card-title">AI Validation</div>
+        <div class="docs-card-desc">Multi-model consensus from Claude, Gemini, and DeepSeek with confidence scoring.</div>
+    </a>
+    <a href="/docs/crypto-bot" class="docs-card">
+        <div class="docs-card-title">Crypto Trading Bot</div>
+        <div class="docs-card-desc">Automated crypto trading on BloFin with 7 strategies, risk gates, and circuit breakers.</div>
+    </a>
+    <a href="/docs/stock-bot" class="docs-card">
+        <div class="docs-card-title">Stock Trading Bot</div>
+        <div class="docs-card-desc">Automated stock trading via Alpaca or Webull with market-hours awareness.</div>
+    </a>
+    <a href="/docs/screener" class="docs-card">
+        <div class="docs-card-title">Screener &amp; Scanner</div>
+        <div class="docs-card-desc">Qullamaggie breakout scanner and AI-powered stock screener with sector analysis.</div>
+    </a>
+    <a href="/docs/tracker" class="docs-card">
+        <div class="docs-card-title">Trade Tracker</div>
+        <div class="docs-card-desc">Journal your trades, set weekly goals, and track P&amp;L across your portfolio.</div>
+    </a>
+</div>
+
+<h2>Quick Start</h2>
+
+<ol>
+    <li><strong>Clone and install</strong> — <code>pip install -r requirements.txt</code></li>
+    <li><strong>Configure</strong> — Copy <code>.env.example</code> to <code>.env</code> and set your keys</li>
+    <li><strong>Run</strong> — <code>python migrations.py && python app.py</code></li>
+    <li><strong>Open</strong> — Visit <a href="http://localhost:5001">http://localhost:5001</a></li>
+</ol>
+
+<p>See the <a href="/docs/getting-started">Getting Started</a> guide for detailed setup instructions.</p>
+
+<h2>Architecture Overview</h2>
+
+<pre><code>┌─────────────────────────────────────────────────┐
+│                   Flask App                      │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │ Analyzer │  │ Screener │  │  Trade Bots  │  │
+│  │          │  │          │  │ Crypto│Stock │  │
+│  └────┬─────┘  └────┬─────┘  └──┬────┬──────┘  │
+│       │              │           │    │          │
+│  ┌────▼──────────────▼───────────▼────▼──────┐  │
+│  │          AI Validation Layer               │  │
+│  │   Ollama (local) + OpenRouter (cloud)     │  │
+│  └────────────────┬──────────────────────────┘  │
+│                   │                              │
+│  ┌────────────────▼──────────────────────────┐  │
+│  │      SQLite / PostgreSQL Database          │  │
+│  └────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘</code></pre>
+
+<h2>Tech Stack</h2>
+
+<table>
+    <thead>
+        <tr><th>Component</th><th>Technology</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Backend</td><td>Python 3.11+, Flask</td></tr>
+        <tr><td>Database</td><td>SQLite (dev) / PostgreSQL (prod)</td></tr>
+        <tr><td>Auth</td><td>Google OAuth 2.0 via Authlib + Flask-Login</td></tr>
+        <tr><td>AI Models</td><td>OpenRouter (Claude, Gemini, DeepSeek) + Ollama (local)</td></tr>
+        <tr><td>Crypto Broker</td><td>BloFin API (paper trading)</td></tr>
+        <tr><td>Stock Broker</td><td>Alpaca / Webull (paper trading)</td></tr>
+        <tr><td>Frontend</td><td>Vanilla HTML/CSS/JS, LightweightCharts</td></tr>
+        <tr><td>Deployment</td><td>Railway (recommended)</td></tr>
+    </tbody>
+</table>
+{% endblock %}

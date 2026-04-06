@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Stock Analyst — Admin Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #131722; color: #d1d4dc;
+            display: flex; justify-content: center; align-items: center; min-height: 100vh;
+        }
+        .login-card {
+            background: #1e222d; border: 1px solid #363a45; border-radius: 12px;
+            padding: 48px 40px; max-width: 420px; width: 100%; text-align: center;
+        }
+        .logo { font-size: 24px; font-weight: 700; color: #e0e3eb; margin-bottom: 4px; }
+        .badge {
+            display: inline-block; background: #ef5350; color: white; font-size: 10px;
+            font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-bottom: 8px;
+        }
+        .subtitle { color: #787b86; font-size: 14px; margin-bottom: 32px; }
+        .form-group { margin-bottom: 12px; text-align: left; }
+        .form-group label { display: block; font-size: 12px; color: #787b86; margin-bottom: 4px; }
+        .form-input {
+            background: #2a2e39; border: 1px solid #363a45; border-radius: 6px;
+            padding: 10px 14px; color: #d1d4dc; font-size: 14px; width: 100%;
+        }
+        .form-input:focus { outline: none; border-color: #ef5350; }
+        .btn-primary {
+            background: #ef5350; color: white; border: none; border-radius: 8px;
+            padding: 12px 32px; font-size: 15px; font-weight: 500; cursor: pointer;
+            width: 100%; margin-top: 8px; transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #d32f2f; }
+        .error-msg {
+            background: rgba(239, 83, 80, 0.1); border: 1px solid #ef5350;
+            color: #ef5350; border-radius: 6px; padding: 10px; font-size: 13px; margin-bottom: 16px;
+        }
+        .back-link { margin-top: 24px; font-size: 12px; }
+        .back-link a { color: #787b86; text-decoration: none; }
+        .back-link a:hover { color: #d1d4dc; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="logo">AI Stock Analyst</div>
+        <div class="badge">ADMIN</div>
+        <div class="subtitle">Secure admin access with password + authenticator</div>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="/auth/admin-login">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label>Admin Email</label>
+                <input type="email" name="email" class="form-input" placeholder="admin@yourdomain.com" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" class="form-input" placeholder="Password" required>
+            </div>
+            <button type="submit" class="btn-primary">Continue to Verification</button>
+        </form>
+
+        <div class="back-link"><a href="/auth/login">&larr; Back to regular login</a></div>
+        <div style="margin-top:20px;font-size:10px;color:#555;line-height:1.5;">&copy; 2025 Infinity Ventures Group LLC. All rights reserved.</div>
+    </div>
+</body>
+</html>

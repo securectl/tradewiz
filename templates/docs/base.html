@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ page_title }}{% endblock %} — AI Stock Analyst Docs</title>
+    <link rel="stylesheet" href="/static/css/core.css">
+    <link rel="stylesheet" href="/static/css/docs.css">
+</head>
+<body>
+    <!-- Mobile hamburger -->
+    <button class="docs-hamburger" onclick="toggleSidebar()" aria-label="Toggle navigation">&#9776;</button>
+    <div class="docs-overlay" id="docsOverlay" onclick="toggleSidebar()"></div>
+
+    <div class="docs-layout">
+        <!-- ── Sidebar ────────────────────────────────────────── -->
+        <aside class="docs-sidebar" id="docsSidebar">
+            <div class="docs-sidebar-header">
+                <a href="/docs/" class="docs-sidebar-logo">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+                        <polyline points="16 7 22 7 22 13"/>
+                    </svg>
+                    AI Stock Analyst
+                    <span class="docs-sidebar-version">docs</span>
+                </a>
+            </div>
+
+            <nav class="docs-nav">
+                {% for section in nav_sections %}
+                <div class="docs-nav-section">
+                    <div class="docs-nav-section-title">{{ section.title }}</div>
+                    {% for slug, label in section.pages %}
+                    <a href="/docs/{{ slug }}"
+                       class="docs-nav-link{% if slug == current_slug %} active{% endif %}">
+                        {{ label }}
+                    </a>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </nav>
+
+            <div class="docs-sidebar-footer">
+                <a href="/">&larr; Back to App</a>
+            </div>
+        </aside>
+
+        <!-- ── Main content ───────────────────────────────────── -->
+        <main class="docs-main">
+            <div class="docs-content">
+                <!-- Breadcrumbs -->
+                <div class="docs-breadcrumbs">
+                    <a href="/docs/">Docs</a>
+                    {% if current_slug != "index" %}
+                    <span class="separator">/</span>
+                    <span>{{ page_title }}</span>
+                    {% endif %}
+                </div>
+
+                {% block content %}{% endblock %}
+
+                <!-- Prev / Next -->
+                <div class="docs-page-nav">
+                    {% if prev_page %}
+                    <a href="/docs/{{ prev_page[0] }}">
+                        <div class="nav-label">&larr; Previous</div>
+                        <div class="nav-title">{{ prev_page[1] }}</div>
+                    </a>
+                    {% endif %}
+                    {% if next_page %}
+                    <a href="/docs/{{ next_page[0] }}" class="next">
+                        <div class="nav-label">Next &rarr;</div>
+                        <div class="nav-title">{{ next_page[1] }}</div>
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            document.getElementById('docsSidebar').classList.toggle('open');
+            document.getElementById('docsOverlay').classList.toggle('open');
+        }
+    </script>
+    <footer style="text-align:center;padding:16px 0 12px;font-size:11px;color:#636b7e;border-top:1px solid rgba(54,58,69,0.4);margin-top:24px;">
+        &copy; 2025 Infinity Ventures Group LLC. All rights reserved. Developed by Infinity Ventures Group LLC.
+    </footer>
+</body>
+</html>

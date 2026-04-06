@@ -37,6 +37,99 @@ COIN_MAP = {
 # Default coins enabled on first run
 DEFAULT_COINS = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT"]
 
+
+# yfinance tickers that differ from the standard {BASE}-USD format
+YF_TICKER_MAP = {
+    "SUI": "SUI20947-USD",
+    "PEPE": "PEPE24478-USD",
+    "ARB": "ARB11841-USD",
+    "UNI": "UNI7083-USD",
+    "RENDER": "RENDER-USD",
+    "RNDR": "RENDER-USD",
+    "OP": "OP-USD",
+    "WIF": "WIF-USD",
+    "NEAR": "NEAR-USD",
+    "FET": "FET-USD",
+    "INJ": "INJ-USD",
+    "LTC": "LTC-USD",
+    "SHIB": "SHIB-USD",
+}
+
+
+def _get_yf_ticker(base: str) -> str:
+    """Get the correct yfinance ticker for a coin symbol.
+
+    Some coins on yfinance have numeric suffixes (e.g., SUI20947-USD).
+    This function checks the known map first, then tries the standard format.
+    """
+    base_upper = base.upper()
+    if base_upper in YF_TICKER_MAP:
+        return YF_TICKER_MAP[base_upper]
+    return f"{base_upper}-USD"
+
+
+def validate_yf_ticker(coin_key: str) -> bool:
+    """Verify that a coin's yfinance ticker actually returns data."""
+    try:
+        import yfinance as yf
+        info = COIN_MAP.get(coin_key)
+        if not info:
+            return False
+        t = yf.Ticker(info["yf"])
+        df = t.history(period="1d", interval="1h")
+        return len(df) > 0
+    except Exception:
+        return False
+
+
+def resolve_coin(ticker: str) -> dict:
+    """Resolve any coin ticker to a COIN_MAP-compatible entry.
+
+    Accepts formats: BTC-USDT, BTC, BTCUSDT, BTC-USD
+    Returns dict with yf, blofin, name keys, or None if invalid.
+    """
+    ticker = ticker.strip().upper()
+
+    # Already in COIN_MAP
+    if ticker in COIN_MAP:
+        return COIN_MAP[ticker]
+
+    # Normalize to XXX-USDT format
+    base = ticker.replace("-USDT", "").replace("-USD", "").replace("USDT", "").replace("USD", "")
+    if not base:
+        return None
+
+    key = f"{base}-USDT"
+    if key in COIN_MAP:
+        return COIN_MAP[key]
+
+    # Dynamic resolution for coins not in static map
+    return {
+        "yf": _get_yf_ticker(base),
+        "blofin": f"{base}-USDT",
+        "name": base,
+    }
+
+
+def ensure_coin_in_map(ticker: str) -> str:
+    """Ensure a coin ticker is in COIN_MAP (add dynamically if needed).
+
+    Returns the normalized COIN_MAP key (e.g., 'SUI-USDT') or None.
+    """
+    ticker = ticker.strip().upper()
+    base = ticker.replace("-USDT", "").replace("-USD", "").replace("USDT", "").replace("USD", "")
+    if not base:
+        return None
+
+    key = f"{base}-USDT"
+    if key not in COIN_MAP:
+        COIN_MAP[key] = {
+            "yf": _get_yf_ticker(base),
+            "blofin": f"{base}-USDT",
+            "name": base,
+        }
+    return key
+
 DEMO_URL = "https://demo-trading-openapi.blofin.com"
 
 
@@ -44,7 +137,7 @@ class BloFinClient:
     """Wrapper around BloFin SDK. Paper trading only (demo endpoint)."""
 
     def __init__(self, api_key=None, api_secret=None, passphrase=None):
-        """Initialize with optional per-user keys. Falls back to env vars."""
+        """Initialize with per-user keys, falling back to env var defaults."""
         self._api_key = api_key or BLOFIN_API_KEY
         self._api_secret = api_secret or BLOFIN_API_SECRET
         self._passphrase = passphrase or BLOFIN_PASSPHRASE

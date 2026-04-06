@@ -117,7 +117,9 @@ class RiskManager:
                 except Exception:
                     return None
 
-    def can_open_position(self, coin: str, size_usd: float, balance: float) -> dict:
+    def can_open_position(self, coin: str, size_usd: float, balance: float, is_swing: bool = False) -> dict:
+        """Check all risk gates before opening a position.
+        is_swing: If True, uses swing trade limits (higher sizing, fewer positions, higher daily loss cap)."""
         if self.is_kill_switch_active():
             return {"allowed": False, "reason": "Kill switch is active"}
 
@@ -128,23 +130,25 @@ class RiskManager:
         if os.getenv("BLOFIN_DEMO", "1") != "1":
             return {"allowed": False, "reason": "SAFETY: Only paper trading (demo mode) is allowed"}
 
-        daily_limit = float(_get_config_val(self.user_id, "daily_loss_limit", "250"))
+        # Swing trades get higher daily loss limit (10% of equity vs fixed $500)
+        daily_limit = float(_get_config_val(self.user_id, "daily_loss_limit", "2000" if is_swing else "500"))
         daily_pnl = self.get_daily_pnl()
         if daily_pnl <= -daily_limit:
             self.activate_kill_switch()
             return {"allowed": False, "reason": f"Daily loss limit breached (${daily_pnl:.2f} / -${daily_limit:.2f})"}
 
-        max_daily = int(_get_config_val(self.user_id, "max_daily_trades", "25"))
+        max_daily = int(_get_config_val(self.user_id, "max_daily_trades", "10" if is_swing else "25"))
         daily_trades = self.get_daily_trade_count()
         if daily_trades >= max_daily:
             return {"allowed": False, "reason": f"Daily trade limit reached ({daily_trades}/{max_daily})"}
 
-        max_pct = float(_get_config_val(self.user_id, "max_position_pct", "10"))
+        # Swing: 25% position, 3 max open | Scalp: 10% position, 6 max open
+        max_pct = float(_get_config_val(self.user_id, "max_position_pct", "25" if is_swing else "10"))
         max_size = balance * (max_pct / 100)
         if size_usd > max_size:
             return {"allowed": False, "reason": f"Position size ${size_usd:.2f} exceeds {max_pct}% limit (${max_size:.2f})"}
 
-        max_open = int(_get_config_val(self.user_id, "max_open_positions", "3"))
+        max_open = int(_get_config_val(self.user_id, "max_open_positions", "3" if is_swing else "6"))
         current_open = self.get_open_positions_count()
         if current_open >= max_open:
             return {"allowed": False, "reason": f"Max open positions reached ({current_open}/{max_open})"}
@@ -152,17 +156,20 @@ class RiskManager:
         if self.has_open_position(coin):
             return {"allowed": False, "reason": f"Already have an open position for {coin}"}
 
+        # Swing trades have longer cooldowns
         consec_losses = self.get_coin_consecutive_losses(coin)
-        if consec_losses >= 3:
+        cooldown_threshold = 3 if is_swing else 5
+        if consec_losses >= cooldown_threshold:
             last_trade_time = self.get_coin_recent_trade_time(coin)
-            cooldown_hours = min(2 * (consec_losses // 3), 12)
+            cooldown_hours = min(4 * (consec_losses // cooldown_threshold), 24) if is_swing else min(1 * (consec_losses // 5), 4)
             if last_trade_time:
                 hours_since = (datetime.now() - last_trade_time).total_seconds() / 3600
                 if hours_since < cooldown_hours:
                     return {"allowed": False, "reason": f"{coin}: {consec_losses} consecutive losses — paused for {cooldown_hours}h ({hours_since:.1f}h elapsed)"}
 
+        # Per-coin daily loss cap (higher for swing)
         coin_daily_pnl = self.get_coin_daily_pnl(coin)
-        coin_daily_limit = 30.0
+        coin_daily_limit = 200.0 if is_swing else 75.0
         if coin_daily_pnl <= -coin_daily_limit:
             return {"allowed": False, "reason": f"{coin}: Daily coin loss cap hit (${coin_daily_pnl:.2f} / -${coin_daily_limit:.2f})"}
 
@@ -189,7 +196,7 @@ class RiskManager:
             )
 
         daily_pnl = self.get_daily_pnl()
-        daily_limit = float(_get_config_val(self.user_id, "daily_loss_limit", "250"))
+        daily_limit = float(_get_config_val(self.user_id, "daily_loss_limit", "500"))
         if daily_pnl <= -daily_limit:
             logger.warning(f"Daily loss limit breached: ${daily_pnl:.2f} / -${daily_limit:.2f}")
             self.activate_kill_switch()

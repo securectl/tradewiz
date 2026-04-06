@@ -19,8 +19,8 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
 WEBULL_APP_KEY = os.getenv("WEBULL_APP_KEY", "")
 WEBULL_APP_SECRET = os.getenv("WEBULL_APP_SECRET", "")
 WEBULL_ACCOUNT_ID = os.getenv("WEBULL_ACCOUNT_ID", "")
-WEBULL_SANDBOX = os.getenv("WEBULL_SANDBOX", "1")  # "1" = sandbox/UAT, "0" = production
-WEBULL_SANDBOX_ENDPOINT = "us-openapi-alb.uat.webullbroker.com"
+# Webull OpenAPI production endpoint (no sandbox exists — use paper trading account)
+WEBULL_API_HOST = "api.webull.com"
 
 # Stock mapping: symbol -> metadata
 STOCK_MAP = {
@@ -118,7 +118,7 @@ class AlpacaClient:
     """Wrapper around Alpaca SDK. Paper trading only."""
 
     def __init__(self, api_key=None, secret_key=None):
-        """Initialize with optional per-user keys. Falls back to env vars."""
+        """Initialize with per-user keys, falling back to env var defaults."""
         self._api_key = api_key or ALPACA_API_KEY
         self._secret_key = secret_key or ALPACA_SECRET_KEY
         self._client = None
@@ -296,40 +296,95 @@ class AlpacaClient:
 
 
 class WebullClient:
-    """Direct HTTP client for Webull OpenAPI (no SDK dependency).
-    Implements HMAC-SHA1 signing per Webull spec.
-    Defaults to sandbox/UAT for paper trading."""
+    """Webull OpenAPI client with HMAC-SHA1 signing.
+    Uses official Webull OpenAPI endpoints (https://developer.webull.com/api-doc/).
+    Paper trading is done via a Webull paper trading account — there is no sandbox URL."""
 
     _instrument_cache = {}
 
     def __init__(self, app_key=None, app_secret=None, account_id=None):
-        """Initialize with optional per-user keys. Falls back to env vars."""
-        self._app_key = app_key or WEBULL_APP_KEY
-        self._app_secret = app_secret or WEBULL_APP_SECRET
-        self._account_id = account_id or WEBULL_ACCOUNT_ID
+        """Initialize with per-user keys. Each user must configure their own."""
+        self._app_key = app_key or ""
+        self._app_secret = app_secret or ""
+        self._account_id = account_id or ""
         self._initialized = False
+        self._sdk_available = False
+        self._api = None  # SDK trade API object
 
     def _ensure_client(self):
         if self._initialized:
             return
         if not all([self._app_key, self._app_secret]):
-            raise RuntimeError("Webull credentials not configured. Set WEBULL_APP_KEY and WEBULL_APP_SECRET in settings.")
+            raise RuntimeError(
+                "Webull credentials not configured. "
+                "Set your App Key and App Secret in Broker Settings. "
+                "Get them from https://developer.webull.com"
+            )
+
+        # Try official SDK first, fall back to raw HTTP
+        try:
+            from webullsdkcore.client import ApiClient
+            from webullsdktrade.api import API
+            api_client = ApiClient(
+                app_key=self._app_key,
+                app_secret=self._app_secret,
+                region_id="us",
+            )
+            self._api = API(api_client)
+            self._sdk_available = True
+            logger.info("Webull client initialized via official SDK")
+        except ImportError:
+            self._sdk_available = False
+            logger.info("Webull SDK not installed, using direct HTTP signing")
+        except Exception as e:
+            self._sdk_available = False
+            logger.warning(f"Webull SDK init failed, falling back to HTTP: {e}")
+
+        # Auto-discover account_id if not provided
         if not self._account_id:
-            raise RuntimeError("Webull Account ID not configured. Set WEBULL_ACCOUNT_ID in settings.")
+            self._account_id = self._discover_account_id()
+            if not self._account_id:
+                raise RuntimeError(
+                    "Webull Account ID not found. Either:\n"
+                    "1. Enter it manually in Broker Settings, OR\n"
+                    "2. Make sure your Webull account is linked to your API app at developer.webull.com"
+                )
+            logger.info(f"Webull account auto-discovered: {self._account_id}")
+
         self._initialized = True
-        env = "SANDBOX" if WEBULL_SANDBOX == "1" else "PRODUCTION"
-        logger.info(f"Webull client initialized ({env})")
+        logger.info(f"Webull client ready (account={self._account_id})")
+
+    def _discover_account_id(self) -> str:
+        """Auto-discover account_id via /app/subscriptions/list endpoint."""
+        try:
+            if self._sdk_available and self._api:
+                resp = self._api.account.get_app_subscriptions()
+                data = resp.json() if hasattr(resp, 'json') else resp
+                if isinstance(data, list) and data:
+                    account_id = str(data[0].get("account_id", ""))
+                    if account_id:
+                        return account_id
+            else:
+                result = self._request_raw("GET", "/app/subscriptions/list")
+                if result["ok"]:
+                    data = result["data"]
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        account_id = str(item.get("account_id", ""))
+                        if account_id:
+                            return account_id
+        except Exception as e:
+            logger.warning(f"Webull account discovery failed: {e}")
+        return ""
 
     def _get_host(self):
-        if WEBULL_SANDBOX == "1":
-            return WEBULL_SANDBOX_ENDPOINT
-        return "api.webull.com"
+        return WEBULL_API_HOST
 
     def _get_base_url(self):
         return f"https://{self._get_host()}"
 
     def _sign_and_build_headers(self, uri: str, query_params: dict = None, body_params: dict = None) -> dict:
-        """Build HMAC-SHA1 signed headers matching Webull SDK exactly."""
+        """Build HMAC-SHA1 signed headers per Webull OpenAPI spec."""
         import hmac
         import hashlib
         import base64
@@ -339,7 +394,6 @@ class WebullClient:
 
         host = self._get_host()
 
-        # Generate sign headers (same as SDK's _refresh_sign_headers)
         ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         nonce_name = socket.gethostname() + str(uuid.uuid1())
         nonce = str(uuid.uuid5(uuid.NAMESPACE_URL, nonce_name))
@@ -365,14 +419,14 @@ class WebullClient:
             raw = _json.dumps(body_params, ensure_ascii=False, separators=(',', ':'))
             body_string = hashlib.md5(raw.encode()).hexdigest().upper()
 
-        # Build string to sign: uri + "&" + sorted_kv + ["&" + body_md5]
+        # Build string to sign: uri & sorted_kv [& body_md5]
         sorted_items = sorted(sign_params.items(), key=lambda x: x[0])
         sorted_kv = "&".join(f"{k}={v}" for k, v in sorted_items)
         string_to_sign = uri + "&" + sorted_kv
         if body_string:
             string_to_sign += "&" + body_string
 
-        # URL-encode the entire string (safe='')
+        # URL-encode the entire string (no safe chars)
         string_to_sign = quote(string_to_sign, safe='')
 
         # HMAC-SHA1 with (app_secret + "&") as key
@@ -381,7 +435,6 @@ class WebullClient:
             hmac.new(key, string_to_sign.encode(), hashlib.sha1).digest()
         ).decode().strip()
 
-        # Return headers for the actual request
         return {
             "Content-Type": "application/json",
             "x-app-key": self._app_key,
@@ -392,8 +445,8 @@ class WebullClient:
             "x-signature-nonce": nonce,
         }
 
-    def _request(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
-        """Make a signed HTTP request to Webull API."""
+    def _request_raw(self, method: str, path: str, params: dict = None, body: dict = None) -> dict:
+        """Make a signed HTTP request to Webull API (direct, no SDK)."""
         import requests as req
         import json as _json
 
@@ -410,35 +463,69 @@ class WebullClient:
         if body is not None:
             body_str = _json.dumps(body, ensure_ascii=False, separators=(',', ':'))
 
-        if method.upper() == "GET":
-            resp = req.get(url, headers=headers, timeout=15)
-        else:
-            resp = req.post(url, headers=headers, data=body_str, timeout=15)
+        try:
+            if method.upper() == "GET":
+                resp = req.get(url, headers=headers, timeout=15)
+            else:
+                resp = req.post(url, headers=headers, data=body_str, timeout=15)
 
-        if resp.status_code == 200:
-            try:
-                return {"ok": True, "data": resp.json(), "status": 200}
-            except Exception:
-                return {"ok": True, "data": {}, "status": 200}
-        else:
-            return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text}", "status": resp.status_code}
+            if resp.status_code == 200:
+                try:
+                    return {"ok": True, "data": resp.json(), "status": 200}
+                except Exception:
+                    return {"ok": True, "data": {}, "status": 200}
+            else:
+                error_msg = f"HTTP {resp.status_code}"
+                try:
+                    err_data = resp.json()
+                    error_msg = err_data.get("message", err_data.get("error_code", resp.text))
+                except Exception:
+                    error_msg = resp.text[:200]
+                return {"ok": False, "error": error_msg, "status": resp.status_code}
+        except req.exceptions.Timeout:
+            return {"ok": False, "error": "Request timed out", "status": 0}
+        except req.exceptions.ConnectionError as e:
+            return {"ok": False, "error": f"Connection failed: {e}", "status": 0}
 
     def is_configured(self) -> bool:
-        return bool(self._app_key and self._app_secret and self._account_id)
+        return bool(self._app_key and self._app_secret)
 
     def get_balance(self) -> dict:
         self._ensure_client()
         try:
-            result = self._request("GET", f"/account/balance",
-                                   params={"account_id": self._account_id, "currency": "USD"})
-            if result["ok"]:
+            if self._sdk_available and self._api:
+                resp = self._api.account.get_account_balance(
+                    account_id=self._account_id,
+                    total_asset_currency="USD",
+                )
+                data = resp.json() if hasattr(resp, 'json') else resp
+            else:
+                result = self._request_raw(
+                    "GET", "/account/balance",
+                    params={"account_id": self._account_id, "total_asset_currency": "USD"},
+                )
+                if not result["ok"]:
+                    return {"total_equity": 0, "available": 0, "unrealized_pnl": 0, "error": result["error"]}
                 data = result["data"]
-                return {
-                    "total_equity": float(data.get("total_asset", 0)),
-                    "available": float(data.get("total_cash_balance", 0)),
-                    "unrealized_pnl": 0.0,
-                }
-            return {"total_equity": 0, "available": 0, "unrealized_pnl": 0, "error": result.get("error", "")}
+
+            # Parse balance — handle nested account_currency_assets
+            total_equity = float(data.get("total_asset", 0))
+            cash_balance = float(data.get("total_cash_balance", 0))
+            unrealized = 0.0
+
+            # Try to get more detailed info from currency assets
+            currency_assets = data.get("account_currency_assets", [])
+            for ca in currency_assets:
+                if ca.get("currency", "").upper() == "USD":
+                    total_equity = float(ca.get("net_liquidation_value", total_equity))
+                    cash_balance = float(ca.get("cash_balance", cash_balance))
+                    break
+
+            return {
+                "total_equity": total_equity,
+                "available": cash_balance,
+                "unrealized_pnl": unrealized,
+            }
         except Exception as e:
             logger.error(f"Webull get_balance failed: {e}")
             return {"total_equity": 0, "available": 0, "unrealized_pnl": 0, "error": str(e)}
@@ -446,25 +533,39 @@ class WebullClient:
     def get_positions(self) -> list:
         self._ensure_client()
         try:
-            result = self._request("GET", f"/account/positions",
-                                   params={"account_id": self._account_id, "page_size": "100"})
-            if not result["ok"]:
-                logger.error(f"Webull get_positions: {result.get('error')}")
-                return []
-            data = result["data"]
+            if self._sdk_available and self._api:
+                resp = self._api.account.get_account_position(
+                    account_id=self._account_id,
+                    page_size=100,
+                )
+                data = resp.json() if hasattr(resp, 'json') else resp
+            else:
+                result = self._request_raw(
+                    "GET", "/account/positions",
+                    params={"account_id": self._account_id, "page_size": "100"},
+                )
+                if not result["ok"]:
+                    logger.error(f"Webull get_positions: {result.get('error')}")
+                    return []
+                data = result["data"]
+
             positions = []
             for h in data.get("holdings", []):
                 qty = float(h.get("qty", 0))
                 if qty == 0:
                     continue
+                instrument_id = str(h.get("instrument_id", ""))
+                symbol = h.get("symbol", "")
+                if instrument_id and symbol:
+                    self._instrument_cache[symbol] = instrument_id
                 positions.append({
-                    "coin": h.get("symbol", ""),
+                    "coin": symbol,
                     "side": "buy",
                     "size": qty,
                     "entry_price": float(h.get("unit_cost", 0)),
                     "unrealized_pnl": float(h.get("unrealized_profit_loss", 0)),
                     "market_value": float(h.get("market_value", 0)),
-                    "instrument_id": h.get("instrument_id", ""),
+                    "instrument_id": instrument_id,
                 })
             return positions
         except Exception as e:
@@ -487,9 +588,11 @@ class WebullClient:
             return 0.0
 
     def _get_instrument_id(self, symbol: str) -> str:
+        """Resolve symbol to Webull instrument_id via /instrument/list endpoint."""
         if symbol in self._instrument_cache:
             return self._instrument_cache[symbol]
-        # Try positions first
+
+        # Check positions cache first
         try:
             for pos in self.get_positions():
                 if pos["coin"] == symbol and pos.get("instrument_id"):
@@ -497,20 +600,41 @@ class WebullClient:
                     return pos["instrument_id"]
         except Exception:
             pass
-        # Search instruments
+
+        # Use the official /instrument/list endpoint (not /instrument/search)
         try:
-            result = self._request("GET", "/instrument/search", params={"symbol": symbol})
-            if result["ok"]:
-                data = result["data"]
-                items = data if isinstance(data, list) else data.get("instruments", [data])
-                for item in items:
-                    iid = str(item.get("instrument_id", ""))
-                    if iid:
-                        self._instrument_cache[symbol] = iid
+            if self._sdk_available and self._api:
+                resp = self._api.instrument.get_instrument(symbols=symbol, category="US_STOCK")
+                data = resp.json() if hasattr(resp, 'json') else resp
+                items = data if isinstance(data, list) else [data]
+            else:
+                result = self._request_raw(
+                    "GET", "/instrument/list",
+                    params={"symbols": symbol, "category": "US_STOCK"},
+                )
+                if not result["ok"]:
+                    # Try as ETF
+                    result = self._request_raw(
+                        "GET", "/instrument/list",
+                        params={"symbols": symbol, "category": "US_ETF"},
+                    )
+                if result["ok"]:
+                    data = result["data"]
+                    items = data if isinstance(data, list) else [data]
+                else:
+                    items = []
+
+            for item in items:
+                iid = str(item.get("instrument_id", ""))
+                sym = item.get("symbol", "")
+                if iid:
+                    self._instrument_cache[sym or symbol] = iid
+                    if sym == symbol or not sym:
                         return iid
         except Exception as e:
             logger.warning(f"Webull instrument lookup for {symbol}: {e}")
-        raise RuntimeError(f"Cannot resolve instrument_id for {symbol}")
+
+        raise RuntimeError(f"Cannot resolve instrument_id for {symbol}. Verify the ticker is valid on Webull.")
 
     def place_order(self, symbol: str, side: str, qty: float,
                     order_type: str = "market",
@@ -522,30 +646,69 @@ class WebullClient:
             order_side = "BUY" if side.lower() == "buy" else "SELL"
             client_order_id = uuid.uuid4().hex[:32]
 
-            order_body = {
-                "account_id": self._account_id,
-                "stock_order": {
-                    "client_order_id": client_order_id,
-                    "side": order_side,
-                    "tif": "DAY",
-                    "extended_hours_trading": False,
-                    "instrument_id": instrument_id,
-                    "order_type": "MARKET",
-                    "qty": str(int(qty)),
-                },
-            }
-
-            result = self._request("POST", "/trade/order/place", body=order_body)
-            if result["ok"]:
+            if self._sdk_available and self._api:
+                resp = self._api.order.place_order(
+                    account_id=self._account_id,
+                    qty=str(int(qty)),
+                    instrument_id=instrument_id,
+                    side=order_side,
+                    client_order_id=client_order_id,
+                    order_type="MARKET",
+                    extended_hours_trading=False,
+                    tif="DAY",
+                )
+                data = resp.json() if hasattr(resp, 'json') else resp
+                logger.info(f"Webull order placed via SDK: {side} {qty} {symbol}")
+            else:
+                order_body = {
+                    "account_id": self._account_id,
+                    "stock_order": {
+                        "client_order_id": client_order_id,
+                        "side": order_side,
+                        "tif": "DAY",
+                        "extended_hours_trading": False,
+                        "instrument_id": instrument_id,
+                        "order_type": "MARKET",
+                        "qty": str(int(qty)),
+                    },
+                }
+                result = self._request_raw("POST", "/trade/order/place", body=order_body)
+                if not result["ok"]:
+                    error_msg = result.get("error", "Unknown")
+                    # Handle known Webull errors with user-friendly messages
+                    if "FIXGW_NOT_READY_MARKET" in str(error_msg):
+                        error_msg = "Market is closed — Webull FIX gateway not available outside trading hours"
+                    elif "NOT_TRADING" in str(error_msg):
+                        error_msg = f"Trading not available: {error_msg}"
+                    logger.error(f"Webull order failed: {error_msg}")
+                    return {"success": False, "error": error_msg}
                 logger.info(f"Webull order placed: {side} {qty} {symbol}")
 
-                # Place separate SL if provided
-                if stop_loss and order_side == "BUY":
+            # Place separate SL order if provided
+            if stop_loss:
+                sl_side = "SELL" if order_side == "BUY" else "BUY"
+                sl_id = uuid.uuid4().hex[:32]
+                if self._sdk_available and self._api:
+                    try:
+                        self._api.order.place_order(
+                            account_id=self._account_id,
+                            qty=str(int(qty)),
+                            instrument_id=instrument_id,
+                            side=sl_side,
+                            client_order_id=sl_id,
+                            order_type="STOP_LOSS",
+                            stop_price=str(round(stop_loss, 2)),
+                            extended_hours_trading=False,
+                            tif="GTC",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Webull SL order failed: {e}")
+                else:
                     sl_body = {
                         "account_id": self._account_id,
                         "stock_order": {
-                            "client_order_id": uuid.uuid4().hex[:32],
-                            "side": "SELL",
+                            "client_order_id": sl_id,
+                            "side": sl_side,
                             "tif": "GTC",
                             "extended_hours_trading": False,
                             "instrument_id": instrument_id,
@@ -554,15 +717,50 @@ class WebullClient:
                             "stop_price": str(round(stop_loss, 2)),
                         },
                     }
-                    self._request("POST", "/trade/order/place", body=sl_body)
+                    self._request_raw("POST", "/trade/order/place", body=sl_body)
 
-                return {"success": True, "order_id": client_order_id, "qty": float(qty)}
-            else:
-                logger.error(f"Webull order failed: {result.get('error')}")
-                return {"success": False, "error": result.get("error", "Unknown")}
+            # Place separate TP order if provided
+            if take_profit:
+                tp_side = "SELL" if order_side == "BUY" else "BUY"
+                tp_id = uuid.uuid4().hex[:32]
+                if self._sdk_available and self._api:
+                    try:
+                        self._api.order.place_order(
+                            account_id=self._account_id,
+                            qty=str(int(qty)),
+                            instrument_id=instrument_id,
+                            side=tp_side,
+                            client_order_id=tp_id,
+                            order_type="LIMIT",
+                            limit_price=str(round(take_profit, 2)),
+                            extended_hours_trading=False,
+                            tif="GTC",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Webull TP order failed: {e}")
+                else:
+                    tp_body = {
+                        "account_id": self._account_id,
+                        "stock_order": {
+                            "client_order_id": tp_id,
+                            "side": tp_side,
+                            "tif": "GTC",
+                            "extended_hours_trading": False,
+                            "instrument_id": instrument_id,
+                            "order_type": "LIMIT",
+                            "qty": str(int(qty)),
+                            "limit_price": str(round(take_profit, 2)),
+                        },
+                    }
+                    self._request_raw("POST", "/trade/order/place", body=tp_body)
+
+            return {"success": True, "order_id": client_order_id, "qty": float(qty)}
         except Exception as e:
-            logger.error(f"Webull place_order failed: {e}")
-            return {"success": False, "error": str(e)}
+            error_msg = str(e)
+            if "FIXGW_NOT_READY_MARKET" in error_msg or "CAN_NOT_TRADING" in error_msg:
+                error_msg = "Market is closed — Webull FIX gateway not available outside trading hours"
+            logger.error(f"Webull place_order failed: {error_msg}")
+            return {"success": False, "error": error_msg}
 
     def close_position(self, symbol: str) -> dict:
         self._ensure_client()
@@ -592,6 +790,7 @@ class WebullClient:
         return results
 
     def get_day_trade_count(self) -> int:
+        """Webull API doesn't expose a PDT counter directly."""
         return 0
 
     def get_account_equity(self) -> float:

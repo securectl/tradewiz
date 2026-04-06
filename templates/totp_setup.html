@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Stock Analyst — Setup Authenticator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #131722; color: #d1d4dc;
+            display: flex; justify-content: center; align-items: center; min-height: 100vh;
+        }
+        .card {
+            background: #1e222d; border: 1px solid #363a45; border-radius: 12px;
+            padding: 40px; max-width: 440px; width: 100%; text-align: center;
+        }
+        .title { font-size: 20px; font-weight: 600; color: #e0e3eb; margin-bottom: 8px; }
+        .desc { color: #787b86; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+        .qr-container {
+            background: white; border-radius: 12px; display: inline-block;
+            padding: 16px; margin-bottom: 20px;
+        }
+        .qr-container img { display: block; width: 200px; height: 200px; }
+        .manual-key {
+            background: #2a2e39; border: 1px solid #363a45; border-radius: 6px;
+            padding: 10px 14px; font-family: monospace; font-size: 13px; color: #26a69a;
+            word-break: break-all; margin-bottom: 20px; text-align: left;
+        }
+        .manual-label { font-size: 11px; color: #787b86; margin-bottom: 4px; text-align: left; }
+        .code-input {
+            background: #2a2e39; border: 1px solid #363a45; border-radius: 8px;
+            padding: 14px; color: #e0e3eb; font-size: 24px; font-weight: 600;
+            text-align: center; letter-spacing: 8px; width: 100%;
+        }
+        .code-input:focus { outline: none; border-color: #26a69a; }
+        .btn-primary {
+            background: #26a69a; color: white; border: none; border-radius: 8px;
+            padding: 12px 32px; font-size: 15px; font-weight: 500; cursor: pointer;
+            width: 100%; margin-top: 16px; transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #1d8a7e; }
+        .error-msg {
+            background: rgba(239, 83, 80, 0.1); border: 1px solid #ef5350;
+            color: #ef5350; border-radius: 6px; padding: 10px; font-size: 13px; margin-bottom: 16px;
+        }
+        .steps { text-align: left; margin-bottom: 24px; }
+        .steps li { font-size: 13px; color: #787b86; margin-bottom: 6px; line-height: 1.4; }
+        .steps li strong { color: #d1d4dc; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="title">Setup Authenticator</div>
+        <div class="desc">Scan the QR code with Google Authenticator, Authy, or any TOTP app</div>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <ol class="steps">
+            <li>Open your <strong>authenticator app</strong> (Google Authenticator, Authy, etc.)</li>
+            <li>Scan the QR code below or enter the manual key</li>
+            <li>Enter the 6-digit code to verify</li>
+        </ol>
+
+        <div class="qr-container">
+            <img src="data:image/png;base64,{{ qr_code }}" alt="TOTP QR Code">
+        </div>
+
+        <div class="manual-label">Manual key (if you can't scan):</div>
+        <div class="manual-key">{{ secret }}</div>
+
+        <form method="POST" action="/auth/totp-setup">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="text" name="code" class="code-input" maxlength="6" pattern="[0-9]{6}"
+                   placeholder="000000" required autofocus autocomplete="one-time-code">
+            <button type="submit" class="btn-primary">Verify & Activate</button>
+        </form>
+        <div style="margin-top:20px;font-size:10px;color:#555;line-height:1.5;">&copy; 2025 Infinity Ventures Group LLC. All rights reserved.</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,125 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Stock Trading Bot</h1>
+<p class="lead">Automated stock trading via Alpaca or Webull with market-hours awareness and PDT protection.</p>
+
+<div class="docs-admonition danger">
+    <div class="docs-admonition-title">Paper Trading Only</div>
+    <p>The stock bot enforces paper trading mode. Alpaca uses <code>paper=True</code> hardcoded in the client. Never use live credentials.</p>
+</div>
+
+<h2>Broker Setup</h2>
+
+<h3>Alpaca (Recommended)</h3>
+
+<ol>
+    <li>Create an <a href="https://alpaca.markets">Alpaca</a> account</li>
+    <li>Go to <strong>Paper Trading</strong> and generate API keys</li>
+    <li>In the app, go to <strong>Stock Trading &rarr; Broker</strong></li>
+    <li>Select <strong>Alpaca</strong> and enter your API Key and Secret Key</li>
+    <li>Click <strong>Test Connection</strong> to verify</li>
+</ol>
+
+<h3>Webull</h3>
+
+<ol>
+    <li>Create a <a href="https://webull.com">Webull</a> developer account</li>
+    <li>Generate App Key, App Secret, and note your Account ID</li>
+    <li>In the app, go to <strong>Stock Trading &rarr; Broker</strong></li>
+    <li>Select <strong>Webull</strong> and enter your credentials</li>
+    <li>Click <strong>Test Connection</strong> to verify</li>
+</ol>
+
+<h2>Trading Strategies</h2>
+
+<p>The stock bot uses the same 7 strategies as the crypto bot, adapted for stock market characteristics:</p>
+
+<ol>
+    <li><strong>MACD Crossover</strong> — Momentum-based entry on MACD signal cross</li>
+    <li><strong>EMA Trend</strong> — SMA8/EMA20 crossover for trend following</li>
+    <li><strong>RSI Mean Reversion</strong> — Fades extreme RSI with MACD confirmation</li>
+    <li><strong>Momentum Breakout</strong> — High-volume breakout above SMA50</li>
+    <li><strong>Bollinger Band Reversion</strong> — Bounces off BB extremes</li>
+    <li><strong>Grid Mean Reversion</strong> — ATR-based distance from SMA50</li>
+    <li><strong>Trend Continuation</strong> — Pullback to EMA20 in confirmed trends</li>
+</ol>
+
+<p>See <a href="/docs/crypto-bot">Crypto Trading Bot</a> for detailed strategy conditions.</p>
+
+<h2>Risk Management</h2>
+
+<p>The stock bot has all 7 risk gates from the crypto bot, plus two additional gates:</p>
+
+<table>
+    <thead>
+        <tr><th>Gate</th><th>Rule</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1–7</td><td>(Same as crypto bot)</td><td>Kill switch, enabled, paper-only, daily loss, max position, max open, no duplicates</td></tr>
+        <tr><td>8</td><td><strong>PDT Rule</strong></td><td>Blocks day trades if equity &lt; $25K and 3+ day trades in rolling 5 days</td></tr>
+        <tr><td>9</td><td><strong>Market Hours</strong></td><td>Only trades during US market hours (9:30 AM – 4:00 PM ET, weekdays)</td></tr>
+    </tbody>
+</table>
+
+<h2>Market Hours</h2>
+
+<p>The stock bot automatically respects US market hours:</p>
+<ul>
+    <li><strong>Regular hours:</strong> 9:30 AM – 4:00 PM Eastern, Monday–Friday</li>
+    <li><strong>Holidays:</strong> NYSE holiday calendar observed</li>
+    <li>The bot scans during market hours only; it pauses outside trading windows</li>
+    <li>Check <code>GET /api/stock-bot/market-hours</code> for current market status</li>
+</ul>
+
+<h2>Bot Configuration</h2>
+
+<table>
+    <thead>
+        <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>stock_bot_enabled</code></td><td>Off</td><td>Master on/off switch</td></tr>
+        <tr><td><code>stock_kill_switch</code></td><td>Off</td><td>Emergency stop</td></tr>
+        <tr><td><code>stock_max_position_pct</code></td><td>10%</td><td>Max size per trade</td></tr>
+        <tr><td><code>stock_daily_loss_limit</code></td><td>$250</td><td>Daily max loss before kill switch</td></tr>
+        <tr><td><code>stock_max_open_positions</code></td><td>3</td><td>Max concurrent trades</td></tr>
+        <tr><td><code>stock_scan_interval_sec</code></td><td>300</td><td>Seconds between scan cycles</td></tr>
+        <tr><td><code>stock_selected_stocks</code></td><td>AAPL, TSLA, NVDA, MSFT, AMD</td><td>Stocks to scan</td></tr>
+        <tr><td><code>stock_daily_goal</code></td><td>$50</td><td>Daily profit target (display only)</td></tr>
+        <tr><td><code>stock_direction_bias</code></td><td>long_only</td><td>Direction filter</td></tr>
+        <tr><td><code>stock_broker</code></td><td>alpaca</td><td>Broker selection (alpaca/webull)</td></tr>
+    </tbody>
+</table>
+
+<h2>Available Stocks</h2>
+
+<table>
+    <thead>
+        <tr><th>Symbol</th><th>Name</th><th>Default</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>AAPL</td><td>Apple</td><td>Yes</td></tr>
+        <tr><td>TSLA</td><td>Tesla</td><td>Yes</td></tr>
+        <tr><td>NVDA</td><td>NVIDIA</td><td>Yes</td></tr>
+        <tr><td>MSFT</td><td>Microsoft</td><td>Yes</td></tr>
+        <tr><td>AMD</td><td>AMD</td><td>Yes</td></tr>
+        <tr><td>AMZN</td><td>Amazon</td><td>No</td></tr>
+        <tr><td>GOOGL</td><td>Alphabet</td><td>No</td></tr>
+        <tr><td>META</td><td>Meta</td><td>No</td></tr>
+        <tr><td>PLTR</td><td>Palantir</td><td>No</td></tr>
+        <tr><td>COIN</td><td>Coinbase</td><td>No</td></tr>
+        <tr><td>SOFI</td><td>SoFi</td><td>No</td></tr>
+        <tr><td>SPY</td><td>S&amp;P 500 ETF</td><td>No</td></tr>
+        <tr><td>QQQ</td><td>Nasdaq ETF</td><td>No</td></tr>
+        <tr><td>MARA</td><td>Marathon Digital</td><td>No</td></tr>
+        <tr><td>RIOT</td><td>Riot Platforms</td><td>No</td></tr>
+    </tbody>
+</table>
+
+<h3>Custom Tickers</h3>
+<p>You can add custom stock tickers beyond the default list. Use the <strong>Add Ticker</strong> feature in the Stock Trading tab — the app validates the ticker with the broker before adding it.</p>
+
+<h2>Position Sizing</h2>
+
+<p>Same ATR-based sizing as the crypto bot, with one difference: stock positions are always rounded to <strong>whole shares</strong> (<code>int(size_usd / price)</code>).</p>
+{% endblock %}

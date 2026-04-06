@@ -1,0 +1,534 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Analyzer</h1>
+<p class="lead">The primary analysis tab — interactive charting, breakout pattern detection, AI validation, and 12-month investment predictions.</p>
+
+<h2>Overview</h2>
+
+<p>The Analyzer is the main feature of AI Stock Analyst. Enter any stock or crypto ticker to get a full technical analysis with interactive candlestick charts, detected breakout patterns, a calculated trade plan, and optional AI-powered validation and long-term predictions.</p>
+
+<pre><code>Ticker Input
+    │
+    ▼
+Fetch Price Data (1 month, 1h bars)
+    │
+    ▼
+Compute Technical Indicators
+    │
+    ├──▶ Breakout Status
+    ├──▶ Pattern Detection (triangles, pennants, wedges)
+    ├──▶ Trade Plan ($25K account)
+    ├──▶ Technical Indicators (RSI, MACD, ATR, Bollinger, Volume)
+    └──▶ Financials (valuation, profitability, balance sheet)
+    │
+    ▼
+┌────────────────────────────────┐
+│   Optional AI Features         │
+│                                │
+│  ┌──────────────────────────┐  │
+│  │  Validate with AI        │  │
+│  │  (3-model setup vetting) │  │
+│  └──────────────────────────┘  │
+│                                │
+│  ┌──────────────────────────┐  │
+│  │  Run 12-Month Prediction │  │
+│  │  (3-model investment)    │  │
+│  └──────────────────────────┘  │
+└────────────────────────────────┘</code></pre>
+
+<h2>Right Panel Sections</h2>
+
+<p>After running an analysis, the right panel displays six sections:</p>
+
+<table>
+    <thead>
+        <tr><th>Section</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>Breakout Status</strong></td><td>Whether the stock is in a breakout, approaching one, or consolidating</td></tr>
+        <tr><td><strong>Pattern Detected</strong></td><td>Identified chart pattern (symmetrical triangle, ascending triangle, pennant, wedge, etc.) with confidence score</td></tr>
+        <tr><td><strong>Trade Plan ($25K Account)</strong></td><td>Calculated entry, stop loss, price target, position size, risk/reward ratio, and setup grade</td></tr>
+        <tr><td><strong>Technical Indicators</strong></td><td>RSI, MACD, EMA/SMA, ATR, Bollinger Bands, and volume analysis</td></tr>
+        <tr><td><strong>Financials</strong></td><td>Key fundamentals — P/E, margins, debt, cash flow, and analyst consensus</td></tr>
+        <tr><td><strong>AI Multi-Model Validation</strong></td><td>"Validate with AI" button — runs 3-model trade setup vetting</td></tr>
+        <tr><td><strong>12-Month Investment Prediction</strong></td><td>"Run 12-Month Prediction" button — runs 3-model investment analysis</td></tr>
+    </tbody>
+</table>
+
+<h2>Chart Toolbar</h2>
+
+<p>The interactive chart includes overlay toggles:</p>
+<ul>
+    <li><strong>Moving Averages:</strong> 9 EMA, 20 SMA, 50 SMA, 100 SMA, 200 SMA</li>
+    <li><strong>Volume:</strong> Toggle volume bars on/off</li>
+    <li><strong>Pattern Overlays:</strong> Trendlines, swing highs/lows, breakout levels, and price targets are drawn automatically when a pattern is detected</li>
+</ul>
+
+<hr>
+
+<h2>Validate with AI</h2>
+
+<p>Runs three specialized LLMs <strong>in parallel</strong> via OpenRouter to rigorously vet the current trade setup. Each model focuses on a different angle, and their outputs are synthesized through risk gates into a final verdict.</p>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">Requirement</div>
+    <p>An OpenRouter API key must be configured (via <code>.env</code> or Admin &rarr; System Config). The "Validate with AI" button only appears after a successful analysis.</p>
+</div>
+
+<h3>Architecture</h3>
+
+<pre><code>Analysis Data
+    │
+    ├──────────────────┬──────────────────┐
+    ▼                  ▼                  ▼
+┌──────────┐   ┌──────────┐   ┌──────────────┐
+│ Model 1  │   │ Model 2  │   │   Model 3    │
+│ Research │   │ Pattern  │   │  Prediction  │
+│ & Fundies│   │ Validation│  │  & Risk      │
+└────┬─────┘   └────┬─────┘   └──────┬───────┘
+     │              │                 │
+     └──────────────┼─────────────────┘
+                    ▼
+            Risk Gates (auto-AVOID)
+                    │
+                    ▼
+             Final Verdict
+        STRONG BUY / BUY / NEUTRAL / WAIT / AVOID
+                    │
+                    ▼
+          Supervisor (optional 4th LLM)
+            Can veto to AVOID</code></pre>
+
+<h3>Model 1: Research &amp; Fundamentals</h3>
+
+<p>Focuses on <strong>why the trade could fail</strong>. Analyzes company fundamentals, sector context, catalysts, and red flags with a risk-first approach.</p>
+
+<p><strong>Default model:</strong> <code>anthropic/claude-sonnet-4-6</code> (or <code>google/gemini-2.5-flash</code> in fast mode)</p>
+
+<details>
+    <summary><strong>View Full Prompt</strong></summary>
+<pre><code>System: "You are a risk-first stock analyst. Capital preservation
+is #1. Respond with ONLY valid JSON. No markdown, no code fences."
+
+User: "Analyze {ticker} setup. Find reasons this trade could FAIL.
+Never risk >5% account on any position.
+
+{data_summary}
+
+Respond with ONLY this JSON (replace values):
+{
+  "verdict": "BULLISH",
+  "confidence": 75,
+  "catalysts_bullish": ["catalyst1"],
+  "catalysts_bearish": ["risk1"],
+  "red_flags": ["flag1"],
+  "earnings_risk": "assessment",
+  "key_risk": "biggest single risk",
+  "summary": "1-2 sentences, risk-first"
+}"</code></pre>
+</details>
+
+<p><strong>Output fields:</strong></p>
+<ul>
+    <li><code>verdict</code> — BULLISH, BEARISH, or NEUTRAL</li>
+    <li><code>confidence</code> — 0–100 score</li>
+    <li><code>catalysts_bullish</code> / <code>catalysts_bearish</code> — Upside drivers and downside risks</li>
+    <li><code>red_flags</code> — Critical concerns (3+ flags triggers a risk gate)</li>
+    <li><code>earnings_risk</code> — Proximity to earnings and impact assessment</li>
+    <li><code>key_risk</code> — Single biggest risk to the trade</li>
+</ul>
+
+<h3>Model 2: Pattern Validation</h3>
+
+<p>Validates or rejects the detected chart pattern. Specifically trained to catch <strong>false breakouts</strong>, which are the primary account killer for breakout traders.</p>
+
+<p><strong>Default model:</strong> <code>google/gemini-2.5-pro-preview</code> (always uses Pro for pattern accuracy)</p>
+
+<details>
+    <summary><strong>View Full Prompt</strong></summary>
+<pre><code>System: "You are a technical analyst. False breakouts destroy
+accounts. Respond with ONLY valid JSON. No markdown, no code fences."
+
+User: "Validate or reject this pattern for {ticker}. Be ruthless
+— false breakouts destroy accounts.
+
+{data_summary}
+
+Respond with ONLY this JSON (replace values):
+{
+  "pattern_valid": true,
+  "pattern_confidence": 75,
+  "detected_pattern": "Symmetrical Triangle",
+  "breakout_probability": 70,
+  "false_breakout_risk": "MEDIUM",
+  "false_breakout_reasons": ["reason1"],
+  "support_resistance_key_levels": ["$100", "$95"],
+  "optimal_entry": "price and condition",
+  "invalidation_level": "$X",
+  "summary": "1-2 sentences"
+}"</code></pre>
+</details>
+
+<p><strong>Output fields:</strong></p>
+<ul>
+    <li><code>pattern_valid</code> — Whether the detected pattern is legitimate</li>
+    <li><code>pattern_confidence</code> — 0–100 score (penalized by -30 if invalid)</li>
+    <li><code>breakout_probability</code> — Likelihood of successful breakout</li>
+    <li><code>false_breakout_risk</code> — LOW / MEDIUM / HIGH (HIGH triggers risk gate)</li>
+    <li><code>support_resistance_key_levels</code> — Key price levels to watch</li>
+    <li><code>optimal_entry</code> — Recommended entry price and conditions</li>
+    <li><code>invalidation_level</code> — Price where the pattern breaks down</li>
+</ul>
+
+<h3>Model 3: Prediction &amp; Risk</h3>
+
+<p>Quantitative risk/reward analysis for a $25K account. Checks pressure points like options flow, earnings proximity, Fed meetings, and liquidity concerns.</p>
+
+<p><strong>Default model:</strong> <code>deepseek/deepseek-chat-v3-0324</code></p>
+
+<details>
+    <summary><strong>View Full Prompt</strong></summary>
+<pre><code>System: "You are a quantitative risk strategist. Cut losses at
+stop-loss, no exceptions, no averaging down. Respond with ONLY
+valid JSON. No markdown, no code fences."
+
+User: "$25K account. Analyze risk/reward for {ticker}. Don't marry
+the trade.
+
+{data_summary}
+
+PRESSURE POINTS to check: Options/gamma/OI, Earnings proximity,
+Ex-div, Fed/FOMC, Sector rotation, Liquidity, Gap risk,
+Volatility regime
+
+Respond with ONLY this JSON (replace values):
+{
+  "trade_verdict": "TAKE",
+  "overall_probability": 70,
+  "price_targets": {
+    "conservative": 100,
+    "moderate": 110,
+    "aggressive": 120
+  },
+  "stop_loss": {
+    "valid": true,
+    "recommended": 90,
+    "reason": "reason"
+  },
+  "risk_score": 40,
+  "pressure_points": [
+    {"factor": "name", "impact": "HIGH", "detail": "explanation"}
+  ],
+  "position_size_ok": true,
+  "scenarios": {
+    "bull_case": "scenario (prob%)",
+    "base_case": "scenario (prob%)",
+    "bear_case": "scenario (prob%)"
+  },
+  "expected_value_per_trade": 150,
+  "summary": "1-2 sentences, risk-first"
+}"</code></pre>
+</details>
+
+<p><strong>Output fields:</strong></p>
+<ul>
+    <li><code>trade_verdict</code> — TAKE, WAIT, or SKIP</li>
+    <li><code>overall_probability</code> — Probability of profitable outcome</li>
+    <li><code>price_targets</code> — Conservative, moderate, and aggressive targets</li>
+    <li><code>stop_loss</code> — Validation and recommended level</li>
+    <li><code>risk_score</code> — 0–100 (75+ triggers risk gate)</li>
+    <li><code>pressure_points</code> — External factors that could impact the trade</li>
+    <li><code>scenarios</code> — Bull, base, and bear case with probabilities</li>
+</ul>
+
+<h3>Risk Gates (Auto-AVOID)</h3>
+
+<p>Before computing the final verdict, the system checks four risk gates. If <strong>2 or more</strong> gates trigger, the verdict is forced to <strong>AVOID</strong> regardless of model scores.</p>
+
+<table>
+    <thead>
+        <tr><th>Risk Gate</th><th>Trigger Condition</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Extreme risk score</td><td>Model 3 risk_score &ge; 75</td></tr>
+        <tr><td>High false breakout risk</td><td>Model 2 false_breakout_risk = "HIGH"</td></tr>
+        <tr><td>Pattern rejected</td><td>Model 2 pattern_valid = false</td></tr>
+        <tr><td>Multiple red flags</td><td>Model 1 red_flags count &ge; 3</td></tr>
+    </tbody>
+</table>
+
+<h3>Final Verdict Scoring</h3>
+
+<table>
+    <thead>
+        <tr><th>Verdict</th><th>Conditions</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>STRONG BUY</strong></td><td>Avg score &ge; 70 AND 2+ models bullish</td></tr>
+        <tr><td><strong>BUY</strong></td><td>Avg score &ge; 55 AND 1+ bullish AND 0 avoid</td></tr>
+        <tr><td><strong>WAIT</strong></td><td>Prediction model says WAIT</td></tr>
+        <tr><td><strong>NEUTRAL</strong></td><td>Mixed signals, no clear direction</td></tr>
+        <tr><td><strong>AVOID</strong></td><td>2+ risk gates OR 2+ models warn OR avg score &lt; 35</td></tr>
+    </tbody>
+</table>
+
+<hr>
+
+<h2>Run 12-Month Prediction</h2>
+
+<p>Runs three specialized LLMs <strong>in parallel</strong> to evaluate a stock as a long-term investment. Unlike "Validate with AI" (which analyzes short-term trade setups), this focuses on <strong>business fundamentals, financial health, and fair valuation</strong> for a 12-month holding period.</p>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">Data Source</div>
+    <p>The prediction uses fundamental data (P/E, margins, cash flow, debt, analyst targets, financial trends) rather than technical chart data. The "Run 12-Month Prediction" button appears after a successful analysis.</p>
+</div>
+
+<h3>Architecture</h3>
+
+<pre><code>Fundamental Data
+    │
+    ├──────────────────┬──────────────────┐
+    ▼                  ▼                  ▼
+┌──────────┐   ┌──────────┐   ┌──────────────┐
+│ Model 1  │   │ Model 2  │   │   Model 3    │
+│ Business │   │ Financial│   │  Valuation   │
+│ Viability│   │  Health  │   │  & Price     │
+└────┬─────┘   └────┬─────┘   └──────┬───────┘
+     │              │                 │
+     └──────────────┼─────────────────┘
+                    ▼
+            Risk Gates (auto-PASS)
+                    │
+                    ▼
+             Final Verdict
+           INVEST / HOLD / PASS
+                    │
+                    ▼
+          Supervisor (optional 4th LLM)
+            Can veto to PASS</code></pre>
+
+<h3>Model 1: Business Viability</h3>
+
+<p>Evaluates competitive moat, sector outlook, growth durability, and catalysts for the next 12 months. Risk-first approach — focuses on survival and downside risk before upside.</p>
+
+<p><strong>Default model:</strong> <code>anthropic/claude-sonnet-4-6</code> (or <code>google/gemini-2.5-flash</code> in fast mode)</p>
+
+<details>
+    <summary><strong>View Full Prompt</strong></summary>
+<pre><code>System: "You are a risk-first investment analyst. Capital
+preservation is #1. No hopium, no emotional language. Respond
+with ONLY valid JSON. No markdown, no code fences."
+
+User: "Evaluate {ticker} BUSINESS VIABILITY for 12-month hold.
+Protect capital. Focus on survival and downside risk first,
+then upside.
+
+{fundamentals_summary}
+
+Respond with ONLY this JSON:
+{
+  "verdict": "INVEST",
+  "confidence": 70,
+  "moat_score": 65,
+  "moat_assessment": "1 sentence",
+  "sector_outlook": "1 sentence",
+  "growth_durability": "1 sentence",
+  "competitive_threats": ["threat1"],
+  "catalysts_12m": ["catalyst1"],
+  "bear_thesis": "why this could fail",
+  "bull_thesis": "why this could succeed",
+  "revenue_trajectory": "growing/flat/declining",
+  "summary": "1-2 sentences, risk-first"
+}"</code></pre>
+</details>
+
+<p><strong>Output fields:</strong></p>
+<ul>
+    <li><code>verdict</code> — INVEST, HOLD, or PASS</li>
+    <li><code>moat_score</code> — 0–100 competitive advantage score</li>
+    <li><code>moat_assessment</code> — Strength of competitive position</li>
+    <li><code>sector_outlook</code> — Industry tailwinds or headwinds</li>
+    <li><code>growth_durability</code> — Whether current growth is sustainable</li>
+    <li><code>competitive_threats</code> — Key competitors or disruptors</li>
+    <li><code>catalysts_12m</code> — Upcoming events that could move the stock</li>
+    <li><code>bear_thesis</code> / <code>bull_thesis</code> — Both sides of the argument</li>
+</ul>
+
+<h3>Model 2: Financial Health</h3>
+
+<p>Forensic financial analysis focused on <strong>survival probability</strong>. Evaluates cash burn, debt servicing, dilution risk, and bankruptcy risk.</p>
+
+<p><strong>Default model:</strong> <code>google/gemini-2.5-pro-preview</code> (or <code>google/gemini-2.5-flash</code> in fast mode)</p>
+
+<details>
+    <summary><strong>View Full Prompt</strong></summary>
+<pre><code>System: "You are a forensic financial analyst. Focus on survival
+probability and dilution risk. No emotional language. Respond
+with ONLY valid JSON. No markdown, no code fences."
+
+User: "Evaluate {ticker} FINANCIAL HEALTH for 12-month hold.
+Is this company financially safe? Focus on: cash burn, debt
+servicing, dilution risk, bankruptcy risk.
+
+{fundamentals_summary}
+
+IMPORTANT: Be realistic about survival probability. Most
+established profitable companies have >90% survival probability.
+Only assign <75% for companies actively burning cash with <12
+months runway, facing imminent debt defaults, or in active
+restructuring.
+
+Respond with ONLY this JSON:
+{
+  "verdict": "INVEST",
+  "confidence": 70,
+  "survival_probability": 85,
+  "financial_grade": "A",
+  "cash_position": "strong/adequate/weak/critical",
+  "burn_assessment": "1 sentence if burning",
+  "debt_risk": "LOW/MEDIUM/HIGH",
+  "fcf_trajectory": "improving/stable/declining",
+  "dilution_risk": "LOW/MEDIUM/HIGH",
+  "revenue_quality": "1 sentence",
+  "red_flags": ["flag1"],
+  "green_flags": ["flag1"],
+  "summary": "1-2 sentences, risk-first"
+}"</code></pre>
+</details>
+
+<p><strong>Output fields:</strong></p>
+<ul>
+    <li><code>survival_probability</code> — 0–100% chance the company survives 12 months (&lt;75% triggers risk gate)</li>
+    <li><code>financial_grade</code> — Letter grade (A through F)</li>
+    <li><code>cash_position</code> — strong / adequate / weak / critical</li>
+    <li><code>burn_assessment</code> — Cash burn rate if applicable</li>
+    <li><code>debt_risk</code> / <code>dilution_risk</code> — LOW / MEDIUM / HIGH</li>
+    <li><code>fcf_trajectory</code> — Free cash flow direction</li>
+    <li><code>red_flags</code> / <code>green_flags</code> — Key financial concerns and strengths</li>
+</ul>
+
+<h3>Model 3: Valuation &amp; Price Target</h3>
+
+<p>Calculates fair value and 12-month price targets using DCF-lite analysis, peer comparison, and margin of safety assessment.</p>
+
+<p><strong>Default model:</strong> <code>deepseek/deepseek-chat-v3-0324</code></p>
+
+<details>
+    <summary><strong>View Full Prompt</strong></summary>
+<pre><code>System: "You are a quantitative valuation analyst. No hopium.
+Respond with ONLY valid JSON. No markdown, no code fences."
+
+User: "Calculate FAIR VALUE and 12-MONTH PRICE TARGETS for
+{ticker}. Focus on margin of safety and downside risk.
+
+{fundamentals_summary}
+
+Respond with ONLY this JSON:
+{
+  "verdict": "INVEST",
+  "confidence": 70,
+  "fair_value": 0.00,
+  "current_vs_fair": "undervalued/fairly valued/overvalued",
+  "margin_of_safety_pct": 15,
+  "price_targets": {
+    "bear": 0.00, "bear_probability": 20,
+    "base": 0.00, "base_probability": 55,
+    "bull": 0.00, "bull_probability": 25
+  },
+  "upside_pct": 25,
+  "downside_pct": 15,
+  "peer_comparison": "1 sentence",
+  "valuation_assessment": "1 sentence",
+  "dcf_notes": "key assumptions",
+  "entry_attractiveness": "attractive/fair/wait",
+  "catalysts_for_rerating": ["catalyst1"],
+  "summary": "1-2 sentences, risk-first"
+}"</code></pre>
+</details>
+
+<p><strong>Output fields:</strong></p>
+<ul>
+    <li><code>fair_value</code> — Estimated intrinsic value per share</li>
+    <li><code>current_vs_fair</code> — undervalued / fairly valued / overvalued</li>
+    <li><code>margin_of_safety_pct</code> — How much discount from fair value</li>
+    <li><code>price_targets</code> — Bear, base, and bull targets with probability weights</li>
+    <li><code>upside_pct</code> / <code>downside_pct</code> — Expected return range</li>
+    <li><code>peer_comparison</code> — How valuation compares to peers</li>
+    <li><code>entry_attractiveness</code> — attractive / fair / wait</li>
+    <li><code>catalysts_for_rerating</code> — What could change the market's valuation</li>
+</ul>
+
+<h3>Risk Gates (Auto-PASS)</h3>
+
+<p>Critical financial risks that force the verdict to <strong>PASS</strong>:</p>
+
+<table>
+    <thead>
+        <tr><th>Risk Gate</th><th>Trigger Condition</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Low survival probability</td><td>Model 2 survival_probability &lt; 75%</td></tr>
+        <tr><td>High dilution risk</td><td>Model 2 dilution_risk = "HIGH"</td></tr>
+    </tbody>
+</table>
+
+<p>Either gate alone forces a PASS verdict.</p>
+
+<h3>Final Verdict Scoring</h3>
+
+<table>
+    <thead>
+        <tr><th>Verdict</th><th>Conditions</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>INVEST</strong></td><td>2+ models say INVEST AND avg score &ge; 60</td></tr>
+        <tr><td><strong>HOLD</strong></td><td>1+ INVEST AND avg score &ge; 50, or mixed signals</td></tr>
+        <tr><td><strong>PASS</strong></td><td>Risk gate triggered OR 2+ models say PASS OR avg score &lt; 35</td></tr>
+    </tbody>
+</table>
+
+<hr>
+
+<h2>Supervisor Gate (Optional)</h2>
+
+<p>When <code>LLM_SUPERVISOR</code> is configured, a 4th LLM acts as a senior supervisor that reviews the consensus from the three primary models. It can <strong>veto</strong> the verdict if it finds critical issues the other models missed.</p>
+
+<ul>
+    <li>Only runs if the verdict is NOT already AVOID (setup) or PASS (prediction)</li>
+    <li>Override changes the verdict to AVOID or PASS and adds reasoning to risk flags</li>
+    <li>On error, gracefully degrades (no override applied)</li>
+</ul>
+
+<h2>Fast Mode</h2>
+
+<p>When fast mode is enabled (toggle in the UI or <code>LLM_FAST_MODE=1</code>), the research and health models switch to <code>google/gemini-2.5-flash</code> for faster, cheaper results. The pattern model always uses Gemini Pro for accuracy.</p>
+
+<h2>API Endpoints</h2>
+
+<table>
+    <thead>
+        <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>/api/validate</code></td><td>POST</td><td>Run AI validation on current analysis</td></tr>
+        <tr><td><code>/api/predict</code></td><td>POST</td><td>Run 12-month investment prediction</td></tr>
+    </tbody>
+</table>
+
+<p>Both endpoints require authentication and are rate-limited (3 calls per source per time window).</p>
+
+<h2>Configuring Models</h2>
+
+<p>Override default models via environment variables or the Admin &rarr; System Config panel:</p>
+
+<pre><code># In .env
+LLM_RESEARCH=anthropic/claude-sonnet-4-6
+LLM_RESEARCH_FAST=google/gemini-2.5-flash
+LLM_PATTERN=google/gemini-2.5-pro-preview
+LLM_PREDICTION=deepseek/deepseek-chat-v3-0324
+LLM_SUPERVISOR=                                  # empty = disabled
+LLM_MAX_TOKENS=2048
+LLM_TEMPERATURE=0.2</code></pre>
+
+<p>Admins can change models at runtime via the <strong>Admin</strong> tab without restarting the application.</p>
+{% endblock %}

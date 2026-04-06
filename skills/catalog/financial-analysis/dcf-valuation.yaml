@@ -1,0 +1,66 @@
+id: dcf-valuation
+name: DCF Valuation Model
+domain: Financial Analysis
+description: >
+  Discounted Cash Flow valuation model with WACC estimation, 5-year FCF projections,
+  terminal value calculation, and sensitivity analysis. Determines fair value
+  and upside/downside potential.
+icon: "calculator"
+tier_required: pro
+estimated_minutes: 4
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+  - name: growth_assumption
+    type: select
+    label: Growth Assumption
+    required: false
+    default: moderate
+    options:
+      - label: Conservative
+        value: conservative
+      - label: Moderate
+        value: moderate
+      - label: Aggressive
+        value: aggressive
+output_types:
+  - json
+  - docx
+  - xlsx
+phases:
+  - name: Data Collection
+    description: Gathering financial statements
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_income_statements
+        description: Fetch income statements
+      - type: fetch_balance_sheet
+        description: Fetch balance sheet
+      - type: fetch_cash_flow
+        description: Fetch cash flow statements
+      - type: fetch_prices
+        description: Fetch price data
+        config:
+          period: "2y"
+  - name: Ratio Computation
+    description: Computing financial ratios
+    actions:
+      - type: compute_ratios
+        description: Calculate financial ratios
+  - name: DCF Modeling
+    description: AI building DCF model
+    actions:
+      - type: llm_dcf
+        description: LLM builds DCF valuation model
+  - name: Quality Review
+    description: Reviewing valuation quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

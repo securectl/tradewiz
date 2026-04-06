@@ -1,0 +1,61 @@
+id: deal-screening
+name: Deal Screening
+domain: Private Equity
+description: >
+  Screen an inbound deal opportunity (CIM, teaser, or public company). Evaluates business
+  quality, market position, financial profile, key risks, preliminary valuation range,
+  and provides a GO / PASS / DILIGENCE recommendation with reasoning.
+icon: "filter"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker / Company Name
+    required: true
+    placeholder: "e.g. DDOG or company name"
+  - name: deal_info
+    type: textarea
+    label: Deal Info (optional)
+    required: false
+    placeholder: "Paste CIM summary, teaser text, or deal terms..."
+  - name: criteria
+    type: textarea
+    label: Investment Criteria (optional)
+    required: false
+    placeholder: "e.g. $50-200M revenue, 20%+ growth, B2B SaaS, $100-500M EV"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering company data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_income_statements
+        description: Fetch income statements
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "1y"
+      - type: fetch_peers
+        description: Fetch peer companies
+  - name: Analysis
+    description: Computing financial metrics
+    actions:
+      - type: compute_ratios
+        description: Calculate financial ratios
+  - name: Deal Assessment
+    description: AI evaluating deal attractiveness
+    actions:
+      - type: llm_deal_screening
+        description: Screen deal opportunity
+  - name: Quality Review
+    description: Reviewing assessment quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

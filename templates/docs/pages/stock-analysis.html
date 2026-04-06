@@ -1,0 +1,133 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Stock Analysis</h1>
+<p class="lead">Technical indicators, breakout pattern detection, and AI-powered analysis.</p>
+
+<h2>How It Works</h2>
+
+<p>The analysis engine fetches price data for a given ticker, computes technical indicators, detects breakout patterns, and generates a signal with confidence scoring. If AI is configured, it provides narrative analysis with support/resistance levels.</p>
+
+<pre><code>Ticker Input
+    │
+    ▼
+Fetch Price Data (1 month, 1h bars)
+    │
+    ▼
+Compute Technical Indicators
+    │
+    ▼
+Detect Breakout Patterns
+    │
+    ▼
+Generate Signal + Confidence
+    │
+    ▼
+AI Analysis (if OpenRouter configured)
+    │
+    ▼
+Display Results</code></pre>
+
+<h2>Technical Indicators</h2>
+
+<p>The following indicators are computed for every analysis:</p>
+
+<h3>Moving Averages</h3>
+<table>
+    <thead>
+        <tr><th>Indicator</th><th>Period</th><th>Type</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>SMA 8</td><td>8 bars</td><td>Simple</td><td>Short-term trend</td></tr>
+        <tr><td>EMA 9</td><td>9 bars</td><td>Exponential</td><td>Short-term momentum</td></tr>
+        <tr><td>EMA 20</td><td>20 bars</td><td>Exponential</td><td>Medium-term trend / BB midline</td></tr>
+        <tr><td>SMA 20</td><td>20 bars</td><td>Simple</td><td>Bollinger Band base</td></tr>
+        <tr><td>SMA 50</td><td>50 bars</td><td>Simple</td><td>Intermediate support/resistance</td></tr>
+        <tr><td>SMA 200</td><td>200 bars</td><td>Simple</td><td>Long-term trend direction</td></tr>
+    </tbody>
+</table>
+
+<h3>RSI (Relative Strength Index)</h3>
+<p>14-period RSI measures momentum on a 0–100 scale.</p>
+<ul>
+    <li><strong>Below 30</strong> — Oversold (potential buy signal)</li>
+    <li><strong>30–70</strong> — Neutral range</li>
+    <li><strong>Above 70</strong> — Overbought (potential sell signal)</li>
+</ul>
+
+<h3>MACD</h3>
+<p>MACD (12, 26, 9) detects momentum shifts through crossovers:</p>
+<ul>
+    <li><strong>Bullish cross</strong> — MACD line crosses above signal line</li>
+    <li><strong>Bearish cross</strong> — MACD line crosses below signal line</li>
+    <li><strong>Histogram strength</strong> — Larger histogram = stronger momentum</li>
+</ul>
+
+<h3>ATR (Average True Range)</h3>
+<p>14-period ATR measures volatility. Used for stop-loss/take-profit placement and filtering out ranging markets (ATR &lt; 0.3% of price = skip).</p>
+
+<h3>Bollinger Bands (20, 2)</h3>
+<p>Measures price position relative to statistical range:</p>
+<ul>
+    <li><strong>BB Position 0%</strong> — Price at lower band (oversold)</li>
+    <li><strong>BB Position 100%</strong> — Price at upper band (overbought)</li>
+    <li><strong>BB Width</strong> — Narrow = potential breakout, Wide = high volatility</li>
+</ul>
+
+<h3>Volume</h3>
+<p>10-period volume moving average with relative volume ratio. A surge (&gt;1.5x average) indicates strong participation.</p>
+
+<h2>Breakout Pattern Detection</h2>
+
+<p>The Qullamaggie breakout scanner looks for stocks that match the breakout criteria of Mark Minervini / Kristjan Qullamaggie style setups:</p>
+
+<ul>
+    <li>Price above SMA 50 and SMA 200 (confirmed uptrend)</li>
+    <li>Tight consolidation (low ATR relative to price)</li>
+    <li>Volume contraction then expansion</li>
+    <li>Price breaking above a consolidation range</li>
+</ul>
+
+<h2>AI-Powered Analysis</h2>
+
+<p>When an OpenRouter API key is configured, the analysis includes AI-generated narrative covering:</p>
+
+<ul>
+    <li>Overall market context and trend assessment</li>
+    <li>Key support and resistance levels</li>
+    <li>Pattern interpretation and confidence</li>
+    <li>Risk factors and trade recommendations</li>
+</ul>
+
+<p>The AI uses the <code>LLM_RESEARCH</code> model (default: Claude Sonnet) for deep analysis. See <a href="/docs/ai-validation">AI Validation</a> for the multi-model consensus system.</p>
+
+<h2>Reading Results</h2>
+
+<h3>Signal Types</h3>
+<table>
+    <thead>
+        <tr><th>Signal</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>BULLISH</strong></td><td>Technical indicators favor upside</td></tr>
+        <tr><td><strong>BEARISH</strong></td><td>Technical indicators favor downside</td></tr>
+        <tr><td><strong>NEUTRAL</strong></td><td>No clear directional bias</td></tr>
+    </tbody>
+</table>
+
+<h3>Confidence Grades</h3>
+<table>
+    <thead>
+        <tr><th>Grade</th><th>Confidence</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>A</strong></td><td>80–100%</td><td>Strong signal with multiple confirming indicators</td></tr>
+        <tr><td><strong>B</strong></td><td>60–79%</td><td>Good signal with some confirmation</td></tr>
+        <tr><td><strong>C</strong></td><td>40–59%</td><td>Moderate signal, mixed indicators</td></tr>
+        <tr><td><strong>D</strong></td><td>0–39%</td><td>Weak signal, proceed with caution</td></tr>
+    </tbody>
+</table>
+
+<h2>Crypto vs. Stock Analysis</h2>
+
+<p>The analyzer supports both stocks and crypto tickers. The engine detects the asset type automatically and fetches appropriate data sources and fundamentals for each.</p>
+{% endblock %}

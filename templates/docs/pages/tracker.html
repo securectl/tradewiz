@@ -1,0 +1,114 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Trade Tracker</h1>
+<p class="lead">Journal your trades, set weekly goals, and track P&amp;L across your portfolio.</p>
+
+<h2>Overview</h2>
+
+<p>The Trade Tracker is a personal trading journal that helps you log trades, track performance, and set profit goals. It automatically calculates P&amp;L when you close positions and rolls results into weekly/monthly summaries.</p>
+
+<h2>Journal Entries</h2>
+
+<h3>Creating an Entry</h3>
+<ol>
+    <li>Go to the <strong>Tracker</strong> tab</li>
+    <li>Enter the ticker symbol, action (BUY or SELL), quantity, and price</li>
+    <li>Add optional notes for your reasoning</li>
+    <li>Click <strong>Add Entry</strong></li>
+</ol>
+
+<h3>Automatic P&amp;L Calculation</h3>
+<p>When you add a <strong>SELL</strong> entry for a ticker you previously bought, the system automatically:</p>
+<ul>
+    <li>Finds the matching BUY entry</li>
+    <li>Calculates the realized P&amp;L</li>
+    <li>Adds the P&amp;L to your weekly goals tracking</li>
+</ul>
+
+<h3>Deleting Entries</h3>
+<p>Deleting a journal entry also reverses any P&amp;L that was recorded from it, keeping your goal tracking accurate.</p>
+
+<h2>Weekly Goals</h2>
+
+<p>Set a weekly profit target to track your trading performance:</p>
+
+<ol>
+    <li>In the Tracker tab, set your <strong>weekly target</strong> amount (default: $50)</li>
+    <li>As you close trades, P&amp;L is automatically accumulated toward the weekly goal</li>
+    <li>View your progress as a percentage with visual progress bar</li>
+</ol>
+
+<h3>Goal Tracking Data</h3>
+<table>
+    <thead>
+        <tr><th>Metric</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Weekly P&amp;L</td><td>Sum of all realized P&amp;L this week</td></tr>
+        <tr><td>Monthly P&amp;L</td><td>Sum of all realized P&amp;L this month</td></tr>
+        <tr><td>Weekly Target</td><td>Your configured weekly goal</td></tr>
+        <tr><td>Progress %</td><td>Current P&amp;L vs. weekly target</td></tr>
+        <tr><td>Account Balance</td><td>Manually tracked account balance</td></tr>
+    </tbody>
+</table>
+
+<h2>Account Balance</h2>
+
+<p>You can manually update your account balance in the Tracker. This is separate from bot trading balances — it's for tracking your overall portfolio value.</p>
+
+<h2>API Endpoints</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/journal</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List journal entries, optionally filtered by ticker. Paginated.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/journal</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Add a journal entry. Auto-calculates P&amp;L for SELL actions.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method delete">DELETE</span>
+        <span class="docs-endpoint-path">/api/journal/&lt;id&gt;</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Delete a journal entry and reverse P&amp;L if applicable.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/goals</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get weekly/monthly P&amp;L goals, balances, and progress.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/goals</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update weekly target amount.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/goals/balance</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update account balance.</div>
+</div>
+{% endblock %}

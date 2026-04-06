@@ -1,0 +1,63 @@
+id: earnings-analysis
+name: Earnings Analysis
+domain: Equity Research
+description: >
+  Institutional-quality quarterly earnings update report with revenue & EPS beat/miss analysis,
+  geographic/segment breakdown, profitability analysis, updated investment thesis, peer valuation,
+  and forward estimates. Matches sell-side equity research format.
+icon: "chart-line"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+output_types:
+  - json
+  - docx
+  - xlsx
+phases:
+  - name: Data Collection
+    description: Gathering financial data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_income_statements
+        description: Fetch annual income statements
+      - type: fetch_income_statements
+        description: Fetch quarterly income statements
+        config:
+          quarterly: true
+      - type: fetch_balance_sheet
+        description: Fetch balance sheet
+      - type: fetch_cash_flow
+        description: Fetch cash flow data
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "2y"
+  - name: Analysis
+    description: Computing ratios and trends
+    actions:
+      - type: compute_ratios
+        description: Calculate financial ratios
+  - name: AI Earnings Review
+    description: AI writing earnings report
+    actions:
+      - type: llm_earnings
+        description: LLM deep earnings analysis
+  - name: Chart Generation
+    description: Building report charts
+    actions:
+      - type: generate_charts
+        description: Generate earnings charts
+  - name: Quality Review
+    description: Reviewing report quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

@@ -1,0 +1,128 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>AI Validation</h1>
+<p class="lead">Multi-model consensus system using Claude, Gemini, and DeepSeek for trade signal validation.</p>
+
+<h2>Overview</h2>
+
+<p>AI Validation uses multiple LLM models to independently assess trade signals and reach a consensus. This reduces false signals by requiring agreement from diverse AI perspectives.</p>
+
+<h2>Validation Architecture</h2>
+
+<pre><code>Trade Signal (from analysis or bot)
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│          Validation Pipeline             │
+│                                          │
+│  ┌──────────────┐                       │
+│  │  Gate 1:     │  Fast local check     │
+│  │  Ollama      │  (llama3.1:8b)        │
+│  │  (local)     │                       │
+│  └──────┬───────┘                       │
+│         │                                │
+│  ┌──────▼───────┐  ┌────────────────┐   │
+│  │  Gate 2a:    │  │  Gate 2b:      │   │
+│  │  Sentiment   │  │  Risk          │   │
+│  │  (OpenRouter)│  │  (OpenRouter)  │   │
+│  └──────┬───────┘  └───────┬────────┘   │
+│         │                   │            │
+│         └─────────┬─────────┘            │
+│                   ▼                      │
+│           Majority Vote                  │
+│          (2 of 3 approve)               │
+└─────────────┬───────────────────────────┘
+              │
+              ▼
+    APPROVED or REJECTED</code></pre>
+
+<h2>Validators</h2>
+
+<h3>Gate 1: Ollama (Local)</h3>
+<p>Fast local model for initial screening. Runs on your machine for zero-cost, low-latency validation.</p>
+<ul>
+    <li>RSI direction alignment</li>
+    <li>MACD histogram strength and direction</li>
+    <li>Historical win rate (flags if &lt; 40%)</li>
+    <li>Confluence count (needs 2–3+ indicators aligned)</li>
+    <li>Outputs: <code>approve/reject</code>, <code>confidence</code> (0–1), <code>reasoning</code></li>
+</ul>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">Ollama Setup</div>
+    <p>Install <a href="https://ollama.ai">Ollama</a>, then run <code>ollama pull llama3.1:8b</code>. The validator automatically falls back to OpenRouter-only if Ollama is unavailable.</p>
+</div>
+
+<h3>Gate 2a: Sentiment Validator (OpenRouter)</h3>
+<p>Cloud-based model for momentum and confluence assessment.</p>
+<ul>
+    <li>Momentum direction and strength</li>
+    <li>Multi-indicator confluence assessment</li>
+    <li>Historical performance context</li>
+    <li>Market narrative and sector rotation</li>
+    <li>Uses <code>LLM_BOT_SENTIMENT</code> model (default: Gemini Flash)</li>
+</ul>
+
+<h3>Gate 2b: Risk Validator (OpenRouter)</h3>
+<p>Cloud-based model focused on risk assessment and false signal detection.</p>
+<ul>
+    <li>Risk score (0–100, reject if &gt; 60)</li>
+    <li>False signal probability (0–1, reject if &gt; 0.5)</li>
+    <li>Risk/reward ratio assessment</li>
+    <li>Historical win rate impact</li>
+    <li>Uses <code>LLM_BOT_RISK</code> model (default: DeepSeek)</li>
+</ul>
+
+<h2>Voting Rules</h2>
+
+<table>
+    <thead>
+        <tr><th>Scenario</th><th>Requirement</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>All 3 validators available</td><td><strong>2 of 3</strong> must approve (majority vote)</td></tr>
+        <tr><td>Ollama unavailable</td><td><strong>2 of 2</strong> OpenRouter models must agree</td></tr>
+        <tr><td>One OpenRouter fails</td><td><strong>2 of 2</strong> remaining must agree</td></tr>
+        <tr><td>No validators available</td><td>Auto-approve (paper trading safety net)</td></tr>
+    </tbody>
+</table>
+
+<h2>Confidence Scoring</h2>
+
+<p>Each validator returns a confidence score (0–1). The final confidence is the average of all approving validators. This score is displayed in the trade details and used for logging purposes.</p>
+
+<h2>Performance History</h2>
+
+<p>Validators receive the last 7 days of closed trades as context, including:</p>
+<ul>
+    <li>Total trades and win rate</li>
+    <li>Average and total P&amp;L</li>
+    <li>Win rate and average P&amp;L per strategy</li>
+    <li>Win rate and average P&amp;L per coin/stock</li>
+</ul>
+
+<p>This helps validators make better decisions by considering recent performance patterns.</p>
+
+<h2>Configuring Validators</h2>
+
+<p>You can customize which models are used for validation:</p>
+
+<pre><code># In .env
+LLM_BOT_SENTIMENT=google/gemini-2.5-flash
+LLM_BOT_RISK=deepseek/deepseek-chat-v3-0324
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b</code></pre>
+
+<p>Admins can also change models at runtime via the <strong>Admin</strong> tab without restarting.</p>
+
+<h2>User-Facing Validation</h2>
+
+<p>In addition to bot trade validation, users can manually validate any stock analysis result by clicking <strong>Validate with AI</strong>. This uses the <code>LLM_RESEARCH</code> model for a comprehensive assessment including:</p>
+
+<ul>
+    <li>Setup quality rating</li>
+    <li>Risk/reward analysis</li>
+    <li>Entry, stop-loss, and target recommendations</li>
+    <li>Confidence score and reasoning</li>
+</ul>
+{% endblock %}

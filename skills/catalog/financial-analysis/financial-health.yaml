@@ -1,0 +1,48 @@
+id: financial-health
+name: Financial Health Check
+domain: Financial Analysis
+description: >
+  Comprehensive assessment of a company's financial health including liquidity,
+  solvency, profitability, efficiency, and growth metrics. Identifies red flags
+  and strengths with an overall health score.
+icon: "heartbeat"
+tier_required: free
+estimated_minutes: 2
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+output_types:
+  - json
+  - docx
+  - xlsx
+phases:
+  - name: Data Collection
+    description: Fetching financial data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental financial data
+      - type: fetch_prices
+        description: Fetch recent price data
+        config:
+          period: "1y"
+  - name: Analysis
+    description: Computing financial ratios
+    actions:
+      - type: compute_ratios
+        description: Calculate derived financial ratios
+  - name: AI Assessment
+    description: AI-powered health analysis
+    actions:
+      - type: llm_financial_health
+        description: LLM analyzes financial health
+  - name: Quality Review
+    description: Reviewing report quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

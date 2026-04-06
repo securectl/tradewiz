@@ -1,0 +1,65 @@
+id: model-update
+name: Model Update
+domain: Equity Research
+description: >
+  Update a financial model with the latest quarterly data. Compares actual results vs
+  prior estimates, revises forward projections, updates valuation (P/E, EV/EBITDA, DCF),
+  and highlights estimate changes with revision magnitude and direction.
+icon: "refresh"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Ticker Symbol
+    required: true
+    placeholder: "e.g. AAPL"
+  - name: notes
+    type: textarea
+    label: Update Notes (optional)
+    required: false
+    placeholder: "e.g. Q1 revenue beat by 5%, raised FY guidance, new product launch..."
+output_types:
+  - json
+  - xlsx
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering latest financial data
+    actions:
+      - type: fetch_company_info
+        description: Get company overview
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_income_statements
+        description: Fetch annual income statements
+      - type: fetch_income_statements
+        description: Fetch quarterly income statements
+        config:
+          quarterly: true
+      - type: fetch_balance_sheet
+        description: Fetch balance sheet
+      - type: fetch_cash_flow
+        description: Fetch cash flow data
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "2y"
+      - type: fetch_peers
+        description: Fetch peer valuations
+  - name: Analysis
+    description: Computing ratios and comparisons
+    actions:
+      - type: compute_ratios
+        description: Calculate financial ratios
+  - name: AI Model Update
+    description: AI revising estimates and valuation
+    actions:
+      - type: llm_model_update
+        description: Update model with revised estimates
+  - name: Quality Review
+    description: Reviewing model consistency
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

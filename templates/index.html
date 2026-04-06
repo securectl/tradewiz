@@ -3,8 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Stock Analyst — Breakout Scanner</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <title>TradeWiz — Smart Market Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/core.css">
+    <link rel="stylesheet" href="/static/css/features/analysis/analysis.css">
+    <link rel="stylesheet" href="/static/css/features/screener/screener.css">
+    <link rel="stylesheet" href="/static/css/features/ipo/ipo.css">
+    <link rel="stylesheet" href="/static/css/features/tracker/tracker.css">
+    <link rel="stylesheet" href="/static/css/features/bot_crypto/bot_crypto.css">
+    <link rel="stylesheet" href="/static/css/features/bot_stock/bot_stock.css">
+    <link rel="stylesheet" href="/static/css/features/status/status.css">
+    <link rel="stylesheet" href="/static/css/features/research/research.css">
+    <link rel="stylesheet" href="/static/css/features/user/settings.css">
+    <link rel="stylesheet" href="/static/css/features/admin/admin.css">
+    <link rel="stylesheet" href="/static/css/features/predictions/predictions.css">
+    <link rel="stylesheet" href="/static/css/features/congress/congress.css">
+    <link rel="stylesheet" href="/static/css/mobile.css">
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -12,8 +28,8 @@
 <!-- Header -->
 <div class="header">
     <div class="logo">
-        AI Stock Analyst
-        <span>Breakout Pattern Scanner</span>
+        <span class="logo-flash">Trade</span><span class="logo-flash logo-wiz">Wiz</span>
+        <span>Smart Market Intelligence</span>
     </div>
     <form class="search-bar" id="search-form">
         <input type="text" id="ticker-input" placeholder="Enter ticker..." autocomplete="off" maxlength="10">
@@ -41,8 +57,16 @@
             <input type="checkbox" id="fast-mode-toggle">
             <span class="fast-mode-label">Fast Mode</span>
         </label>
+        <button class="btn-guide" id="btn-guide" onclick="showGuide()" title="User Guide">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            Guide
+        </button>
         <button class="btn-history" id="btn-history">History</button>
-        <button class="btn-status-header" id="btn-status-header" onclick="switchTab('status')">Status</button>
+        <button class="btn-status-header" id="btn-status-header" data-role="admin" onclick="switchTab('status')" style="display:none;">Status</button>
         <button class="btn-settings-header" id="btn-settings" onclick="openSettings()" title="Settings">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -50,6 +74,13 @@
             </svg>
         </button>
         <div class="user-profile" id="user-profile" style="display:none;">
+            <span class="tier-badge" id="tier-badge" style="font-size:10px;padding:2px 6px;border-radius:4px;background:#2a2e39;color:#787b86;margin-right:4px;"></span>
+            <div class="usage-gauge" id="usage-gauge" onclick="showPricingModal()" title="LLM calls used / limit (24h rolling)">
+                <div class="usage-gauge-bar">
+                    <div class="usage-gauge-fill" id="usage-gauge-fill"></div>
+                </div>
+                <span class="usage-gauge-label" id="usage-badge"></span>
+            </div>
             <img class="user-avatar" id="user-avatar" src="" alt="">
             <span class="user-name" id="user-name"></span>
             <button class="btn-logout" id="btn-logout" onclick="location.href='/auth/logout'" title="Sign out">
@@ -63,12 +94,54 @@
     </div>
 </div>
 
+<!-- Market Pulse Strip -->
+<div class="market-pulse-strip" id="market-pulse-strip">
+    <div class="pulse-tile" id="pulse-spy">
+        <span class="pulse-label">SPY</span>
+        <span class="pulse-value" id="pulse-spy-price">—</span>
+        <span class="pulse-change" id="pulse-spy-change"></span>
+        <span class="pulse-sub" id="pulse-spy-range"></span>
+    </div>
+    <div class="pulse-tile" id="pulse-vix">
+        <span class="pulse-label">VIX</span>
+        <span class="pulse-value" id="pulse-vix-value">—</span>
+        <span class="pulse-change" id="pulse-vix-change"></span>
+        <span class="pulse-sub" id="pulse-vix-sub"></span>
+    </div>
+    <div class="pulse-tile" id="pulse-fg">
+        <span class="pulse-label">Fear & Greed</span>
+        <span class="pulse-value" id="pulse-fg-score">—</span>
+        <span class="pulse-sub" id="pulse-fg-rating"></span>
+    </div>
+    <div class="pulse-tile" id="pulse-regime" style="border-left:1px solid var(--border-color);padding-left:12px;">
+        <span class="pulse-label">Market Regime</span>
+        <span class="pulse-value" id="pulse-regime-value" style="font-size:12px;font-weight:700;letter-spacing:0.3px;">—</span>
+        <span class="pulse-sub" id="pulse-regime-sub" style="font-size:9px;"></span>
+    </div>
+    <div class="pulse-tile" id="pulse-poly" style="border-left:1px solid var(--border-color);padding-left:12px;cursor:pointer;" onclick="switchTab('predictions')">
+        <span class="pulse-label">Poly/Kalshi</span>
+        <span class="pulse-value" id="pulse-poly-mood" style="font-size:12px;font-weight:700;">—</span>
+        <span class="pulse-sub" id="pulse-poly-desc" style="font-size:9px;"></span>
+    </div>
+    <div class="pulse-tile" id="pulse-trump" style="border-left:1px solid var(--border-color);padding-left:12px;cursor:pointer;" onclick="if(currentUser && (currentUser.tier==='pro'||currentUser.tier==='admin'||currentUser.is_admin)){switchTab('trump')}else{showPricingModal()}">
+        <span class="pulse-label">Trump Mood</span>
+        <span class="pulse-value" id="pulse-trump-mood" style="font-size:12px;font-weight:700;">—</span>
+        <span class="pulse-sub" id="pulse-trump-pattern" style="font-size:9px;"></span>
+    </div>
+</div>
+
 <!-- Tab Bar -->
 <div class="tab-bar">
     <button class="tab-btn active" data-tab="analyzer" onclick="switchTab('analyzer')">Analyzer</button>
     <button class="tab-btn" data-tab="qullamaggie" onclick="switchTab('qullamaggie')">Breakout Scanner</button>
     <button class="tab-btn" data-tab="tracker" onclick="switchTab('tracker')">Tracker</button>
     <button class="tab-btn" data-tab="screener" onclick="switchTab('screener')">Screener</button>
+    <button class="tab-btn" data-tab="research" onclick="switchTab('research')">Research</button>
+    <button class="tab-btn" data-tab="finskills" onclick="switchTab('finskills')">Fin Skills</button>
+    <button class="tab-btn" data-tab="ipos" onclick="switchTab('ipos')">IPOs</button>
+    <button class="tab-btn" data-tab="predictions" data-role="pro" onclick="switchTab('predictions')" style="display:none;">Markets</button>
+    <button class="tab-btn" data-tab="congress" data-role="pro" onclick="switchTab('congress')" style="display:none;">Congress</button>
+    <button class="tab-btn" data-tab="trump" data-role="pro" onclick="switchTab('trump')" style="display:none;">Trump</button>
     <button class="tab-btn" data-tab="autotrading" data-role="trader" onclick="switchTab('autotrading')" style="display:none;">Crypto Trading</button>
     <button class="tab-btn" data-tab="stocktrading" data-role="trader" onclick="switchTab('stocktrading')" style="display:none;">Stock Trading</button>
     <button class="tab-btn" data-tab="admin" data-role="admin" onclick="switchTab('admin')" style="display:none;">Admin</button>
@@ -175,6 +248,19 @@
                 </div>
             </div>
         </div>
+
+        <!-- Earnings Analysis -->
+        <div class="panel-section" id="section-earnings">
+            <div class="panel-section-title">Earnings Analysis</div>
+            <div id="earnings-box">
+                <button class="btn-earnings" id="btn-earnings" style="display:none;">
+                    Run Earnings Analysis
+                </button>
+                <div id="earnings-not-configured" style="display:none; color:#787b86; font-size:12px;">
+                    AI not configured. Add your OpenRouter API key to .env
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -268,6 +354,14 @@
             <button class="screener-category-btn" data-category="metals_mining" onclick="switchScreenerCategory('metals_mining')">Metals &amp; Mining</button>
             <button class="screener-category-btn" data-category="crypto" onclick="switchScreenerCategory('crypto')">Crypto</button>
             <button class="screener-category-btn" data-category="ai" onclick="switchScreenerCategory('ai')">AI</button>
+            <button class="screener-category-btn" data-category="gainers" onclick="switchScreenerCategory('gainers')">Top Gainers</button>
+            <button class="screener-category-btn" data-category="losers" onclick="switchScreenerCategory('losers')">Top Losers</button>
+        </div>
+        <div class="screener-timeframe-bar" id="screener-timeframe-bar" style="display:none;">
+            <span style="color:#787b86; font-size:12px; margin-right:8px;">Timeframe:</span>
+            <button class="timeframe-btn active" data-timeframe="1d">1 Day</button>
+            <button class="timeframe-btn" data-timeframe="1w">1 Week</button>
+            <button class="timeframe-btn" data-timeframe="3mo">3 Months</button>
         </div>
         <!-- Sector Filter -->
         <div class="screener-sector-filter" id="screener-sector-filter">
@@ -306,6 +400,233 @@
     </div>
 </div>
 
+<!-- Prediction Markets View -->
+<div class="predictions-content" id="predictions-content" style="display:none;padding:20px;">
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <div>
+            <h2 style="font-size:20px;color:var(--text-bright);margin:0 0 2px;font-weight:800;">Prediction Markets</h2>
+            <div style="font-size:11px;color:var(--text-secondary);">Live odds from Polymarket + Kalshi</div>
+        </div>
+        <button onclick="loadPredictionMarkets(true)" class="btn-analyze" style="padding:8px 18px;font-size:12px;">Refresh</button>
+    </div>
+
+    <!-- Sentiment Banner -->
+    <div class="pred-sentiment-banner" id="pred-sentiment-banner">
+        <div class="pred-sentiment-left">
+            <div class="pred-mood-label">Betting Market Mood</div>
+            <div class="pred-mood-value" id="pred-mood">—</div>
+            <div class="pred-mood-desc" id="pred-mood-desc"></div>
+        </div>
+        <div class="pred-signals-row" id="pred-signals"></div>
+    </div>
+
+    <!-- Category Filter (pill tabs) -->
+    <div class="pred-cat-bar" id="pred-categories"></div>
+
+    <!-- Major Movers -->
+    <div id="pred-movers-section" style="margin-bottom:24px;">
+        <div class="pred-section-title">Major Movers <span class="pred-count">24h</span></div>
+        <div class="pred-grid" id="pred-movers"></div>
+    </div>
+
+    <!-- All Markets -->
+    <div id="pred-events-section">
+        <div class="pred-section-title">All Markets</div>
+        <div class="pred-grid" id="pred-events"></div>
+    </div>
+
+    <div id="pred-loading" class="bot-empty" style="display:none;">Loading prediction markets...</div>
+    <div class="pred-page-footer" id="pred-footer"></div>
+</div>
+
+<!-- Congress Trades View -->
+<div class="predictions-content" id="congress-content" style="display:none;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div>
+            <h2 style="font-size:20px;color:var(--text-bright);margin:0 0 2px;font-weight:800;">Politician Holdings & Trades</h2>
+            <div style="font-size:11px;color:var(--text-secondary);">US House & Senate financial disclosures (STOCK Act)</div>
+        </div>
+        <button onclick="loadCongressTrades(true)" class="btn-analyze" style="padding:8px 18px;font-size:12px;">Search</button>
+    </div>
+
+    <!-- Filters -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
+        <select id="cong-chamber" style="padding:7px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;color:var(--text-bright);font-size:12px;">
+            <option value="">All Chambers</option>
+            <option value="house">House</option>
+            <option value="senate">Senate</option>
+        </select>
+        <input type="text" id="cong-name" placeholder="Search by name..." style="padding:7px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;color:var(--text-bright);font-size:12px;width:180px;">
+        <input type="text" id="cong-state" placeholder="State (e.g. CA)" maxlength="2" style="padding:7px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;color:var(--text-bright);font-size:12px;width:70px;text-transform:uppercase;">
+        <input type="text" id="cong-ticker" placeholder="Ticker (e.g. AAPL)" style="padding:7px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;color:var(--text-bright);font-size:12px;width:120px;text-transform:uppercase;">
+        <select id="cong-days" style="padding:7px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;color:var(--text-bright);font-size:12px;">
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90" selected>Last 90 days</option>
+            <option value="180">Last 6 months</option>
+            <option value="365">Last 1 year</option>
+        </select>
+    </div>
+
+    <!-- Stats Bar -->
+    <div id="cong-stats" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;"></div>
+
+    <!-- Top Traders -->
+    <div id="cong-top-traders" style="margin-bottom:16px;"></div>
+
+    <!-- News -->
+    <div id="cong-news" style="margin-bottom:16px;"></div>
+
+    <!-- Senate API notice -->
+    <div id="cong-senate-notice" style="background:rgba(124,93,250,0.06);border:1px solid rgba(124,93,250,0.2);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text-secondary);display:none;">
+        <strong style="color:#7c5dfa;">Senate data:</strong> Senate trade data is temporarily unavailable. Showing news coverage only.
+    </div>
+
+    <!-- Filings Table -->
+    <div id="cong-filings" style="overflow-x:auto;">
+        <div class="bot-empty">Click Search to load congressional trades (House: official PDFs, Senate: QuiverQuant API)</div>
+    </div>
+
+    <div id="cong-footer" style="font-size:9px;color:rgba(255,255,255,0.12);text-align:right;margin-top:16px;"></div>
+</div>
+
+<!-- Trump Indicator -->
+<div class="predictions-content" id="trump-content" style="display:none;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+        <div>
+            <h2 style="font-size:20px;color:var(--text-bright);margin:0 0 2px;font-weight:800;">Trump Market Indicator</h2>
+            <div style="font-size:11px;color:var(--text-secondary);">AI-powered analysis of presidential rhetoric and market impact prediction</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <select id="trump-history-days" onchange="loadTrumpTab()" style="padding:7px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;color:var(--text-bright);font-size:12px;">
+                <option value="7">7 Days</option>
+                <option value="14">14 Days</option>
+                <option value="30" selected>30 Days</option>
+            </select>
+            <button onclick="loadTrumpTab(true)" class="btn-analyze" style="padding:8px 18px;font-size:12px;">Refresh</button>
+        </div>
+    </div>
+
+    <!-- Current Mood + AI Prediction side by side -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:20px;" id="trump-top-grid">
+        <!-- Current Mood Card -->
+        <div id="trump-current-mood" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Current Mood</div>
+            <div style="text-align:center;padding:10px 0;">
+                <div style="font-size:10px;color:var(--text-secondary);">Loading...</div>
+            </div>
+        </div>
+        <!-- AI Prediction Card -->
+        <div id="trump-ai-prediction" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);">AI Prediction</div>
+                <button onclick="loadTrumpPrediction(true)" style="background:none;border:1px solid var(--border-color);border-radius:6px;padding:4px 10px;color:var(--accent-blue);font-size:10px;cursor:pointer;">Generate</button>
+            </div>
+            <div style="text-align:center;padding:10px 0;">
+                <div style="font-size:10px;color:var(--text-secondary);">Click Generate for AI analysis</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mood History Chart -->
+    <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;margin-bottom:20px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Mood Timeline</div>
+        <div id="trump-chart" style="height:200px;position:relative;"></div>
+    </div>
+
+    <!-- Signals + Notable Posts -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;" id="trump-bottom-grid">
+        <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Key Signals Detected</div>
+            <div id="trump-signals" style="font-size:12px;color:var(--text-secondary);">Loading...</div>
+        </div>
+        <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Notable Posts & News</div>
+            <div id="trump-notable" style="font-size:12px;color:var(--text-secondary);">Loading...</div>
+        </div>
+    </div>
+
+    <!-- History Table -->
+    <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;margin-top:20px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Mood History Log</div>
+        <div id="trump-history-table" style="overflow-x:auto;font-size:12px;">Loading...</div>
+    </div>
+</div>
+
+<!-- IPO View -->
+<div class="ipo-content" id="ipo-content" style="display:none;">
+    <div class="ipo-header">
+        <h2>IPOs, Pre-IPO, VC &amp; Startup Opportunities</h2>
+        <p class="ipo-subtitle">High-stake IPOs, pre-IPO vehicles, VC-backed deals, and startup investing &mdash; rated by social sentiment and AI analysis</p>
+        <div class="ipo-header-actions">
+            <button class="btn-ipo-scan" id="btn-ipo-scan" onclick="loadIPOs()">Scan Opportunities</button>
+            <div class="ipo-filter-bar">
+                <button class="ipo-filter-btn active" data-filter="all" onclick="filterIPOs('all')">All</button>
+                <button class="ipo-filter-btn" data-filter="ipo" onclick="filterIPOs('ipo')">IPOs</button>
+                <button class="ipo-filter-btn" data-filter="pre_ipo" onclick="filterIPOs('pre_ipo')">Pre-IPO</button>
+                <button class="ipo-filter-btn" data-filter="vc" onclick="filterIPOs('vc')">VC Deals</button>
+                <button class="ipo-filter-btn" data-filter="startup" onclick="filterIPOs('startup')">Startups</button>
+                <button class="ipo-filter-btn" data-filter="platforms" onclick="filterIPOs('platforms')">Platforms</button>
+                <button class="ipo-filter-btn" data-filter="guide" onclick="filterIPOs('guide')">How to Start</button>
+            </div>
+        </div>
+        <!-- Advanced filters row -->
+        <div class="ipo-adv-filters" id="ipo-adv-filters">
+            <div class="ipo-adv-filter">
+                <label>Sector</label>
+                <select id="ipo-filter-sector" onchange="applyIPOFilters()">
+                    <option value="">All Sectors</option>
+                    <option value="FinTech">FinTech</option>
+                    <option value="AI">AI / ML</option>
+                    <option value="SaaS">SaaS / Cloud</option>
+                    <option value="Cybersecurity">Cybersecurity</option>
+                    <option value="Healthcare">Healthcare / Biotech</option>
+                    <option value="E-Commerce">E-Commerce</option>
+                    <option value="Space">Space / Defense</option>
+                    <option value="Climate">Climate / Clean Energy</option>
+                    <option value="Crypto">Crypto / Web3</option>
+                    <option value="Consumer">Consumer Tech</option>
+                </select>
+            </div>
+            <div class="ipo-adv-filter">
+                <label>Min Rating</label>
+                <select id="ipo-filter-rating" onchange="applyIPOFilters()">
+                    <option value="0">Any</option>
+                    <option value="3">3+ Stars</option>
+                    <option value="4">4+ Stars</option>
+                    <option value="5">5 Stars</option>
+                </select>
+            </div>
+            <div class="ipo-adv-filter">
+                <label>Access Level</label>
+                <select id="ipo-filter-accred" onchange="applyIPOFilters()">
+                    <option value="">Any</option>
+                    <option value="none">Open to All</option>
+                    <option value="accredited">Accredited</option>
+                </select>
+            </div>
+            <div class="ipo-adv-filter">
+                <label>Risk</label>
+                <select id="ipo-filter-risk" onchange="applyIPOFilters()">
+                    <option value="0">Any</option>
+                    <option value="low">Low (1-2)</option>
+                    <option value="med">Medium (3)</option>
+                    <option value="high">High (4-5)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <div class="ipo-results" id="ipo-results">
+        <div style="padding:60px; color:#787b86; text-align:center;">
+            <h3 style="color:#d1d4dc; margin-bottom:12px;">IPO &amp; Investment Scanner</h3>
+            <p>Discover upcoming IPOs, pre-IPO access, VC deals, and startup investments &mdash; ranked by social buzz, expected returns, and AI quality rating.</p>
+            <p style="margin-top:12px; font-size:12px;">Click "Scan Opportunities" to start, or browse <strong>Platforms</strong> and <strong>How to Start</strong> tabs.</p>
+        </div>
+    </div>
+</div>
+
 <!-- Status View -->
 <div class="status-content" id="status-content" style="display:none;">
     <div id="status-inner">
@@ -316,6 +637,64 @@
     </div>
 </div>
 
+<!-- Research View -->
+<div class="research-content" id="research-content" style="display:none;">
+    <!-- Top: Catalog + Launcher side-by-side -->
+    <div class="research-top">
+        <!-- Left: Skill Catalog -->
+        <div class="research-catalog" id="research-catalog">
+            <div class="research-catalog-header">
+                <h3>Skill Catalog</h3>
+                <select id="research-domain-filter" onchange="filterSkillCatalog()">
+                    <option value="">All Domains</option>
+                </select>
+            </div>
+            <div class="research-catalog-list" id="research-catalog-list">
+                <div style="color:#787b86; padding:20px; text-align:center;">Loading skills...</div>
+            </div>
+        </div>
+        <!-- Right: Launch Form -->
+        <div class="research-launcher" id="research-launcher">
+            <div class="research-launcher-placeholder" id="research-launcher-placeholder">
+                <h3>Select a Skill</h3>
+                <p>Choose a research skill from the catalog to get started.</p>
+            </div>
+            <div class="research-launcher-form" id="research-launcher-form" style="display:none;">
+                <div class="research-launcher-header">
+                    <h3 id="research-skill-name"></h3>
+                    <span class="tier-badge" id="research-skill-tier"></span>
+                </div>
+                <p id="research-skill-desc" style="color:#787b86; margin-bottom:16px;"></p>
+                <div id="research-form-fields"></div>
+                <div class="research-launcher-actions">
+                    <button class="btn-analyze" id="btn-launch-skill" onclick="launchSkill()">Launch Analysis</button>
+                    <span id="research-est-time" style="color:#787b86; font-size:12px;"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Bottom: Jobs List (full width) -->
+    <div class="research-jobs" id="research-jobs">
+        <div class="research-jobs-header">
+            <h3>Jobs</h3>
+            <span class="research-jobs-badge" id="research-jobs-badge"></span>
+        </div>
+        <div class="research-jobs-list" id="research-jobs-list">
+            <div style="color:#787b86; padding:20px; text-align:center;">No jobs yet. Launch a skill to get started.</div>
+        </div>
+    </div>
+</div>
+
+<!-- Fin Skills Hub -->
+<div class="finskills-content" id="finskills-content" style="display:none;">
+    <div class="finskills-header">
+        <h2>Financial Skills Hub</h2>
+        <p>Professional-grade financial analysis tools powered by AI</p>
+        <input type="text" id="finskills-search-input" placeholder="Search skills..." oninput="filterFinSkills()">
+    </div>
+    <div class="finskills-domains" id="finskills-domains"></div>
+</div>
+
 <!-- Auto Trading View -->
 <div class="autotrading-content" id="autotrading-content" style="display:none;">
     <!-- Top Bar -->
@@ -324,6 +703,10 @@
             <div class="bot-status-indicator" id="bot-status-indicator">
                 <span class="bot-dot" id="bot-dot"></span>
                 <span id="bot-status-text">Stopped</span>
+            </div>
+            <div class="bot-stat">
+                <span class="bot-stat-label">Sensor</span>
+                <span class="bot-stat-value" id="bot-sensor-status">N/A</span>
             </div>
             <div class="bot-stat">
                 <span class="bot-stat-label">Balance</span>
@@ -357,6 +740,14 @@
                 </div>
                 <div id="bot-trending" class="bot-trending-feed">
                     <div class="bot-empty">Click Refresh to scan market</div>
+                </div>
+            </div>
+
+            <!-- Reporting Dashboard -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Performance Dashboard</div>
+                <div id="bot-report-dashboard">
+                    <div class="bot-empty">Loading dashboard...</div>
                 </div>
             </div>
 
@@ -430,12 +821,34 @@
                 <button class="btn-bot-save-coins" onclick="updateBotCoins()">Save Coins</button>
             </div>
 
+            <!-- Top 10 by Volume -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">
+                    Top 10 by Volume (24h)
+                    <button class="btn-bot-refresh-trending" id="btn-refresh-volume" onclick="loadTopVolume()">Refresh</button>
+                </div>
+                <div id="bot-top-volume" class="bot-top-volume">
+                    <div class="bot-empty">Click Refresh to load volume data</div>
+                </div>
+            </div>
+
             <!-- Risk Settings -->
             <div class="bot-panel">
                 <div class="bot-panel-title">Settings</div>
                 <div class="bot-config-form" id="bot-config-form">
                     <div class="bot-config-row">
-                        <label>Trading Mode</label>
+                        <label>Trade Strategy</label>
+                        <select id="bot-cfg-trade-mode" class="bot-select">
+                            <option value="hybrid">Hybrid (Swing + Scalp)</option>
+                            <option value="swing">Swing Only (Daily, 25% size, 2-14 day holds)</option>
+                            <option value="scalp">Scalp Only (Hourly, 10% size, intraday)</option>
+                        </select>
+                    </div>
+                    <div class="bot-trading-mode-note" id="bot-trade-mode-note" style="font-size:11px;color:var(--text-secondary);padding:4px 0 8px;">
+                        Hybrid: swing trades get priority (25% position, 8% SL, 25% TP). Scalp fills gaps.
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Platform</label>
                         <select id="bot-cfg-trading-mode" class="bot-select">
                             <option value="futures" selected>Futures (Perpetual Swaps)</option>
                             <option value="spot">Spot</option>
@@ -451,6 +864,13 @@
                             <option value="long_only">Long Only (Bullish)</option>
                             <option value="short_only">Short Only (Bearish)</option>
                             <option value="auto">Auto (LLM Decides)</option>
+                        </select>
+                    </div>
+                    <div class="bot-config-row">
+                        <label>Quick Trade Mode</label>
+                        <select id="bot-cfg-quick-trade" class="bot-select">
+                            <option value="0">Off (LLM validates all trades)</option>
+                            <option value="1">On (Bypass LLM for Vol+RSI & Momentum)</option>
                         </select>
                     </div>
                     <div class="bot-config-row">
@@ -563,6 +983,10 @@
                 </span>
             </div>
             <div class="bot-stat">
+                <span class="bot-stat-label">Sensor</span>
+                <span class="bot-stat-value" id="sbot-sensor-status">N/A</span>
+            </div>
+            <div class="bot-stat">
                 <span class="bot-stat-label">Balance</span>
                 <span class="bot-stat-value" id="sbot-balance">$0.00</span>
             </div>
@@ -586,6 +1010,13 @@
     <div class="bot-grid">
         <!-- Left Column -->
         <div class="bot-left">
+            <!-- Performance Dashboard (same narrative design as crypto) -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Performance Dashboard</div>
+                <div id="sbot-report-dashboard">
+                    <div class="bot-empty">Loading dashboard...</div>
+                </div>
+            </div>
             <!-- P&L Chart -->
             <div class="bot-panel">
                 <div class="bot-panel-title">Cumulative P&L (Stocks)</div>
@@ -604,6 +1035,27 @@
                 <div id="sbot-positions" class="bot-positions-list">
                     <div class="bot-empty">No open positions</div>
                 </div>
+            </div>
+            <!-- Manual Test Trade -->
+            <div class="bot-panel">
+                <div class="bot-panel-title">Manual Test Trade</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+                    <input type="text" id="sbot-test-symbol" placeholder="AAPL" value="AAPL" style="width:80px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-bright);font-size:13px;text-transform:uppercase;">
+                    <select id="sbot-test-side" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-bright);font-size:13px;">
+                        <option value="buy">BUY</option>
+                        <option value="sell">SELL</option>
+                    </select>
+                    <input type="number" id="sbot-test-qty" value="1" min="1" max="10" style="width:55px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-bright);font-size:13px;text-align:center;">
+                    <span style="font-size:11px;color:var(--text-secondary);">shares</span>
+                    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
+                        <input type="checkbox" id="sbot-test-extended"> Extended Hours
+                    </label>
+                </div>
+                <div style="display:flex;gap:6px;">
+                    <button onclick="placeStockTestTrade()" class="btn-bot-save-keys" style="flex:1;">Place Test Trade</button>
+                </div>
+                <div id="sbot-test-result" class="bot-key-status" style="margin-top:6px;"></div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-top:6px;">Test with 1-10 shares to verify broker connection end-to-end. Trade is recorded and can be closed from Open Positions.</div>
             </div>
         </div>
 
@@ -645,8 +1097,13 @@
                             <input type="password" id="sbot-cfg-wb-app-secret" placeholder="Enter Webull App Secret" class="bot-input-wide">
                         </div>
                         <div class="bot-config-row">
-                            <label>Account ID</label>
-                            <input type="text" id="sbot-cfg-wb-account-id" placeholder="Enter Webull Account ID" class="bot-input-wide">
+                            <label>Account <span style="color:#636b7e;font-size:0.8em">(save keys first, then fetch)</span></label>
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <select id="sbot-cfg-wb-account-id" class="bot-input-wide" style="flex:1;padding:6px 10px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-bright);font-size:13px;">
+                                    <option value="">-- Fetch accounts after saving keys --</option>
+                                </select>
+                                <button onclick="fetchWebullAccounts()" class="btn-bot-test-keys" style="margin:0;white-space:nowrap;padding:6px 12px;font-size:12px;">Fetch Accounts</button>
+                            </div>
                         </div>
                     </div>
                     <div class="bot-key-actions">
@@ -654,6 +1111,17 @@
                         <button class="btn-bot-test-keys" onclick="testStockConnection()">Test Connection</button>
                     </div>
                     <div id="sbot-key-status" class="bot-key-status"></div>
+                </div>
+            </div>
+
+            <!-- Top Stock Movers -->
+            <div class="bot-panel">
+                <div class="bot-panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    Top Movers
+                    <button class="btn-bot-refresh-trending" id="btn-sbot-refresh-movers" onclick="loadStockTopMovers()">Refresh</button>
+                </div>
+                <div id="sbot-top-movers" class="bot-top-volume">
+                    <div class="bot-empty">Click Refresh to scan movers</div>
                 </div>
             </div>
 
@@ -675,6 +1143,17 @@
             <div class="bot-panel">
                 <div class="bot-panel-title">Settings</div>
                 <div class="bot-config-form" id="sbot-config-form">
+                    <div class="bot-config-row">
+                        <label>Trade Strategy</label>
+                        <select id="sbot-cfg-trade-mode" class="bot-select">
+                            <option value="hybrid">Hybrid (Swing + Scalp)</option>
+                            <option value="swing">Swing Only (Daily, 25% size, 2-14 day holds)</option>
+                            <option value="scalp">Scalp Only (Hourly, 10% size, intraday)</option>
+                        </select>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);padding:4px 0 8px;">
+                        Swing: concentrated positions on daily breakouts + Qullamaggie scan. Scalp: intraday signals.
+                    </div>
                     <div class="bot-config-row">
                         <label>Direction Bias</label>
                         <select id="sbot-cfg-direction-bias" class="bot-select">
@@ -763,10 +1242,15 @@
             <div class="admin-card-title">Invite Users</div>
             <div class="admin-invite-form">
                 <input type="email" id="admin-invite-email" class="settings-input" placeholder="Email address">
-                <select id="admin-invite-role" class="settings-input" style="width:auto;">
-                    <option value="trader">Trader</option>
-                    <option value="user">User</option>
+                <select id="admin-invite-tier" class="settings-input" style="width:auto;" onchange="onInviteTierChange()">
+                    <option value="free">Free</option>
+                    <option value="basic">Basic</option>
+                    <option value="pro">Pro</option>
                 </select>
+                <div id="invite-bot-access-group" class="invite-bot-checkboxes" style="display:none;">
+                    <label class="invite-checkbox-label"><input type="checkbox" id="invite-bot-crypto" value="crypto"> Crypto</label>
+                    <label class="invite-checkbox-label"><input type="checkbox" id="invite-bot-stock" value="stock"> Stock</label>
+                </div>
                 <button class="btn-analyze" onclick="adminInviteUser()" style="padding:7px 16px; font-size:12px;">Invite</button>
             </div>
             <div class="admin-invite-list" id="admin-invite-list"></div>
@@ -778,11 +1262,11 @@
             <table class="bot-trades-table">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Roles</th>
+                        <th>User</th>
+                        <th>Tier</th>
+                        <th>Bot Access</th>
                         <th>Last Login</th>
-                        <th>Action</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody id="admin-users-body">
@@ -800,15 +1284,69 @@
                 <div class="settings-row"><label>Pattern</label><input type="text" id="admin-llm-pattern" class="settings-input"></div>
                 <div class="settings-row"><label>Prediction</label><input type="text" id="admin-llm-prediction" class="settings-input"></div>
                 <div class="settings-row"><label>Screener</label><input type="text" id="admin-llm-screener" class="settings-input"></div>
+                <div class="settings-row"><label>Supervisor</label><input type="text" id="admin-llm-supervisor" class="settings-input" placeholder="Empty = disabled"></div>
                 <div class="settings-row"><label>Bot Sentiment</label><input type="text" id="admin-llm-bot-sentiment" class="settings-input"></div>
                 <div class="settings-row"><label>Bot Risk</label><input type="text" id="admin-llm-bot-risk" class="settings-input"></div>
+                <div style="margin:12px 0 4px;color:var(--text-secondary);font-size:0.85rem;font-weight:600;">Skills Models</div>
+                <div class="settings-row"><label>Skills (All)</label><input type="text" id="admin-llm-skill" class="settings-input"></div>
+                <div class="settings-row"><label>Skills (Earnings)</label><input type="text" id="admin-llm-skill-earnings" class="settings-input"></div>
                 <div class="settings-row"><label>Max Tokens</label><input type="number" id="admin-llm-max-tokens" class="settings-input"></div>
                 <div class="settings-row"><label>Temperature</label><input type="number" id="admin-llm-temperature" class="settings-input" step="0.1"></div>
+                <div class="settings-row" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
+                    <label>Market Sensor</label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:normal;">
+                        <input type="checkbox" id="admin-sensor-enabled"> Enable pre-scan market health check
+                    </label>
+                </div>
                 <div style="margin-top:12px; text-align:right;">
                     <span id="admin-config-status" style="font-size:12px; margin-right:12px;"></span>
                     <button class="btn-analyze" onclick="adminSaveConfig()" style="padding:7px 16px; font-size:12px;">Save Config</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Data Export for Fine-Tuning -->
+        <div class="admin-card">
+            <div class="admin-card-title">Export Data (Fine-Tuning)</div>
+            <p style="font-size:12px; color:var(--text-secondary); margin:0 0 12px;">Export all user data as grouped JSON for analysis and model fine-tuning.</p>
+            <div class="admin-export-grid">
+                <button class="btn-export" onclick="adminExport('all')">
+                    <span class="export-icon">&#9733;</span>
+                    <span class="export-label">All (Training Set)</span>
+                    <span class="export-desc">Trades + outcomes + analyses</span>
+                </button>
+                <button class="btn-export" onclick="adminExport('trades')">
+                    <span class="export-icon">&#8644;</span>
+                    <span class="export-label">Trades</span>
+                    <span class="export-desc">Signals, validation, PnL</span>
+                </button>
+                <button class="btn-export" onclick="adminExport('analyses')">
+                    <span class="export-icon">&#128200;</span>
+                    <span class="export-label">Analyses</span>
+                    <span class="export-desc">AI validation results</span>
+                </button>
+                <button class="btn-export" onclick="adminExport('bot_logs')">
+                    <span class="export-icon">&#9881;</span>
+                    <span class="export-label">Bot Logs</span>
+                    <span class="export-desc">Signal generation details</span>
+                </button>
+                <button class="btn-export" onclick="adminExport('llm_usage')">
+                    <span class="export-icon">&#9889;</span>
+                    <span class="export-label">LLM Usage</span>
+                    <span class="export-desc">Model calls & sources</span>
+                </button>
+                <button class="btn-export" onclick="adminExport('journal')">
+                    <span class="export-icon">&#128221;</span>
+                    <span class="export-label">Journal</span>
+                    <span class="export-desc">User trade notes</span>
+                </button>
+                <button class="btn-export" onclick="adminExport('daily_pnl')">
+                    <span class="export-icon">&#128176;</span>
+                    <span class="export-label">Daily P&L</span>
+                    <span class="export-desc">Win/loss aggregates</span>
+                </button>
+            </div>
+            <div id="admin-export-status" style="font-size:12px; margin-top:8px; color:var(--text-secondary);"></div>
         </div>
     </div>
 </div>
@@ -869,6 +1407,41 @@
             </div>
         </div>
 
+        <!-- API Key Setup Instructions -->
+        <div class="settings-section">
+            <div class="settings-section-title">Setup Instructions</div>
+            <details class="api-instructions">
+                <summary>BloFin (Crypto Trading)</summary>
+                <ol>
+                    <li>Sign up at <a href="https://blofin.com" target="_blank">blofin.com</a></li>
+                    <li>Go to Account &rarr; API Management (<a href="https://blofin.com/account/apis" target="_blank">direct link</a>)</li>
+                    <li>Create API key with "Trade" permission</li>
+                    <li>Copy API Key, Secret, and Passphrase into the fields above</li>
+                    <li>Enable Demo Trading for paper trading</li>
+                </ol>
+            </details>
+            <details class="api-instructions">
+                <summary>Alpaca (Stock Trading)</summary>
+                <ol>
+                    <li>Sign up at <a href="https://alpaca.markets" target="_blank">alpaca.markets</a></li>
+                    <li>Go to Paper Trading &rarr; API Keys (<a href="https://app.alpaca.markets/brokerage/dashboard/overview" target="_blank">dashboard</a>)</li>
+                    <li>Generate new key</li>
+                    <li>Copy API Key and Secret Key into the fields above</li>
+                </ol>
+            </details>
+            <details class="api-instructions">
+                <summary>Webull (Stock Trading)</summary>
+                <ol>
+                    <li>You need a <strong>funded Webull brokerage account</strong></li>
+                    <li>Apply for API access at <a href="https://developer.webull.com" target="_blank">developer.webull.com</a> (1-2 day approval)</li>
+                    <li>After approval, copy your <strong>App Key</strong> from the developer dashboard</li>
+                    <li>Generate an <strong>App Secret</strong> (expires in 1-7 days, regenerate as needed)</li>
+                    <li><strong>Account ID</strong> is auto-detected when you Test Connection — leave it blank</li>
+                </ol>
+                <p style="color:#636b7e;font-size:12px;margin-top:6px;">Note: App Secret expires (max 7 days). Regenerate at developer.webull.com when it stops working.</p>
+            </details>
+        </div>
+
         <!-- LLM Settings (visible to all, read from admin config) -->
         <div class="settings-section">
             <div class="settings-section-title">Preferences</div>
@@ -891,6 +1464,35 @@
     </div>
 </div>
 
-<script src="/static/js/app.js"></script>
+<div class="disclaimer-overlay" id="disclaimer-overlay">
+    <div class="disclaimer-popup">
+        <strong>Disclaimer</strong>
+        <p>This tool is for research and educational purposes only. It is not a financial advisor and should not be your sole basis for buying, selling, or trading any securities or cryptocurrencies. All trading involves risk, including possible loss of principal. Past performance does not guarantee future results. Always do your own research and consult a qualified financial advisor before making investment decisions. Bot trading features use paper/demo accounts by default.</p>
+        <button class="disclaimer-close-btn" onclick="closeDisclaimer()">I Understand</button>
+    </div>
+</div>
+<script>
+function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.display='none';sessionStorage.setItem('disclaimerClosed','1')}
+if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
+</script>
+
+<script src="/static/js/core.js"></script>
+<script src="/static/js/features/analysis/analysis.js"></script>
+<script src="/static/js/features/screener/screener.js"></script>
+<script src="/static/js/features/ipo/ipo.js"></script>
+<script src="/static/js/features/tracker/tracker.js"></script>
+<script src="/static/js/features/bot_crypto/bot_crypto.js"></script>
+<script src="/static/js/features/bot_stock/bot_stock.js"></script>
+<script src="/static/js/features/status/status.js"></script>
+<script src="/static/js/features/research/research.js"></script>
+<script src="/static/js/features/user/settings.js"></script>
+<script src="/static/js/features/admin/admin.js"></script>
+<script src="/static/js/features/predictions/predictions.js"></script>
+<script src="/static/js/features/congress/congress.js"></script>
+<script src="/static/js/init.js"></script>
+<footer style="text-align:center;padding:16px 0 12px;font-size:11px;color:#636b7e;border-top:1px solid rgba(54,58,69,0.4);margin-top:24px;">
+    TradeWiz is a product of <strong style="color:#c8ccd4;">Infinity Ventures Group LLC</strong><br>
+    &copy; 2025 Infinity Ventures Group LLC. All rights reserved. Developed by Infinity Ventures Group LLC.
+</footer>
 </body>
 </html>

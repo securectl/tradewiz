@@ -1,0 +1,88 @@
+/* Congress Trades — Politician Holdings */
+
+/* Stats bar */
+.cong-stat {
+    background: var(--bg-card); border: 1px solid var(--border-color);
+    border-radius: 10px; padding: 12px 16px; text-align: center; min-width: 80px;
+}
+.cong-stat-value { font-size: 22px; font-weight: 800; color: var(--text-bright); }
+.cong-stat-label { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.3px; margin-top: 2px; }
+.cong-state-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+    background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color);
+}
+
+/* Top traders bar chart */
+.cong-top-list { margin-bottom: 8px; }
+.cong-top-row {
+    display: grid; grid-template-columns: 24px 160px 1fr 40px;
+    align-items: center; gap: 8px; padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.cong-top-rank { font-size: 10px; color: var(--text-secondary); text-align: center; font-weight: 700; }
+.cong-top-name { font-size: 12px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cong-top-bar-track { height: 12px; background: rgba(255,255,255,0.03); border-radius: 2px; overflow: hidden; }
+.cong-top-bar { height: 100%; background: var(--accent-blue); border-radius: 2px; transition: width 0.4s ease; }
+.cong-top-count { font-size: 11px; font-weight: 700; color: var(--accent-blue); text-align: right; }
+
+/* News grid */
+.cong-news-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 8px; margin-bottom: 8px;
+}
+.cong-news-card {
+    display: block; padding: 10px 14px; background: var(--bg-card);
+    border: 1px solid var(--border-color); border-radius: 8px;
+    text-decoration: none; transition: border-color 0.2s;
+}
+.cong-news-card:hover { border-color: var(--accent-blue); }
+.cong-news-title {
+    font-size: 12px; font-weight: 600; color: var(--text-bright); line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.cong-news-meta { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+
+/* Filings table */
+.cong-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cong-table th {
+    text-align: left; padding: 8px 10px; color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+.cong-table td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); color: var(--text-primary); }
+.cong-table tr:hover { background: rgba(79,138,255,0.03); }
+
+.cong-chamber-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+.cong-house { background: rgba(79,138,255,0.1); color: #4f8aff; }
+.cong-senate { background: rgba(124,93,250,0.1); color: #7c5dfa; }
+
+.cong-pdf-link {
+    color: var(--accent-blue); text-decoration: none; font-weight: 600; font-size: 11px;
+}
+.cong-pdf-link:hover { text-decoration: underline; }
+
+/* Trade rows (buy/sell) */
+.cong-trade-row {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 6px 10px; border-radius: 6px; margin-bottom: 4px; font-size: 12px;
+}
+.cong-buy { background: rgba(0,200,150,0.04); border-left: 3px solid #00c896; }
+.cong-sell { background: rgba(255,71,87,0.04); border-left: 3px solid #ff4757; }
+.cong-trade-name { color: var(--text-primary); font-weight: 500; flex: 1; min-width: 100px; }
+.cong-trade-amount { color: var(--text-bright); font-weight: 700; font-variant-numeric: tabular-nums; }
+.cong-trade-date { color: var(--text-secondary); font-size: 10px; }
+
+/* Mobile */
+@media (max-width: 768px) {
+    .cong-top-row { grid-template-columns: 20px 120px 1fr 30px; }
+    .cong-news-grid { grid-template-columns: 1fr; }
+    .cong-table { font-size: 11px; }
+}
+@media (max-width: 480px) {
+    .cong-top-row { grid-template-columns: 18px 100px 1fr 28px; gap: 4px; }
+    .cong-stat { padding: 8px 10px; min-width: 60px; }
+    .cong-stat-value { font-size: 18px; }
+}

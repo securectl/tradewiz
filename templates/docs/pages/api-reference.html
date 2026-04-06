@@ -1,0 +1,710 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>API Reference</h1>
+<p class="lead">All 66 API endpoints grouped by category.</p>
+
+<div class="docs-admonition info">
+    <div class="docs-admonition-title">Authentication</div>
+    <p>All endpoints require authentication unless noted. Auth is session-based (cookie). Endpoints return JSON. Unauthorized requests receive <code>401</code>; insufficient roles receive <code>403</code>.</p>
+</div>
+
+<!-- ── Auth ────────────────────────────────────────────────────────── -->
+<h2>Auth</h2>
+<p>Authentication endpoints. No login required.</p>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/auth/login</span>
+        <span class="docs-endpoint-badge">public</span>
+    </div>
+    <div class="docs-endpoint-desc">Render the login page. Shows dev login form if Google OAuth not configured.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/auth/google</span>
+        <span class="docs-endpoint-badge">public</span>
+    </div>
+    <div class="docs-endpoint-desc">Redirect to Google OAuth authorization.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/auth/callback</span>
+        <span class="docs-endpoint-badge">public</span>
+    </div>
+    <div class="docs-endpoint-desc">Google OAuth callback. Upserts user, applies invite roles, logs in.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/auth/dev-login</span>
+        <span class="docs-endpoint-badge">public</span>
+    </div>
+    <div class="docs-endpoint-desc">Dev-only login bypass. Disabled when <code>GOOGLE_CLIENT_ID</code> is set. Body: <code>{"email": "..."}</code></div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/auth/logout</span>
+        <span class="docs-endpoint-badge">public</span>
+    </div>
+    <div class="docs-endpoint-desc">Log out and redirect to login page.</div>
+</div>
+
+<!-- ── Core ────────────────────────────────────────────────────────── -->
+<h2>Core</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/me</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get current user info: id, email, name, roles.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/ai-status</span>
+        <span class="docs-endpoint-badge">public</span>
+    </div>
+    <div class="docs-endpoint-desc">Check if OpenRouter API key is configured.</div>
+</div>
+
+<!-- ── Analysis ────────────────────────────────────────────────────── -->
+<h2>Analysis</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/analyze</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run technical analysis on a ticker. Body: <code>{"ticker": "AAPL"}</code>. Saves result to search history.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/validate</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run AI validation on a completed analysis. Body: analysis result JSON.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/predict</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run AI 12-month investment prediction. Body: <code>{"ticker": "AAPL"}</code>.</div>
+</div>
+
+<!-- ── Search History ──────────────────────────────────────────────── -->
+<h2>Search History</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/history</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get user's search history (last 50 results).</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/history/&lt;id&gt;</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get the full result JSON for a specific search.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method delete">DELETE</span>
+        <span class="docs-endpoint-path">/api/history/&lt;id&gt;</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Delete a specific search result.</div>
+</div>
+
+<!-- ── Screener ────────────────────────────────────────────────────── -->
+<h2>Screener</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/screener</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run AI-powered stock screener by category/sector/price range.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/qullamaggie</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run Qullamaggie breakout pattern scan on a ticker category.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/screener/hot-sectors</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get hot sectors ranked by performance. Query: <code>?period=1w</code>.</div>
+</div>
+
+<!-- ── Journal / Tracker ───────────────────────────────────────────── -->
+<h2>Journal / Tracker</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/journal</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List journal entries. Query: <code>?ticker=AAPL&amp;page=1</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/journal</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Add journal entry. Body: <code>{"ticker", "action", "quantity", "price", "notes"}</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method delete">DELETE</span>
+        <span class="docs-endpoint-path">/api/journal/&lt;id&gt;</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Delete a journal entry and reverse P&amp;L.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/goals</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get weekly/monthly P&amp;L goals, balances, and progress.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/goals</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update weekly target. Body: <code>{"weekly_target": 100}</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/goals/balance</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update account balance. Body: <code>{"balance": 10000}</code>.</div>
+</div>
+
+<!-- ── Status ──────────────────────────────────────────────────────── -->
+<h2>Service Status</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/status</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get status of all monitored services with uptime %.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/status/uptime/&lt;service&gt;</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get 90-day day-by-day uptime data for a single service.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/status/incidents</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get last 50 service incidents.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/status/check</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Manually trigger a health check cycle for all services.</div>
+</div>
+
+<!-- ── Crypto Bot ──────────────────────────────────────────────────── -->
+<h2>Crypto Trading Bot</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/status</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get current bot status, running state, and stats.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/start</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Start the crypto trading bot.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/stop</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Gracefully stop the crypto trading bot.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/kill</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Emergency kill switch — stops bot and closes all open positions.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/trades</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List crypto bot trades. Query: <code>?status=open&amp;asset_type=crypto</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/trades/&lt;id&gt;</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get full trade details including validation result.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/trades/&lt;id&gt;/close</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Manually close an open crypto trade at current market price.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/pnl</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get daily P&amp;L data. Query: <code>?days=30</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/pnl-summary</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get P&amp;L summary: day, week, month, year, and all-time.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/platform</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get platform config and BloFin key status.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/platform</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Save platform selection and encrypted API keys.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/test-connection</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Test BloFin API connection and return account balance.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/check-permissions</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Check if BloFin API key has trade permissions.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/test-trade</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Place a minimal test order on BloFin.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/coins</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List available coins with current selection state.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/coins</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Save selected coins list. Body: <code>{"coins": ["BTC-USDT", "ETH-USDT"]}</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/config</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get all bot config key-value pairs.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/bot/config</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update bot config. Body: <code>{"max_position_pct": 5, "daily_loss_limit": 100}</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/log</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get bot log entries. Query: <code>?level=WARNING</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/bot/trending</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Fetch trending crypto and auto-add high-volume coins to selection.</div>
+</div>
+
+<!-- ── Stock Bot ────────────────────────────────────────────────────── -->
+<h2>Stock Trading Bot</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/status</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get current stock bot status.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/start</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Start the stock trading bot.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/stop</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Gracefully stop the stock trading bot.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/kill</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Emergency kill switch — stops stock bot and closes positions.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/trades</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List stock bot trades. Query: <code>?status=open</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/trades/&lt;id&gt;</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get full stock trade details.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/trades/&lt;id&gt;/close</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Manually close an open stock trade.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/pnl</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get daily P&amp;L data. Query: <code>?days=30</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/pnl-summary</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get P&amp;L summary for stock trades.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/config</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get stock bot config.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/config</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Update stock bot config.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/stocks</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List stocks with selection state and custom tickers.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/stocks</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Save selected stocks list.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/stocks/add</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Validate and add a custom ticker symbol.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/log</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get stock bot log entries. Query: <code>?level=WARNING</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/broker</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get broker config and API key status.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/broker</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Save broker selection and encrypted API keys.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/stock-bot/test-connection</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Test broker API connection and return balance.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/stock-bot/market-hours</span>
+        <span class="docs-endpoint-badge">trader_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Check if the US stock market is currently open.</div>
+</div>
+
+<!-- ── Settings ─────────────────────────────────────────────────────── -->
+<h2>Settings</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/settings</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get user API key status (masked), LLM model config, and OpenRouter status.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/settings</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Save user broker API keys (encrypted per-user).</div>
+</div>
+
+<!-- ── Admin ────────────────────────────────────────────────────────── -->
+<h2>Admin</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/admin/config</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get LLM/OpenRouter config (API key masked).</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/admin/config</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Hot-reload LLM models and API keys.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/admin/invite</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List all invites.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/admin/invite</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Create/upsert an invite. Body: <code>{"email": "...", "role": "trader"}</code>.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method delete">DELETE</span>
+        <span class="docs-endpoint-path">/api/admin/invite/&lt;email&gt;</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Delete a pending invite.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/admin/users</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">List all users with roles.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/admin/users/&lt;id&gt;/role</span>
+        <span class="docs-endpoint-badge">admin_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Add or remove a role. Body: <code>{"role": "trader", "action": "add"}</code>.</div>
+</div>
+{% endblock %}

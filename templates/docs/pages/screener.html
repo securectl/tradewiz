@@ -1,0 +1,91 @@
+{% extends "docs/base.html" %}
+{% block content %}
+<h1>Screener &amp; Scanner</h1>
+<p class="lead">AI-powered stock screener and Qullamaggie breakout pattern scanner.</p>
+
+<h2>Qullamaggie Breakout Scanner</h2>
+
+<p>The Qullamaggie scanner identifies stocks exhibiting breakout patterns based on the methodology of Kristjan Qullamaggie and Mark Minervini. It scans a category of tickers and ranks them by breakout quality.</p>
+
+<h3>What It Looks For</h3>
+<ul>
+    <li><strong>Uptrend confirmation</strong> — Price above SMA 50 and SMA 200</li>
+    <li><strong>Consolidation</strong> — Tight price range with declining volume</li>
+    <li><strong>Breakout</strong> — Price breaking above consolidation with expanding volume</li>
+    <li><strong>Momentum</strong> — RSI and MACD alignment confirming the move</li>
+</ul>
+
+<h3>How to Use</h3>
+<ol>
+    <li>Go to the <strong>Breakout Scanner</strong> tab</li>
+    <li>Select a ticker category (e.g., Tech, Growth, Crypto)</li>
+    <li>Click <strong>Scan</strong></li>
+    <li>Results are ranked by breakout quality with technical details for each ticker</li>
+</ol>
+
+<h3>Result Fields</h3>
+<table>
+    <thead>
+        <tr><th>Field</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Ticker</td><td>Stock symbol</td></tr>
+        <tr><td>Price</td><td>Current price</td></tr>
+        <tr><td>Signal</td><td>BULLISH / BEARISH / NEUTRAL</td></tr>
+        <tr><td>Confidence</td><td>Grade A–D with percentage</td></tr>
+        <tr><td>RSI</td><td>Current RSI value</td></tr>
+        <tr><td>Volume Ratio</td><td>Current vs. average volume</td></tr>
+        <tr><td>ADR%</td><td>Average daily range as percentage</td></tr>
+    </tbody>
+</table>
+
+<h2>AI Stock Screener</h2>
+
+<p>The AI screener uses LLM intelligence to find stocks matching specific criteria. Unlike the technical scanner, the AI screener can understand complex, qualitative criteria.</p>
+
+<h3>How to Use</h3>
+<ol>
+    <li>Go to the <strong>Screener</strong> tab</li>
+    <li>Select a category or enter custom screening criteria</li>
+    <li>Set optional filters (sector, price range)</li>
+    <li>Click <strong>Screen</strong></li>
+    <li>The AI returns ranked results with reasoning for each pick</li>
+</ol>
+
+<p>The screener uses the <code>LLM_SCREENER</code> model (default: Gemini Flash) for fast, cost-efficient screening.</p>
+
+<h2>Hot Sectors</h2>
+
+<p>The hot sectors feature ranks market sectors by recent performance over a configurable time period. This helps identify where market momentum is concentrated.</p>
+
+<p>Access via the <strong>Screener</strong> tab or the API: <code>GET /api/screener/hot-sectors?period=1w</code></p>
+
+<h2>API Endpoints</h2>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/qullamaggie</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run Qullamaggie breakout scan on a ticker category.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method post">POST</span>
+        <span class="docs-endpoint-path">/api/screener</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Run AI-powered stock screener by category, sector, or price range.</div>
+</div>
+
+<div class="docs-endpoint">
+    <div class="docs-endpoint-header">
+        <span class="docs-method get">GET</span>
+        <span class="docs-endpoint-path">/api/screener/hot-sectors</span>
+        <span class="docs-endpoint-badge">login_required</span>
+    </div>
+    <div class="docs-endpoint-desc">Get hot sectors ranked by performance for a given period.</div>
+</div>
+{% endblock %}

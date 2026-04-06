@@ -1,0 +1,50 @@
+id: client-report
+name: Client Report
+domain: Wealth Management
+description: >
+  Generate a client performance report with portfolio returns,
+  benchmark comparison, attribution analysis, and market commentary.
+icon: "bar-chart"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Portfolio Tickers (comma-separated)
+    required: true
+    placeholder: "e.g. AAPL, MSFT, VTI, BND"
+  - name: benchmark
+    type: text
+    label: Benchmark Ticker
+    required: false
+    placeholder: "e.g. SPY"
+  - name: portfolio_csv
+    type: file
+    label: Portfolio CSV (optional)
+    required: false
+    accept: ".csv,.tsv,.txt"
+    placeholder: "Upload CSV with holdings (ticker, shares, cost_basis...)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering portfolio and benchmark data
+    actions:
+      - type: fetch_fundamentals
+        description: Fetch portfolio fundamentals
+      - type: fetch_prices
+        description: Fetch portfolio price history
+        config:
+          period: "1y"
+  - name: Report Generation
+    description: AI generating performance report
+    actions:
+      - type: llm_client_report
+        description: Generate client performance report
+  - name: Quality Review
+    description: Reviewing report quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

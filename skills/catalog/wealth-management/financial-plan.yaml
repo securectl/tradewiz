@@ -1,0 +1,71 @@
+id: financial-plan
+name: Financial Plan
+domain: Wealth Management
+description: >
+  Build a comprehensive financial plan with retirement projections,
+  savings targets, asset allocation strategy, and milestone tracking.
+icon: "map"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Current Portfolio Tickers (comma-separated)
+    required: true
+    placeholder: "e.g. VTI, VXUS, BND, VNQ"
+  - name: risk_tolerance
+    type: select
+    label: Risk Tolerance
+    required: true
+    default: moderate
+    options:
+      - label: Conservative
+        value: conservative
+      - label: Moderate
+        value: moderate
+      - label: Aggressive
+        value: aggressive
+  - name: investment_horizon
+    type: select
+    label: Planning Horizon
+    required: false
+    default: "10+ years"
+    options:
+      - label: 5-10 years
+        value: "5-10 years"
+      - label: 10-20 years
+        value: "10-20 years"
+      - label: 10+ years
+        value: "10+ years"
+      - label: 20+ years
+        value: "20+ years"
+  - name: portfolio_csv
+    type: file
+    label: Portfolio CSV (optional)
+    required: false
+    accept: ".csv,.tsv,.txt"
+    placeholder: "Upload CSV with holdings (ticker, shares, cost_basis...)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering market and portfolio data
+    actions:
+      - type: fetch_fundamentals
+        description: Fetch portfolio fundamentals
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "5y"
+  - name: Plan Generation
+    description: AI building financial plan
+    actions:
+      - type: llm_financial_plan
+        description: Generate comprehensive financial plan
+  - name: Quality Review
+    description: Reviewing plan quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

@@ -59,16 +59,16 @@ Historical Performance (last 7 days):
         if symbol_stats:
             ctx += f"\n- This stock ({symbol}): {symbol_stats['trades']} trades, {symbol_stats['win_rate']}% win rate, avg P&L ${symbol_stats['avg_pnl']}"
 
-        if overall["win_rate"] < 40:
-            ctx += "\n\nWARNING: Overall win rate is BELOW 40%. Be MORE SELECTIVE — only approve trades with strong confluence."
+        if overall["win_rate"] < 30:
+            ctx += "\n\nNOTE: Overall win rate is below 30%. Look for reasonable confluence before approving."
 
-    ctx += "\n\nThis is a PAPER TRADING bot on Alpaca paper. Evaluate the stock trade setup quality."
+    ctx += "\n\nThis is a PAPER TRADING bot on Alpaca paper. The goal is to ACTIVELY TRADE swing opportunities. Approve trades with reasonable technical confluence (2+ indicators). Only reject if indicators clearly conflict or setup is fundamentally flawed."
     return ctx
 
 
 def _validate_stock_ollama(trade_context: str) -> dict:
     """Gate 1: Local Ollama validation for stocks."""
-    prompt = f"""You are a strict stock trading risk analyst. Evaluate this stock trade signal and decide if it should execute.
+    prompt = f"""You are a stock trading analyst evaluating swing trade signals for a paper trading bot. Evaluate this trade signal and decide if it should execute.
 
 {trade_context}
 
@@ -80,12 +80,11 @@ Respond in JSON format ONLY:
     "risk_level": "low/medium/high/extreme"
 }}
 
-Be SELECTIVE. Only approve trades where multiple indicators clearly align. Consider equity-specific risks:
+Approve trades where the primary indicators support the trade direction. Consider equity-specific risks:
 - Earnings dates can cause large gaps
 - PDT restrictions limit day trading below $25K
-- Stock volatility differs from crypto
 - Sector and macro conditions matter
-Reject if indicators conflict or confidence is low.
+Reject only if indicators clearly conflict or the setup is fundamentally flawed. Moderate-confidence setups with decent risk/reward should be approved for swing trading.
 """
     return _call_ollama(prompt)
 
@@ -93,7 +92,7 @@ Reject if indicators conflict or confidence is low.
 def _validate_stock_sentiment(trade_context: str) -> dict:
     """Gate 2a: OpenRouter sentiment analysis for stocks."""
     messages = [
-        {"role": "system", "content": "You are a strict stock market sentiment analyst. You protect capital by only approving high-conviction equity setups. Respond in JSON only."},
+        {"role": "system", "content": "You are a stock market sentiment analyst evaluating swing trade setups for a paper trading bot. Respond in JSON only."},
         {"role": "user", "content": f"""{trade_context}
 
 Evaluate the SENTIMENT and MOMENTUM of this stock trade. Respond in JSON:
@@ -105,7 +104,7 @@ Evaluate the SENTIMENT and MOMENTUM of this stock trade. Respond in JSON:
     "reasoning": "brief explanation"
 }}
 
-Only approve if momentum CLEARLY supports the trade direction with strong indicator alignment. If historical performance shows a losing streak, require STRONG confluence. Reject if momentum is ambiguous or indicators conflict."""}
+Approve if momentum generally supports the trade direction. If historical performance shows a losing streak, require reasonable confluence. Reject only if momentum clearly contradicts the trade direction or indicators significantly conflict."""}
     ]
     raw = _call_openrouter(LLM_BOT_SENTIMENT, messages)
     return _parse_json(raw)
@@ -114,7 +113,7 @@ Only approve if momentum CLEARLY supports the trade direction with strong indica
 def _validate_stock_risk(trade_context: str) -> dict:
     """Gate 2b: OpenRouter risk analysis for stocks."""
     messages = [
-        {"role": "system", "content": "You are a conservative stock trading risk manager. Your PRIMARY job is to protect capital. Consider earnings risk, market hours, PDT rules, and sector rotation. Respond in JSON only."},
+        {"role": "system", "content": "You are a stock trading risk manager evaluating swing trade setups for a paper trading bot. Consider earnings risk, market hours, PDT rules, and sector rotation. Respond in JSON only."},
         {"role": "user", "content": f"""{trade_context}
 
 Evaluate the RISK of this stock trade. Consider: earnings gap risk, false signal probability, volatility, position timing, market regime, and historical performance. Respond in JSON:
@@ -127,7 +126,7 @@ Evaluate the RISK of this stock trade. Consider: earnings gap risk, false signal
     "reasoning": "brief explanation"
 }}
 
-Be CONSERVATIVE. Reject when risk/reward is unfavorable or false signal probability exceeds 0.5."""}
+Approve trades with acceptable risk/reward ratios. Reject only when risk/reward is clearly unfavorable or false signal probability exceeds 0.65. This is paper trading — err toward taking the trade to gather performance data."""}
     ]
     raw = _call_openrouter(LLM_BOT_RISK, messages)
     return _parse_json(raw)
@@ -168,8 +167,17 @@ def validate_stock_trade(symbol: str, side: str, price: float,
         sentiment_future = executor.submit(_validate_stock_sentiment, trade_context)
         risk_future = executor.submit(_validate_stock_risk, trade_context)
 
-        sentiment_result = sentiment_future.result()
-        risk_result = risk_future.result()
+        try:
+            sentiment_result = sentiment_future.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"Sentiment future failed/timed out: {e}")
+            sentiment_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — sentiment validator timed out (paper trading auto-approve)"}
+
+        try:
+            risk_result = risk_future.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"Risk future failed/timed out: {e}")
+            risk_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — risk validator timed out (paper trading auto-approve)"}
 
     result["sentiment"] = sentiment_result
     result["risk"] = risk_result
@@ -215,5 +223,32 @@ def validate_stock_trade(symbol: str, side: str, price: float,
             reasons.append(f"Risk: {risk_result.get('reasoning', 'rejected')}")
         result["summary"] = f"Blocked ({votes_for}/{total_voters} votes) — " + "; ".join(reasons)
 
-    logger.info(f"Stock trade {side} {symbol}: {'APPROVED' if result['approved'] else 'BLOCKED'} — {result['summary']}")
+    # Aggregate confidence from individual validators
+    conf_values = []
+    for v in [ollama_result, sentiment_result, risk_result]:
+        c = v.get("confidence")
+        if c is not None and isinstance(c, (int, float)):
+            conf_values.append(float(c))
+    result["confidence"] = round(sum(conf_values) / len(conf_values), 2) if conf_values else 0.5
+
+    # Supervisor gate — only if trade approved and LLM_SUPERVISOR configured
+    if result["approved"]:
+        try:
+            from ai_validator import _validate_supervisor, LLM_SUPERVISOR
+            if LLM_SUPERVISOR:
+                supervisor = _validate_supervisor(
+                    trade_context[:1000],
+                    {"ollama": ollama_result.get("execute"), "sentiment": sentiment_result.get("execute"),
+                     "risk": risk_result.get("execute"), "approved": True, "summary": result["summary"]},
+                    layer="bot_stock",
+                )
+                result["supervisor"] = supervisor
+                if supervisor.get("override") is True:
+                    result["approved"] = False
+                    result["summary"] = f"Supervisor veto: {supervisor.get('reasoning', 'overridden')} (was: {result['summary']})"
+                    logger.warning(f"Supervisor VETOED stock trade {side} {symbol}: {supervisor.get('reasoning')}")
+        except Exception as e:
+            logger.warning(f"Supervisor check failed (graceful skip): {e}")
+
+    logger.info(f"Stock trade {side} {symbol}: {'APPROVED' if result['approved'] else 'BLOCKED'} — {result['summary']} (confidence={result['confidence']:.0%})")
     return result

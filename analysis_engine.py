@@ -951,7 +951,7 @@ def detect_trendline_tests(df: pd.DataFrame, pattern: dict) -> list:
         # Support trendline test: candle low approaches support line
         support_at_i = l_slope * i + l_intercept
         dist_to_support = low[i] - support_at_i
-        support_tolerance = atr * 0.5
+        support_tolerance = atr * 0.3
 
         if -support_tolerance <= dist_to_support <= support_tolerance:
             # Candle touches or pierces support
@@ -984,7 +984,7 @@ def detect_trendline_tests(df: pd.DataFrame, pattern: dict) -> list:
                 strength += 1
                 reasons.append("Next candle recovered")
 
-            if strength >= 2:
+            if strength >= 3:
                 tests.append({
                     "idx": int(i),
                     "type": "support_test",
@@ -1001,7 +1001,7 @@ def detect_trendline_tests(df: pd.DataFrame, pattern: dict) -> list:
         # Resistance trendline test: candle high approaches resistance line
         resistance_at_i = u_slope * i + u_intercept
         dist_to_resistance = resistance_at_i - high[i]
-        resistance_tolerance = atr * 0.5
+        resistance_tolerance = atr * 0.3
 
         if -resistance_tolerance <= dist_to_resistance <= resistance_tolerance:
             strength = 0
@@ -1025,7 +1025,7 @@ def detect_trendline_tests(df: pd.DataFrame, pattern: dict) -> list:
             if dist_to_resistance < 0:
                 reasons.append("Pierced resistance (wick above)")
 
-            if strength >= 2:
+            if strength >= 3:
                 tests.append({
                     "idx": int(i),
                     "type": "resistance_test",
@@ -1039,6 +1039,22 @@ def detect_trendline_tests(df: pd.DataFrame, pattern: dict) -> list:
                     "held": bool(close[i] < resistance_at_i),
                 })
 
+    # Deduplicate: keep only the strongest test within a 5-bar window per type
+    deduped = []
+    for t in tests:
+        too_close = False
+        for existing in deduped:
+            if existing["type"] == t["type"] and abs(existing["idx"] - t["idx"]) < 5:
+                # Keep the stronger one
+                if t["strength"] > existing["strength"]:
+                    deduped.remove(existing)
+                else:
+                    too_close = True
+                break
+        if not too_close:
+            deduped.append(t)
+    tests = deduped
+
     # Sort by weighted score: strength + recency bonus (recent tests matter more)
     # Tests in last 5 bars get a significant boost — current price action is critical
     for t in tests:
@@ -1049,7 +1065,7 @@ def detect_trendline_tests(df: pd.DataFrame, pattern: dict) -> list:
     # Clean up internal sort key
     for t in tests:
         del t["_sort_score"]
-    return tests[:15]
+    return tests[:5]
 
 
 def calculate_indicators(df: pd.DataFrame) -> dict:
@@ -1280,24 +1296,38 @@ def generate_trade_plan(df: pd.DataFrame, pattern: dict, indicators: dict, info:
     entry_price = breakout_level + entry_buffer
 
     # ── Stop Loss ──
-    # Per Breakout Strategy: place stop "just below the most recent swing low before the breakout"
-    # Fall back to support trendline minus ATR buffer if no swing lows available
+    # Use the strongest nearby support from the last 4-5 swing lows.
+    # Pick the highest swing low that's still below the breakout level (tightest valid stop).
+    # Fall back to support trendline minus ATR buffer if no swing lows available.
     swing_lows = pattern.get("swing_lows", [])
-    recent_swing_low = None
-    if swing_lows:
-        # Find the most recent swing low's actual price
-        for sl_idx in reversed(swing_lows):
-            if sl_idx < len(df):
-                recent_swing_low = float(df["Low"].iloc[sl_idx])
-                break
+    swing_low_prices = []
+    for sl_idx in swing_lows:
+        if sl_idx < len(df):
+            sl_price = float(df["Low"].iloc[sl_idx])
+            if sl_price < breakout_level:
+                swing_low_prices.append(sl_price)
 
-    if recent_swing_low is not None:
-        # Stop just below the most recent swing low with a small ATR buffer
-        stop_buffer = atr * 0.25 if atr > 0 else recent_swing_low * 0.005
-        stop_loss = recent_swing_low - stop_buffer
+    if swing_low_prices:
+        # Use last 4-5 swing lows to find the best support cluster
+        recent_lows = swing_low_prices[-5:]
+        # Pick the highest swing low below breakout (tightest stop = best R:R)
+        # but validate it's a real support (at least 2 lows within 2% of each other)
+        best_stop_ref = max(recent_lows)
+        tolerance = best_stop_ref * 0.02
+        cluster = [p for p in recent_lows if abs(p - best_stop_ref) <= tolerance]
+        if len(cluster) >= 2:
+            # Strong support cluster — use the mean
+            best_stop_ref = sum(cluster) / len(cluster)
+        stop_buffer = atr * 0.25 if atr > 0 else best_stop_ref * 0.005
+        stop_loss = best_stop_ref - stop_buffer
     else:
         stop_buffer = atr * 0.5 if atr > 0 else pattern_height * 0.1
         stop_loss = support_level - stop_buffer
+
+    # Sanity check: stop loss should not be more than 10% below entry
+    max_stop_distance = entry_price * 0.10
+    if entry_price - stop_loss > max_stop_distance:
+        stop_loss = entry_price - max_stop_distance
 
     # ── Take Profit Levels (TP1 / TP2 / TP3) ──
     # TP1: 0.618 Fibonacci extension of pattern height (conservative, secure partial profits)
@@ -1494,6 +1524,58 @@ def detect_candlestick_patterns(df: pd.DataFrame) -> list:
                 "volume_ratio": round(float(vol_ratio), 2),
             })
 
+        # Doji Detection: body < 10% of candle range
+        body = abs(close[i] - open_[i])
+        if curr_range > 0 and body < curr_range * 0.10:
+            upper_wick = high[i] - max(close[i], open_[i])
+            lower_wick = min(close[i], open_[i]) - low[i]
+            tiny = curr_range * 0.10
+
+            if lower_wick > 2 * body and upper_wick < tiny:
+                doji_sub = "Dragonfly"
+                direction = "bullish"
+            elif upper_wick > 2 * body and lower_wick < tiny:
+                doji_sub = "Gravestone"
+                direction = "bearish"
+            else:
+                doji_sub = "Standard"
+                direction = "neutral"
+
+            patterns.append({
+                "idx": i,
+                "type": "doji",
+                "label": f"Doji ({doji_sub})",
+                "signal": "reversal",
+                "direction": direction,
+                "description": f"{doji_sub} doji — {'bullish reversal signal' if direction == 'bullish' else 'bearish reversal signal' if direction == 'bearish' else 'indecision'}",
+            })
+
+        # Pump/Dump on Close: volume >= 2x average + large body + close at extreme
+        vol_ratio = volume[i] / vol_ma[i] if (not np.isnan(vol_ma[i]) and vol_ma[i] > 0) else 0
+        atr_10 = np.mean([high[j] - low[j] for j in range(max(0, i - 10), i + 1)]) if i > 0 else curr_range
+        if vol_ratio >= 2.0 and body > atr_10 * 0.5 and curr_range > 0:
+            close_pos = (close[i] - low[i]) / curr_range
+            if close_pos >= 0.75:
+                patterns.append({
+                    "idx": i,
+                    "type": "pump_close",
+                    "label": "Pump on Close",
+                    "signal": "momentum",
+                    "direction": "bullish",
+                    "description": f"Volume surge ({vol_ratio:.1f}x avg) with close in upper range — bullish momentum",
+                    "volume_ratio": round(float(vol_ratio), 2),
+                })
+            elif close_pos <= 0.25:
+                patterns.append({
+                    "idx": i,
+                    "type": "pump_close",
+                    "label": "Dump on Close",
+                    "signal": "momentum",
+                    "direction": "bearish",
+                    "description": f"Volume surge ({vol_ratio:.1f}x avg) with close in lower range — bearish momentum",
+                    "volume_ratio": round(float(vol_ratio), 2),
+                })
+
     # Return only the most recent 10 patterns
     return patterns[-10:]
 
@@ -1588,14 +1670,17 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
                     else:
                         pt["time"] = dates[-1]
 
-        # Convert swing point indices to timestamps
+        # Convert swing point indices to timestamps — only show anchor points
+        # used by the trendlines to avoid chart clutter
+        upper_anchors = set(pattern.get("upper_trendline", {}).get("anchors", []))
+        lower_anchors = set(pattern.get("lower_trendline", {}).get("anchors", []))
         pattern["swing_highs_ts"] = [
             {"time": dates[i], "value": round(df["High"].iloc[i], 2)}
-            for i in pattern["swing_highs"] if i < len(dates)
+            for i in pattern["swing_highs"] if i < len(dates) and i in upper_anchors
         ]
         pattern["swing_lows_ts"] = [
             {"time": dates[i], "value": round(df["Low"].iloc[i], 2)}
-            for i in pattern["swing_lows"] if i < len(dates)
+            for i in pattern["swing_lows"] if i < len(dates) and i in lower_anchors
         ]
 
         # Price target and stop loss timestamps (project forward)

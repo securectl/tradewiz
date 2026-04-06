@@ -1,0 +1,46 @@
+id: tax-loss-harvest
+name: Tax-Loss Harvesting
+domain: Wealth Management
+description: >
+  Identify tax-loss harvesting opportunities in a portfolio. Flags positions
+  with unrealized losses, suggests substitute securities, and estimates
+  tax savings.
+icon: "scissors"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Portfolio Tickers (comma-separated)
+    required: true
+    placeholder: "e.g. AAPL, MSFT, GOOGL, AMZN, META"
+  - name: portfolio_csv
+    type: file
+    label: Portfolio CSV (optional)
+    required: false
+    accept: ".csv,.tsv,.txt"
+    placeholder: "Upload CSV with holdings (ticker, shares, cost_basis...)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering portfolio and price data
+    actions:
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "1y"
+  - name: TLH Analysis
+    description: AI identifying harvesting opportunities
+    actions:
+      - type: llm_tax_loss_harvest
+        description: Identify tax-loss harvesting opportunities
+  - name: Quality Review
+    description: Reviewing TLH recommendations
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

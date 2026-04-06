@@ -1,11 +1,18 @@
 """
 AI Validation Engine — Multi-LLM Rigorous Trade Setup Vetting
-Uses 3 specialized LLMs via OpenRouter to validate every setup from every angle.
+Uses specialized LLMs via OpenRouter to validate every setup from every angle.
 Risk management is the #1 priority. Capital preservation above all.
 
-Model 1 (Research):    Fundamentals, sector, red flags, catalysts
-Model 2 (Pattern):     Chart pattern validation, breakout probability
-Model 3 (Prediction):  Price targets, risk modeling, stop loss, scenarios
+Setup Validation (3-Model):
+  Model 1 (Research):    Fundamentals, sector, red flags, catalysts
+  Model 2 (Pattern):     Chart pattern validation, breakout probability
+  Model 3 (Prediction):  Price targets, risk modeling, stop loss, scenarios
+
+12-Month Prediction (4-Model, 3/4 Quorum):
+  LLM 1 (Fact Gatherer):    Gathers all facts (fundamentals + technicals) — runs first
+  LLM 2 (Company Health):   Financial health + moat assessment — parallel
+  LLM 3 (Price Action):     Valuation + technical analysis — parallel
+  LLM 4 (Supervisor):       Reviews all, casts independent vote — runs last
 """
 
 import os
@@ -14,6 +21,15 @@ import requests
 import concurrent.futures
 from datetime import datetime
 from dotenv import load_dotenv
+from shared.prompts.analysis import (
+    RESEARCH_SYSTEM, RESEARCH_USER_TEMPLATE,
+    PATTERN_SYSTEM, PATTERN_USER_TEMPLATE,
+    PREDICTION_SYSTEM, PREDICTION_USER_TEMPLATE,
+    FACT_GATHERER_SYSTEM, FACT_GATHERER_USER_TEMPLATE,
+    COMPANY_HEALTH_SYSTEM, COMPANY_HEALTH_USER_TEMPLATE,
+    PRICE_ACTION_SYSTEM, PRICE_ACTION_USER_TEMPLATE,
+    SUPERVISOR_PROMPTS, SUPERVISOR_USER_TEMPLATE,
+)
 
 load_dotenv()
 
@@ -25,6 +41,7 @@ LLM_RESEARCH_FAST = os.getenv("LLM_RESEARCH_FAST", "google/gemini-2.5-flash")
 LLM_PATTERN = os.getenv("LLM_PATTERN", "google/gemini-2.5-pro-preview")
 LLM_PREDICTION = os.getenv("LLM_PREDICTION", "deepseek/deepseek-chat-v3-0324")
 LLM_SCREENER = os.getenv("LLM_SCREENER", "google/gemini-2.5-flash")
+LLM_SUPERVISOR = os.getenv("LLM_SUPERVISOR", "")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_FAST_MODE = os.getenv("LLM_FAST_MODE", "0") == "1"
@@ -43,8 +60,39 @@ def is_configured() -> bool:
 
 
 def _call_openrouter(model: str, messages: list, temperature: float = None,
-                     max_tokens: int = None, timeout: int = None) -> str:
-    """Make a single call to OpenRouter with per-call token/timeout control."""
+                     max_tokens: int = None, timeout: int = None,
+                     _user_id: int = None, _source: str = None) -> str:
+    """Make a single LLM call. Routes to Vertex AI if configured, else OpenRouter."""
+
+    # ── Vertex AI path (direct Google Cloud, no OpenRouter markup) ──
+    try:
+        from vertex_adapter import is_available, call_vertex
+        if is_available():
+            content = call_vertex(
+                model, messages,
+                max_tokens=max_tokens or LLM_MAX_TOKENS,
+                temperature=temperature if temperature is not None else LLM_TEMPERATURE,
+                timeout=timeout or 60,
+            )
+            # Record LLM usage
+            try:
+                from rate_limiter import get_llm_user, record_llm_call
+                uid, source = _user_id, _source
+                if not uid:
+                    uid, source = get_llm_user()
+                if uid:
+                    record_llm_call(uid, source or "api", model)
+            except Exception:
+                pass
+            return content
+    except ImportError:
+        pass  # vertex_adapter not installed, use OpenRouter
+    except Exception as e:
+        # Vertex failed, fall through to OpenRouter
+        import logging
+        logging.getLogger(__name__).warning(f"Vertex AI failed, falling back to OpenRouter: {e}")
+
+    # ── OpenRouter path (default) ──
     payload = {
         "model": model,
         "messages": messages,
@@ -58,7 +106,18 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
         resp = requests.post(OPENROUTER_URL, headers=HEADERS, json=payload, timeout=req_timeout)
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        # Record LLM usage
+        try:
+            from rate_limiter import get_llm_user, record_llm_call
+            uid, source = _user_id, _source
+            if not uid:
+                uid, source = get_llm_user()
+            if uid:
+                record_llm_call(uid, source or "api", model)
+        except Exception:
+            pass
+        return content
     except requests.exceptions.Timeout:
         return json.dumps({"error": "LLM request timed out. Try again."})
     except requests.exceptions.RequestException as e:
@@ -165,13 +224,8 @@ def _validate_research(data_summary: str, ticker: str, fast_mode: bool = False) 
     """Model 1: Fundamental research — risk-first, concise."""
     model = LLM_RESEARCH_FAST if fast_mode else LLM_RESEARCH
     messages = [
-        {"role": "system", "content": "You are a risk-first stock analyst. Capital preservation is #1. Respond with ONLY valid JSON. No markdown, no code fences."},
-        {"role": "user", "content": f"""Analyze {ticker} setup. Find reasons this trade could FAIL. Never risk >5% account on any position.
-
-{data_summary}
-
-Respond with ONLY this JSON (replace values):
-{{"verdict":"BULLISH","confidence":75,"catalysts_bullish":["catalyst1"],"catalysts_bearish":["risk1"],"red_flags":["flag1"],"earnings_risk":"assessment","key_risk":"biggest single risk","summary":"1-2 sentences, risk-first"}}"""}
+        {"role": "system", "content": RESEARCH_SYSTEM},
+        {"role": "user", "content": RESEARCH_USER_TEMPLATE.format(ticker=ticker, data_summary=data_summary)},
     ]
     raw = _call_openrouter(model, messages, max_tokens=768, timeout=30)
     return _parse_json_response(raw, "research")
@@ -180,13 +234,8 @@ Respond with ONLY this JSON (replace values):
 def _validate_pattern(data_summary: str, ticker: str) -> dict:
     """Model 2: Pattern validation — always uses Gemini Pro for accuracy."""
     messages = [
-        {"role": "system", "content": "You are a technical analyst. False breakouts destroy accounts. Respond with ONLY valid JSON. No markdown, no code fences."},
-        {"role": "user", "content": f"""Validate or reject this pattern for {ticker}. Be ruthless — false breakouts destroy accounts.
-
-{data_summary}
-
-Respond with ONLY this JSON (replace values):
-{{"pattern_valid":true,"pattern_confidence":75,"detected_pattern":"Symmetrical Triangle","breakout_probability":70,"false_breakout_risk":"MEDIUM","false_breakout_reasons":["reason1"],"support_resistance_key_levels":["$100","$95"],"optimal_entry":"price and condition","invalidation_level":"$X","summary":"1-2 sentences"}}"""}
+        {"role": "system", "content": PATTERN_SYSTEM},
+        {"role": "user", "content": PATTERN_USER_TEMPLATE.format(ticker=ticker, data_summary=data_summary)},
     ]
     raw = _call_openrouter(LLM_PATTERN, messages, max_tokens=768, timeout=30)
     return _parse_json_response(raw, "pattern")
@@ -195,15 +244,8 @@ Respond with ONLY this JSON (replace values):
 def _validate_prediction(data_summary: str, ticker: str) -> dict:
     """Model 3: Prediction & risk — pressure points, stop loss, scenarios."""
     messages = [
-        {"role": "system", "content": "You are a quantitative risk strategist. Cut losses at stop-loss, no exceptions, no averaging down. Respond with ONLY valid JSON. No markdown, no code fences."},
-        {"role": "user", "content": f"""$25K account. Analyze risk/reward for {ticker}. Don't marry the trade.
-
-{data_summary}
-
-PRESSURE POINTS to check: Options/gamma/OI, Earnings proximity, Ex-div, Fed/FOMC, Sector rotation, Liquidity, Gap risk, Volatility regime
-
-Respond with ONLY this JSON (replace values):
-{{"trade_verdict":"TAKE","overall_probability":70,"price_targets":{{"conservative":100,"moderate":110,"aggressive":120}},"stop_loss":{{"valid":true,"recommended":90,"reason":"reason"}},"risk_score":40,"pressure_points":[{{"factor":"name","impact":"HIGH","detail":"explanation"}}],"position_size_ok":true,"scenarios":{{"bull_case":"scenario (prob%)","base_case":"scenario (prob%)","bear_case":"scenario (prob%)"}},"expected_value_per_trade":150,"summary":"1-2 sentences, risk-first"}}"""}
+        {"role": "system", "content": PREDICTION_SYSTEM},
+        {"role": "user", "content": PREDICTION_USER_TEMPLATE.format(ticker=ticker, data_summary=data_summary)},
     ]
     raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1024, timeout=45)
     return _parse_json_response(raw, "prediction")
@@ -377,135 +419,211 @@ ANALYST CONSENSUS:
     return summary
 
 
-def _predict_business_viability(fundamentals_summary: str, ticker: str, fast_mode: bool = False) -> dict:
-    """LLM 1: Business viability — moat, sector outlook, growth durability."""
+def _build_price_action_summary(indicators: dict, df) -> str:
+    """Build compact technical/price action summary for LLM context."""
+    if not indicators or df is None or len(df) == 0:
+        return "PRICE ACTION: No technical data available."
+
+    close = df["Close"]
+    current = float(close.iloc[-1])
+    parts = []
+
+    # Moving averages + positions
+    sma8 = indicators.get("sma_8", 0)
+    ema20 = indicators.get("ema_20", 0)
+    sma50 = indicators.get("sma_50", 0)
+    sma200 = indicators.get("sma_200", 0)
+    ma_stack = []
+    for label, val in [("SMA8", sma8), ("EMA20", ema20), ("SMA50", sma50), ("SMA200", sma200)]:
+        pct = ((current - val) / val * 100) if val else 0
+        ma_stack.append(f"{label}=${val:.2f} ({pct:+.1f}%)")
+    parts.append("MOVING AVERAGES:\n  " + " | ".join(ma_stack))
+    parts.append(f"  SMA8 {'above' if indicators.get('sma8_above_ema20') else 'below'} EMA20 | Cross: {'YES' if indicators.get('sma8_ema20_cross') else 'No'}")
+
+    # RSI
+    rsi = indicators.get("rsi_14", 0)
+    rsi_zone = "overbought" if rsi > 70 else "oversold" if rsi < 30 else "neutral"
+    parts.append(f"RSI(14): {rsi:.1f} ({rsi_zone})")
+
+    # MACD
+    macd = indicators.get("macd", 0)
+    macd_sig = indicators.get("macd_signal", 0)
+    macd_hist = indicators.get("macd_histogram", 0)
+    macd_cross = "bullish cross" if indicators.get("macd_bullish_cross") else "bearish cross" if indicators.get("macd_bearish_cross") else "no cross"
+    parts.append(f"MACD: {macd:.4f} | Signal: {macd_sig:.4f} | Hist: {macd_hist:.4f} | {macd_cross}")
+
+    # Bollinger Bands
+    bb_upper = indicators.get("bb_upper", 0)
+    bb_lower = indicators.get("bb_lower", 0)
+    bb_width = indicators.get("bb_width", 0)
+    bb_pos = "above upper" if current > bb_upper else "below lower" if current < bb_lower else "within bands"
+    parts.append(f"BOLLINGER BANDS: Upper=${bb_upper:.2f} Lower=${bb_lower:.2f} Width={bb_width:.1f}% | Price {bb_pos}")
+
+    # ATR + volume
+    atr = indicators.get("atr_14", 0)
+    rel_vol = indicators.get("relative_volume", 0)
+    parts.append(f"ATR(14): ${atr:.2f} ({atr/current*100:.1f}% of price) | Relative Volume: {rel_vol:.2f}x")
+
+    # Last 5 candles
+    last5 = df.tail(5)
+    candles = []
+    for _, row in last5.iterrows():
+        date_str = str(row.name.date()) if hasattr(row.name, 'date') else str(row.name)
+        candles.append(f"  {date_str}: O={row['Open']:.2f} H={row['High']:.2f} L={row['Low']:.2f} C={row['Close']:.2f} V={int(row['Volume']):,}")
+    parts.append("LAST 5 CANDLES:\n" + "\n".join(candles))
+
+    # Trend structure
+    above_50 = current > sma50
+    above_200 = current > sma200
+    trend = "strong uptrend" if above_50 and above_200 and sma50 > sma200 else \
+            "uptrend" if above_200 else \
+            "downtrend" if not above_50 and not above_200 else "mixed"
+    parts.append(f"TREND: {trend} (Price {'>' if above_50 else '<'} SMA50 {'>' if above_200 else '<'} SMA200)")
+
+    return "\n".join(parts)
+
+
+def _gather_facts(fundamentals_summary: str, price_action_summary: str, ticker: str, fast_mode: bool = False) -> dict:
+    """LLM 1 (Fact Gatherer): Gather and organize all relevant facts about the company."""
     model = LLM_RESEARCH_FAST if fast_mode else LLM_RESEARCH
     messages = [
-        {"role": "system", "content": "You are a risk-first investment analyst. Capital preservation is #1. No hopium, no emotional language. Respond with ONLY valid JSON. No markdown, no code fences."},
-        {"role": "user", "content": f"""Evaluate {ticker} BUSINESS VIABILITY for 12-month hold. Protect capital. Focus on survival and downside risk first, then upside.
-
-{fundamentals_summary}
-
-Respond with ONLY this JSON:
-{{"verdict":"INVEST","confidence":70,"moat_score":65,"moat_assessment":"1 sentence","sector_outlook":"1 sentence","growth_durability":"1 sentence","competitive_threats":["threat1"],"catalysts_12m":["catalyst1"],"bear_thesis":"why this could fail","bull_thesis":"why this could succeed","revenue_trajectory":"growing/flat/declining","summary":"1-2 sentences, risk-first"}}"""}
-    ]
-    raw = _call_openrouter(model, messages, max_tokens=1024, timeout=45)
-    return _parse_json_response(raw, "business_viability")
-
-
-def _predict_financial_health(fundamentals_summary: str, ticker: str, fast_mode: bool = False) -> dict:
-    """LLM 2: Financial health — burn rate, cash runway, debt, survival probability."""
-    model = LLM_RESEARCH_FAST if fast_mode else LLM_PATTERN
-    messages = [
-        {"role": "system", "content": "You are a forensic financial analyst. Focus on survival probability and dilution risk. No emotional language. Respond with ONLY valid JSON. No markdown, no code fences."},
-        {"role": "user", "content": f"""Evaluate {ticker} FINANCIAL HEALTH for 12-month hold. Is this company financially safe? Focus on: cash burn, debt servicing, dilution risk, bankruptcy risk.
-
-{fundamentals_summary}
-
-IMPORTANT: Be realistic about survival probability. Most established profitable companies have >90% survival probability. Only assign <75% for companies actively burning cash with <12 months runway, facing imminent debt defaults, or in active restructuring.
-
-Respond with ONLY this JSON:
-{{"verdict":"INVEST","confidence":70,"survival_probability":85,"financial_grade":"A","cash_position":"strong/adequate/weak/critical","burn_assessment":"1 sentence if burning","debt_risk":"LOW/MEDIUM/HIGH","fcf_trajectory":"improving/stable/declining","dilution_risk":"LOW/MEDIUM/HIGH","revenue_quality":"1 sentence","red_flags":["flag1"],"green_flags":["flag1"],"summary":"1-2 sentences, risk-first"}}"""}
+        {"role": "system", "content": FACT_GATHERER_SYSTEM},
+        {"role": "user", "content": FACT_GATHERER_USER_TEMPLATE.format(ticker=ticker, fundamentals_summary=fundamentals_summary, price_action_summary=price_action_summary)},
     ]
     raw = _call_openrouter(model, messages, max_tokens=1200, timeout=45)
-    return _parse_json_response(raw, "financial_health")
+    return _parse_json_response(raw, "fact_gatherer")
 
 
-def _predict_valuation_price(fundamentals_summary: str, ticker: str) -> dict:
-    """LLM 3: Valuation & price target — DCF-lite, peer comparison, 12m targets."""
+def _evaluate_company_health(fundamentals_summary: str, fact_gatherer_output: dict, ticker: str, fast_mode: bool = False) -> dict:
+    """LLM 2 (Company Health): Financial health + moat assessment, informed by fact gatherer."""
+    model = LLM_RESEARCH_FAST if fast_mode else LLM_PATTERN
+    facts_context = json.dumps({k: v for k, v in fact_gatherer_output.items() if not k.startswith("_")}, default=str)[:1500]
     messages = [
-        {"role": "system", "content": "You are a quantitative valuation analyst. No hopium. Respond with ONLY valid JSON. No markdown, no code fences."},
-        {"role": "user", "content": f"""Calculate FAIR VALUE and 12-MONTH PRICE TARGETS for {ticker}. Focus on margin of safety and downside risk.
-
-{fundamentals_summary}
-
-Respond with ONLY this JSON:
-{{"verdict":"INVEST","confidence":70,"fair_value":0.00,"current_vs_fair":"undervalued/fairly valued/overvalued","margin_of_safety_pct":15,"price_targets":{{"bear":0.00,"bear_probability":20,"base":0.00,"base_probability":55,"bull":0.00,"bull_probability":25}},"upside_pct":25,"downside_pct":15,"peer_comparison":"1 sentence","valuation_assessment":"1 sentence","dcf_notes":"key assumptions","entry_attractiveness":"attractive/fair/wait","catalysts_for_rerating":["catalyst1"],"summary":"1-2 sentences, risk-first"}}"""}
+        {"role": "system", "content": COMPANY_HEALTH_SYSTEM},
+        {"role": "user", "content": COMPANY_HEALTH_USER_TEMPLATE.format(ticker=ticker, fundamentals_summary=fundamentals_summary, facts_context=facts_context)},
     ]
-    raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1024, timeout=45)
-    return _parse_json_response(raw, "valuation_price")
+    raw = _call_openrouter(model, messages, max_tokens=1200, timeout=45)
+    return _parse_json_response(raw, "company_health")
 
 
-def _build_investment_verdict(biz: dict, health: dict, val: dict) -> dict:
-    """Synthesize 3 investment model outputs into final INVEST/HOLD/PASS verdict with risk gates."""
+def _evaluate_price_action(price_action_summary: str, fundamentals_summary: str, fact_gatherer_output: dict, ticker: str) -> dict:
+    """LLM 3 (Price Action): Valuation + technical analysis, informed by fact gatherer."""
+    facts_context = json.dumps({k: v for k, v in fact_gatherer_output.items() if not k.startswith("_")}, default=str)[:1500]
+    messages = [
+        {"role": "system", "content": PRICE_ACTION_SYSTEM},
+        {"role": "user", "content": PRICE_ACTION_USER_TEMPLATE.format(ticker=ticker, fundamentals_summary=fundamentals_summary, price_action_summary=price_action_summary, facts_context=facts_context)},
+    ]
+    raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1200, timeout=45)
+    return _parse_json_response(raw, "price_action")
+
+
+def _build_investment_verdict(facts: dict, health: dict, price: dict, supervisor: dict) -> dict:
+    """Synthesize 4 model outputs into final INVEST/HOLD/PASS verdict with 3/4 quorum."""
     scores = []
     verdicts = []
     risk_flags = []
 
     # ── Risk Gates ──
-    # Default survival to 90 if health model errored (don't penalize for LLM failure)
     survival = health.get("survival_probability") or 90
     if health.get("error"):
-        survival = 90  # Don't force PASS on model errors
+        survival = 90
     dilution_risk = str(health.get("dilution_risk", "")).upper()
 
     if survival < 75:
         risk_flags.append("Survival probability {}% (below 75% threshold)".format(survival))
-
     if dilution_risk.startswith("HIGH"):
         risk_flags.append("HIGH dilution risk")
 
-    # Force PASS on critical risk
     force_pass = survival < 75 or dilution_risk.startswith("HIGH")
 
-    # ── Scoring ──
-    biz_conf = biz.get("confidence", 0)
-    biz_verdict = biz.get("verdict", "HOLD").upper()
-    if not biz.get("error"):
-        scores.append(biz_conf)
-        verdicts.append(biz_verdict)
-
-    health_conf = health.get("confidence", 0)
-    health_verdict = health.get("verdict", "HOLD").upper()
-    if not health.get("error"):
-        scores.append(health_conf)
-        verdicts.append(health_verdict)
-
-    val_conf = val.get("confidence", 0)
-    val_verdict = val.get("verdict", "HOLD").upper()
-    if not val.get("error"):
-        scores.append(val_conf)
-        verdicts.append(val_verdict)
+    # ── Scoring (4 voters) ──
+    model_scores = {}
+    for label, model_out in [("fact_gatherer", facts), ("company_health", health),
+                              ("price_action", price), ("supervisor", supervisor)]:
+        conf = model_out.get("confidence", 0)
+        verdict = model_out.get("verdict", "HOLD").upper()
+        if not model_out.get("error"):
+            scores.append(conf)
+            verdicts.append(verdict)
+            model_scores[label] = conf
 
     avg_score = sum(scores) / len(scores) if scores else 0
     invest_count = sum(1 for v in verdicts if v == "INVEST")
     pass_count = sum(1 for v in verdicts if v == "PASS")
 
+    # 3/4 quorum logic
     if force_pass:
         final = "PASS"
         color = "red"
     elif pass_count >= 2 or avg_score < 35:
         final = "PASS"
         color = "red"
-    elif invest_count >= 2 and avg_score >= 60:
+    elif invest_count >= 3 and avg_score >= 55:
         final = "INVEST"
         color = "green"
-    elif invest_count >= 1 and avg_score >= 50:
+    elif invest_count >= 2 and avg_score >= 45:
         final = "HOLD"
         color = "yellow"
     else:
         final = "HOLD"
         color = "yellow"
 
-    price_targets = val.get("price_targets", {})
+    price_targets = price.get("price_targets", {})
 
     return {
         "final_verdict": final,
         "color": color,
         "composite_score": round(avg_score, 1),
-        "business_score": biz_conf,
-        "health_score": health_conf,
-        "valuation_score": val_conf,
+        "fact_gatherer_score": model_scores.get("fact_gatherer", 0),
+        "health_score": model_scores.get("company_health", 0),
+        "price_action_score": model_scores.get("price_action", 0),
+        "supervisor_score": model_scores.get("supervisor", 0),
         "survival_probability": survival,
         "models_invest": invest_count,
         "models_pass": pass_count,
         "total_models": len(verdicts),
         "price_targets": price_targets,
-        "fair_value": val.get("fair_value"),
-        "upside_pct": val.get("upside_pct"),
-        "downside_pct": val.get("downside_pct"),
+        "fair_value": price.get("fair_value"),
+        "upside_pct": price.get("upside_pct"),
+        "downside_pct": price.get("downside_pct"),
         "risk_flags": risk_flags,
     }
+
+
+# ─── Supervisor / Judge LLM ───────────────────────────────────────
+
+def _validate_supervisor(context: str, prior_verdicts: dict, layer: str) -> dict:
+    """4th LLM gate — Supervisor/Judge that can veto prior consensus.
+
+    Only called when LLM_SUPERVISOR is configured (non-empty).
+    Returns {override: bool, final_verdict, reasoning, confidence, risk_flags}.
+    On error, returns {override: False} for graceful degradation.
+    """
+    if not LLM_SUPERVISOR:
+        return {"override": False, "skipped": True}
+
+    system_prompt = SUPERVISOR_PROMPTS.get(layer, SUPERVISOR_PROMPTS["setup"])
+
+    verdicts_summary = json.dumps(prior_verdicts, indent=2, default=str)[:2000]
+
+    user_msg = SUPERVISOR_USER_TEMPLATE.format(
+        layer=layer,
+        verdicts_summary=verdicts_summary,
+        context=context[:2000],
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+
+    try:
+        raw = _call_openrouter(LLM_SUPERVISOR, messages, max_tokens=1024, timeout=45)
+        result = _parse_json_response(raw, "supervisor")
+        result["model"] = LLM_SUPERVISOR
+        return result
+    except Exception as e:
+        return {"override": False, "error": str(e), "model": LLM_SUPERVISOR}
 
 
 # ─── JSON Parsing ────────────────────────────────────────────────
@@ -599,15 +717,24 @@ def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
     use_fast = fast_mode if fast_mode is not None else LLM_FAST_MODE
     ticker = analysis.get("ticker", "UNKNOWN")
 
+    # Capture user context from calling thread to propagate into executor threads
+    from rate_limiter import get_llm_user, set_llm_user
+    _ctx_uid, _ctx_src = get_llm_user()
+
+    def _run_with_context(fn, *args):
+        if _ctx_uid:
+            set_llm_user(_ctx_uid, _ctx_src)
+        return fn(*args)
+
     # Build context-specific summaries to reduce tokens
     research_summary = _build_data_summary(analysis, context="research")
     pattern_summary = _build_data_summary(analysis, context="pattern")
     prediction_summary = _build_data_summary(analysis, context="prediction")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        future_research = executor.submit(_validate_research, research_summary, ticker, use_fast)
-        future_pattern = executor.submit(_validate_pattern, pattern_summary, ticker)
-        future_prediction = executor.submit(_validate_prediction, prediction_summary, ticker)
+        future_research = executor.submit(_run_with_context, _validate_research, research_summary, ticker, use_fast)
+        future_pattern = executor.submit(_run_with_context, _validate_pattern, pattern_summary, ticker)
+        future_prediction = executor.submit(_run_with_context, _validate_prediction, prediction_summary, ticker)
 
         research = future_research.result()
         pattern = future_pattern.result()
@@ -615,8 +742,23 @@ def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
 
     verdict = _build_final_verdict(research, pattern, prediction)
 
+    # Supervisor gate — only if configured
+    supervisor = None
+    if LLM_SUPERVISOR and verdict["final_verdict"] not in ("AVOID",):
+        supervisor = _validate_supervisor(
+            research_summary[:1000],
+            {"research": research.get("verdict"), "pattern_valid": pattern.get("pattern_valid"),
+             "prediction": prediction.get("trade_verdict"), "final": verdict["final_verdict"],
+             "composite_score": verdict["composite_score"]},
+            layer="setup",
+        )
+        if supervisor.get("override") is True:
+            verdict["final_verdict"] = "AVOID"
+            verdict["color"] = "red"
+            verdict["risk_flags"].append(f"Supervisor veto: {supervisor.get('reasoning', 'N/A')}")
+
     research_model = LLM_RESEARCH_FAST if use_fast else LLM_RESEARCH
-    return {
+    result = {
         "configured": True,
         "ticker": ticker,
         "timestamp": datetime.now().isoformat(),
@@ -630,12 +772,47 @@ def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
         "prediction": prediction,
         "verdict": verdict,
     }
+    if supervisor:
+        result["supervisor"] = supervisor
+    return result
 
 
-def predict_12month(fundamentals: dict, fast_mode: bool = None) -> dict:
+def _supervisor_review(facts: dict, health: dict, price: dict, ticker: str, fast_mode: bool = False) -> dict:
+    """LLM 4 (Supervisor): Reviews all prior model outputs and casts own vote."""
+    model = LLM_SUPERVISOR if LLM_SUPERVISOR else (LLM_RESEARCH_FAST if fast_mode else LLM_RESEARCH)
+    prior_summary = json.dumps({
+        "fact_gatherer": {k: v for k, v in facts.items() if not k.startswith("_")},
+        "company_health": {k: v for k, v in health.items() if not k.startswith("_")},
+        "price_action": {k: v for k, v in price.items() if not k.startswith("_")},
+    }, default=str)[:3000]
+
+    messages = [
+        {"role": "system", "content": "You are a senior investment supervisor. Your job is to review all prior analysis, catch errors or overconfidence, identify missed risks, and cast your own independent vote. Respond with ONLY valid JSON. No markdown, no code fences."},
+        {"role": "user", "content": f"""Review the complete analysis of {ticker} from 3 prior models. Cast your own INVEST/HOLD/PASS vote.
+
+PRIOR MODEL OUTPUTS:
+{prior_summary}
+
+As the final reviewer, check for:
+1. Overconfidence or hopium in any model
+2. Missed macro/sector risks
+3. Contradictions between models
+4. Whether the evidence actually supports the verdicts given
+
+Respond with ONLY this JSON:
+{{"verdict":"INVEST","confidence":70,"agrees_with_health":true,"agrees_with_price_action":true,"override_flags":["any critical issue that should force a different verdict"],"reasoning":"2-3 sentences explaining your independent assessment","risk_flags":["risk1"],"summary":"1 sentence final take"}}"""}
+    ]
+    raw = _call_openrouter(model, messages, max_tokens=1024, timeout=45)
+    return _parse_json_response(raw, "supervisor")
+
+
+def predict_12month(fundamentals: dict, indicators: dict = None, df=None, fast_mode: bool = None) -> dict:
     """
-    Run 12-month investment prediction using 3 LLMs in parallel.
-    Returns comprehensive investment verdict with INVEST/HOLD/PASS.
+    Run 12-month investment prediction using 4 LLMs.
+    Phase 1: Fact Gatherer (sequential)
+    Phase 2: Company Health + Price Action (parallel)
+    Phase 3: Supervisor Review (sequential)
+    Returns comprehensive investment verdict with INVEST/HOLD/PASS (3/4 quorum).
     """
     if not is_configured():
         return {
@@ -646,28 +823,46 @@ def predict_12month(fundamentals: dict, fast_mode: bool = None) -> dict:
     use_fast = fast_mode if fast_mode is not None else LLM_FAST_MODE
     ticker = fundamentals.get("ticker", "UNKNOWN")
     fundamentals_summary = _build_fundamentals_summary(fundamentals)
+    price_action_summary = _build_price_action_summary(indicators or {}, df)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        future_biz = executor.submit(_predict_business_viability, fundamentals_summary, ticker, use_fast)
-        future_health = executor.submit(_predict_financial_health, fundamentals_summary, ticker, use_fast)
-        future_val = executor.submit(_predict_valuation_price, fundamentals_summary, ticker)
+    # Capture thread-local LLM user context for propagation into child threads
+    from rate_limiter import get_llm_user, set_llm_user
+    _ctx_uid, _ctx_src = get_llm_user()
 
-        biz = future_biz.result()
+    def _run_with_context(fn, *args):
+        if _ctx_uid:
+            set_llm_user(_ctx_uid, _ctx_src)
+        return fn(*args)
+
+    # Phase 1: Fact Gatherer (sequential — feeds into Phase 2)
+    facts = _gather_facts(fundamentals_summary, price_action_summary, ticker, use_fast)
+
+    # Phase 2: Company Health + Price Action (parallel)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        future_health = executor.submit(_run_with_context, _evaluate_company_health, fundamentals_summary, facts, ticker, use_fast)
+        future_price = executor.submit(_run_with_context, _evaluate_price_action, price_action_summary, fundamentals_summary, facts, ticker)
+
         health = future_health.result()
-        val = future_val.result()
+        price = future_price.result()
 
-    verdict = _build_investment_verdict(biz, health, val)
+    # Phase 3: Supervisor Review (sequential — reviews all prior outputs)
+    supervisor = _run_with_context(_supervisor_review, facts, health, price, ticker, use_fast)
 
-    biz_model = LLM_RESEARCH_FAST if use_fast else LLM_RESEARCH
+    # Build verdict with 3/4 quorum from all 4 models
+    verdict = _build_investment_verdict(facts, health, price, supervisor)
+
+    fact_model = LLM_RESEARCH_FAST if use_fast else LLM_RESEARCH
     health_model = LLM_RESEARCH_FAST if use_fast else LLM_PATTERN
-    return {
+    supervisor_model = LLM_SUPERVISOR if LLM_SUPERVISOR else fact_model
+    result = {
         "configured": True,
         "ticker": ticker,
         "timestamp": datetime.now().isoformat(),
         "models": {
-            "business_viability": biz_model,
-            "financial_health": health_model,
-            "valuation_price": LLM_PREDICTION,
+            "fact_gatherer": fact_model,
+            "company_health": health_model,
+            "price_action": LLM_PREDICTION,
+            "supervisor": supervisor_model,
         },
         "fundamentals_snapshot": {
             "pe_forward": fundamentals.get("valuation", {}).get("pe_forward"),
@@ -677,8 +872,10 @@ def predict_12month(fundamentals: dict, fast_mode: bool = None) -> dict:
             "is_burning": fundamentals.get("derived", {}).get("is_burning_cash"),
             "cash_runway": fundamentals.get("derived", {}).get("cash_runway_months"),
         },
-        "business_viability": biz,
-        "financial_health": health,
-        "valuation_price": val,
+        "fact_gatherer": facts,
+        "company_health": health,
+        "price_action": price,
+        "supervisor": supervisor,
         "verdict": verdict,
     }
+    return result

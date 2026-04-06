@@ -1,0 +1,46 @@
+id: client-review
+name: Client Review Prep
+domain: Wealth Management
+description: >
+  Prepare materials for a client review meeting including portfolio
+  performance summary, market outlook, discussion points, and
+  recommended action items.
+icon: "users"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Portfolio Tickers (comma-separated)
+    required: true
+    placeholder: "e.g. VTI, VXUS, BND, VNQ"
+  - name: portfolio_csv
+    type: file
+    label: Portfolio CSV (optional)
+    required: false
+    accept: ".csv,.tsv,.txt"
+    placeholder: "Upload CSV with holdings (ticker, shares, cost_basis...)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering portfolio and market data
+    actions:
+      - type: fetch_fundamentals
+        description: Fetch portfolio fundamentals
+      - type: fetch_prices
+        description: Fetch portfolio price history
+        config:
+          period: "1y"
+  - name: Review Prep
+    description: AI preparing review materials
+    actions:
+      - type: llm_client_review
+        description: Generate client review preparation materials
+  - name: Quality Review
+    description: Reviewing materials quality
+    actions:
+      - type: llm_qc
+        description: Quality check review pass

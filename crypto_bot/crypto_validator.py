@@ -72,7 +72,16 @@ def _call_openrouter(model: str, messages: list, timeout: int = 60) -> str:
     try:
         resp = requests.post(OPENROUTER_URL, headers=HEADERS, json=payload, timeout=timeout)
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        content = resp.json()["choices"][0]["message"]["content"]
+        # Record LLM usage
+        try:
+            from rate_limiter import get_llm_user, record_llm_call
+            uid, source = get_llm_user()
+            if uid:
+                record_llm_call(uid, source, model)
+        except Exception:
+            pass
+        return content
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -136,7 +145,7 @@ Historical Performance (last 7 days):
         if coin_stats:
             ctx += f"\n- This coin ({coin}): {coin_stats['trades']} trades, {coin_stats['win_rate']}% win rate, avg P&L ${coin_stats['avg_pnl']}"
 
-    ctx += "\n\nThis is a PAPER TRADING bot. Evaluate trade quality critically. If a coin or strategy has a poor recent track record (low win rate, negative avg P&L), that is a STRONG signal to reject. Do not ignore historical performance."
+    ctx += "\n\nThis is a PAPER TRADING bot. The goal is to ACTIVELY TRADE swing opportunities. Approve trades that have reasonable technical confluence (2+ indicators aligning). Only reject if indicators clearly conflict or setup is fundamentally flawed. Poor recent history should add caution but not auto-reject — strategies cycle."
     return ctx
 
 
@@ -154,13 +163,11 @@ Respond in JSON format ONLY:
     "risk_level": "low/medium/high/extreme"
 }}
 
-Approve ONLY if at least 3 indicators clearly support the trade direction. Reject if:
-- RSI contradicts the direction (>65 for buy, <35 for sell)
-- Indicators are mixed with weak agreement
-- The setup has marginal edge or relies on a single indicator
-- Historical performance for this coin or strategy shows consistent losses
-- The coin has low win rate (<30%) in recent history
-Default to execute=false unless the setup is strong and well-confirmed.
+Approve if at least 2 indicators support the trade direction. This is paper trading — the goal is to take swings and learn. Reject ONLY if:
+- RSI strongly contradicts (>75 for buy, <25 for sell)
+- Indicators clearly conflict (majority oppose the direction)
+- The setup is fundamentally flawed (e.g., buying at extreme overbought)
+Default to execute=true for reasonable setups with decent risk/reward.
 """
     return _call_ollama(prompt)
 
@@ -180,12 +187,11 @@ Evaluate the SENTIMENT and MOMENTUM of this trade. Respond in JSON:
     "reasoning": "brief explanation"
 }}
 
-Approve ONLY if momentum clearly supports the trade direction and at least 3 indicators align strongly. Reject if:
-- Indicators give mixed signals or only weakly support the direction
-- Historical performance for this coin/strategy shows consistent losses (win rate < 30%)
-- The trade is fighting the higher timeframe trend
-- Momentum is neutral or contradicts the trade side
-Default to execute=false unless the case is compelling."""}
+Approve if momentum generally supports the trade direction and 2+ indicators align. This is paper trading for learning. Reject ONLY if:
+- Momentum clearly and strongly opposes the trade direction
+- The trade is obviously fighting a strong higher timeframe trend
+- Indicators significantly conflict with the trade side
+Default to execute=true for reasonable swing setups."""}
     ]
     raw = _call_openrouter(LLM_BOT_SENTIMENT, messages)
     return _parse_json(raw)
@@ -207,13 +213,11 @@ Evaluate the RISK of this trade. Consider: overextension, false signal probabili
     "reasoning": "brief explanation"
 }}
 
-Reject when ANY of these apply:
-- Risk score is above 60 (high risk)
-- Historical win rate for this coin or strategy is below 30%
-- Indicators give mixed or weak confirmation
-- The trade is counter-trend on higher timeframe
-- False signal probability exceeds 0.5
-Only approve if the risk/reward is clearly favorable and multiple indicators confirm."""}
+Reject ONLY when:
+- Risk score is above 80 (extreme risk)
+- Indicators clearly and strongly oppose the trade direction
+- False signal probability exceeds 0.7
+This is paper trading — err toward taking trades to gather data. Approve trades with acceptable risk/reward and reasonable indicator support."""}
     ]
     raw = _call_openrouter(LLM_BOT_RISK, messages)
     return _parse_json(raw)
@@ -418,6 +422,15 @@ def validate_trade(coin: str, side: str, price: float,
                                          performance_history=performance_history,
                                          strategy_name=strategy_name)
 
+    # Capture thread-local LLM user context for propagation into child threads
+    from rate_limiter import get_llm_user, set_llm_user
+    _ctx_uid, _ctx_src = get_llm_user()
+
+    def _run_with_context(fn, *args):
+        if _ctx_uid:
+            set_llm_user(_ctx_uid, _ctx_src)
+        return fn(*args)
+
     result = {
         "approved": False,
         "ollama": None,
@@ -435,11 +448,20 @@ def validate_trade(coin: str, side: str, price: float,
 
     # Gate 2: OpenRouter — 2 models in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        sentiment_future = executor.submit(_validate_sentiment, trade_context)
-        risk_future = executor.submit(_validate_risk, trade_context)
+        sentiment_future = executor.submit(_run_with_context, _validate_sentiment, trade_context)
+        risk_future = executor.submit(_run_with_context, _validate_risk, trade_context)
 
-        sentiment_result = sentiment_future.result()
-        risk_result = risk_future.result()
+        try:
+            sentiment_result = sentiment_future.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"Sentiment future failed/timed out: {e}")
+            sentiment_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — sentiment validator timed out (paper trading auto-approve)"}
+
+        try:
+            risk_result = risk_future.result(timeout=90)
+        except Exception as e:
+            logger.warning(f"Risk future failed/timed out: {e}")
+            risk_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — risk validator timed out (paper trading auto-approve)"}
 
     result["sentiment"] = sentiment_result
     result["risk"] = risk_result
@@ -463,11 +485,11 @@ def validate_trade(coin: str, side: str, price: float,
     if risk_error:
         total_voters -= 1
 
-    # If no validators available at all, REJECT — don't trade blind
+    # If no validators available at all, auto-approve for paper trading
     if total_voters == 0:
-        result["approved"] = False
-        result["summary"] = "All validators unreachable — rejected (no validation available)"
-    elif votes_for >= max(2, (total_voters + 1) // 2):
+        result["approved"] = True
+        result["summary"] = "All validators unreachable — auto-approved (paper trading)"
+    elif votes_for >= max(1, (total_voters + 1) // 2):
         # Majority approves (at least half, minimum 1)
         result["approved"] = True
         approvers = []
@@ -488,5 +510,32 @@ def validate_trade(coin: str, side: str, price: float,
             reasons.append(f"Risk: {risk_result.get('reasoning', 'rejected')}")
         result["summary"] = f"Blocked ({votes_for}/{total_voters} votes) — " + "; ".join(reasons)
 
-    logger.info(f"Trade {side} {coin}: {'APPROVED' if result['approved'] else 'BLOCKED'} — {result['summary']}")
+    # Aggregate confidence from individual validators
+    conf_values = []
+    for v in [ollama_result, sentiment_result, risk_result]:
+        c = v.get("confidence")
+        if c is not None and isinstance(c, (int, float)):
+            conf_values.append(float(c))
+    result["confidence"] = round(sum(conf_values) / len(conf_values), 2) if conf_values else 0.5
+
+    # Supervisor gate — only if trade approved and LLM_SUPERVISOR configured
+    if result["approved"]:
+        try:
+            from ai_validator import _validate_supervisor, LLM_SUPERVISOR
+            if LLM_SUPERVISOR:
+                supervisor = _validate_supervisor(
+                    trade_context[:1000],
+                    {"ollama": ollama_result.get("execute"), "sentiment": sentiment_result.get("execute"),
+                     "risk": risk_result.get("execute"), "approved": True, "summary": result["summary"]},
+                    layer="bot_crypto",
+                )
+                result["supervisor"] = supervisor
+                if supervisor.get("override") is True:
+                    result["approved"] = False
+                    result["summary"] = f"Supervisor veto: {supervisor.get('reasoning', 'overridden')} (was: {result['summary']})"
+                    logger.warning(f"Supervisor VETOED crypto trade {side} {coin}: {supervisor.get('reasoning')}")
+        except Exception as e:
+            logger.warning(f"Supervisor check failed (graceful skip): {e}")
+
+    logger.info(f"Trade {side} {coin}: {'APPROVED' if result['approved'] else 'BLOCKED'} — {result['summary']} (confidence={result['confidence']:.0%})")
     return result

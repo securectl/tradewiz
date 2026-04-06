@@ -1,0 +1,50 @@
+id: portfolio-rebalance
+name: Portfolio Rebalance
+domain: Wealth Management
+description: >
+  Analyze portfolio drift from target allocation and generate specific
+  rebalancing trades. Considers tax implications and transaction costs.
+icon: "refresh"
+tier_required: pro
+estimated_minutes: 3
+llm_calls_required: 2
+input_schema:
+  - name: ticker
+    type: text
+    label: Current Holdings (comma-separated)
+    required: true
+    placeholder: "e.g. AAPL, MSFT, VTI, BND, GLD"
+  - name: target_allocation
+    type: text
+    label: Target Allocation (optional, comma-separated %)
+    required: false
+    placeholder: "e.g. 20, 20, 30, 20, 10"
+  - name: portfolio_csv
+    type: file
+    label: Portfolio CSV (optional)
+    required: false
+    accept: ".csv,.tsv,.txt"
+    placeholder: "Upload CSV with holdings (ticker, shares, cost_basis...)"
+output_types:
+  - json
+  - docx
+phases:
+  - name: Data Collection
+    description: Gathering portfolio data
+    actions:
+      - type: fetch_fundamentals
+        description: Fetch fundamental data
+      - type: fetch_prices
+        description: Fetch price history
+        config:
+          period: "1y"
+  - name: Rebalance Analysis
+    description: AI analyzing drift and generating trades
+    actions:
+      - type: llm_rebalance
+        description: Analyze drift and generate rebalancing trades
+  - name: Quality Review
+    description: Reviewing rebalance plan
+    actions:
+      - type: llm_qc
+        description: Quality check review pass
