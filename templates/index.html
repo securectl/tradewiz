@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="/static/css/features/admin/admin.css">
     <link rel="stylesheet" href="/static/css/features/predictions/predictions.css">
     <link rel="stylesheet" href="/static/css/features/congress/congress.css">
+    <link rel="stylesheet" href="/static/css/features/watchdog/watchdog.css?v=1">
     <link rel="stylesheet" href="/static/css/mobile.css">
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -142,6 +143,7 @@
     <button class="tab-btn" data-tab="predictions" data-role="pro" onclick="switchTab('predictions')" style="display:none;">Markets</button>
     <button class="tab-btn" data-tab="congress" data-role="pro" onclick="switchTab('congress')" style="display:none;">Congress</button>
     <button class="tab-btn" data-tab="trump" data-role="pro" onclick="switchTab('trump')" style="display:none;">Trump</button>
+    <button class="tab-btn" data-tab="watchdog" data-role="trader" onclick="switchTab('watchdog')" style="display:none;">Watchdog</button>
     <button class="tab-btn" data-tab="autotrading" data-role="trader" onclick="switchTab('autotrading')" style="display:none;">Crypto Trading</button>
     <button class="tab-btn" data-tab="stocktrading" data-role="trader" onclick="switchTab('stocktrading')" style="display:none;">Stock Trading</button>
     <button class="tab-btn" data-tab="admin" data-role="admin" onclick="switchTab('admin')" style="display:none;">Admin</button>
@@ -356,6 +358,7 @@
             <button class="screener-category-btn" data-category="ai" onclick="switchScreenerCategory('ai')">AI</button>
             <button class="screener-category-btn" data-category="gainers" onclick="switchScreenerCategory('gainers')">Top Gainers</button>
             <button class="screener-category-btn" data-category="losers" onclick="switchScreenerCategory('losers')">Top Losers</button>
+            <button class="screener-category-btn" data-category="oversold" onclick="switchScreenerCategory('oversold')">Oversold</button>
         </div>
         <div class="screener-timeframe-bar" id="screener-timeframe-bar" style="display:none;">
             <span style="color:#787b86; font-size:12px; margin-right:8px;">Timeframe:</span>
@@ -397,6 +400,19 @@
             <p>Select a category above, then scan and vet stocks with AI. Each category uses tailored analysis prompts.</p>
             <p style="margin-top:12px; font-size:12px;">Click "Scan & Vet with AI" to start.</p>
         </div>
+    </div>
+
+    <!-- Trending Signals + Past Scans -->
+    <div style="margin-top:16px;">
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <button class="screener-category-btn active" id="btn-trending-tab" onclick="showScreenerTab('trending')" style="font-size:12px; padding:6px 14px;">Trending Signals</button>
+            <button class="screener-category-btn" id="btn-history-tab" onclick="showScreenerTab('history')" style="font-size:12px; padding:6px 14px;">Past Scans</button>
+        </div>
+        <div id="screener-trending-panel" style="background:#1e222d; border:1px solid #2a2e39; border-radius:8px; padding:16px;"></div>
+        <div id="screener-history-panel" style="background:#1e222d; border:1px solid #2a2e39; border-radius:8px; padding:16px; display:none;">
+        <div id="screener-history-days" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;"></div>
+        <div id="screener-history-table" style="overflow-x:auto;"></div>
+    </div>
     </div>
 </div>
 
@@ -530,10 +546,43 @@
         </div>
     </div>
 
+    <!-- Trade Signals (BUY / AVOID) -->
+    <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;margin-bottom:20px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Trade Signals — Based on Current Rhetoric</div>
+        <div id="trump-trade-signals" style="font-size:12px;color:var(--text-secondary);">Loading...</div>
+    </div>
+
     <!-- Mood History Chart -->
     <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;margin-bottom:20px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Mood Timeline</div>
         <div id="trump-chart" style="height:200px;position:relative;"></div>
+    </div>
+
+    <!-- Backtrack Tracker -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:20px;" id="trump-backtrack-grid">
+        <!-- Backtrack Prediction Card -->
+        <div id="trump-backtrack-prediction" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);">Backtrack Predictor</div>
+                <button onclick="loadBacktrackPrediction(true)" class="btn-analyze" style="padding:4px 12px;font-size:10px;">Predict</button>
+            </div>
+            <div style="text-align:center;padding:20px 0;">
+                <div style="font-size:10px;color:var(--text-secondary);">Click Predict to forecast policy reversals</div>
+            </div>
+        </div>
+        <!-- Backtrack Stats Card -->
+        <div id="trump-backtrack-stats" style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Reversal Stats</div>
+            <div style="text-align:center;padding:20px 0;">
+                <div style="font-size:10px;color:var(--text-secondary);">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backtrack Timeline -->
+    <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:12px;padding:20px;margin-bottom:20px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Policy Reversal Timeline</div>
+        <div id="trump-backtrack-timeline" style="font-size:12px;color:var(--text-secondary);">Loading...</div>
     </div>
 
     <!-- Signals + Notable Posts -->
@@ -695,6 +744,13 @@
     <div class="finskills-domains" id="finskills-domains"></div>
 </div>
 
+<!-- Watchdog Trader View -->
+<div id="watchdog-content" style="display:none;padding:20px;">
+    <div id="watchdog-dashboard">
+        <div style="text-align:center;padding:40px 0;color:var(--text-secondary);">Loading Watchdog...</div>
+    </div>
+</div>
+
 <!-- Auto Trading View -->
 <div class="autotrading-content" id="autotrading-content" style="display:none;">
     <!-- Top Bar -->
@@ -753,8 +809,8 @@
 
             <!-- P&L Chart -->
             <div class="bot-panel">
-                <div class="bot-panel-title">Cumulative P&L</div>
-                <div id="bot-pnl-chart" style="height:250px;"></div>
+                <div class="bot-panel-title">Daily P&L — Crypto</div>
+                <div id="bot-pnl-chart" style="height:300px;"></div>
                 <div id="bot-pnl-summary" class="pnl-summary-grid">
                     <div class="pnl-period"><span class="pnl-period-label">Day</span><span class="pnl-period-value" id="pnl-day">$0.00</span></div>
                     <div class="pnl-period"><span class="pnl-period-label">Week</span><span class="pnl-period-value" id="pnl-week">$0.00</span></div>
@@ -762,6 +818,7 @@
                     <div class="pnl-period"><span class="pnl-period-label">Year</span><span class="pnl-period-value" id="pnl-year">$0.00</span></div>
                     <div class="pnl-period"><span class="pnl-period-label">All Time</span><span class="pnl-period-value" id="pnl-all">$0.00</span></div>
                 </div>
+                <div id="bot-daily-table"></div>
             </div>
             <!-- Open Positions -->
             <div class="bot-panel">
@@ -1019,8 +1076,8 @@
             </div>
             <!-- P&L Chart -->
             <div class="bot-panel">
-                <div class="bot-panel-title">Cumulative P&L (Stocks)</div>
-                <div id="sbot-pnl-chart" style="height:250px;"></div>
+                <div class="bot-panel-title">Daily P&L — Stocks</div>
+                <div id="sbot-pnl-chart" style="height:300px;"></div>
                 <div id="sbot-pnl-summary" class="pnl-summary-grid">
                     <div class="pnl-period"><span class="pnl-period-label">Day</span><span class="pnl-period-value" id="spnl-day">$0.00</span></div>
                     <div class="pnl-period"><span class="pnl-period-label">Week</span><span class="pnl-period-value" id="spnl-week">$0.00</span></div>
@@ -1028,6 +1085,7 @@
                     <div class="pnl-period"><span class="pnl-period-label">Year</span><span class="pnl-period-value" id="spnl-year">$0.00</span></div>
                     <div class="pnl-period"><span class="pnl-period-label">All Time</span><span class="pnl-period-value" id="spnl-all">$0.00</span></div>
                 </div>
+                <div id="sbot-daily-table"></div>
             </div>
             <!-- Open Positions -->
             <div class="bot-panel">
@@ -1250,6 +1308,7 @@
                 <div id="invite-bot-access-group" class="invite-bot-checkboxes" style="display:none;">
                     <label class="invite-checkbox-label"><input type="checkbox" id="invite-bot-crypto" value="crypto"> Crypto</label>
                     <label class="invite-checkbox-label"><input type="checkbox" id="invite-bot-stock" value="stock"> Stock</label>
+                    <label class="invite-checkbox-label"><input type="checkbox" id="invite-bot-watchdog" value="watchdog"> Watchdog</label>
                 </div>
                 <button class="btn-analyze" onclick="adminInviteUser()" style="padding:7px 16px; font-size:12px;">Invite</button>
             </div>
@@ -1476,9 +1535,9 @@ function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.d
 if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
 </script>
 
-<script src="/static/js/core.js"></script>
+<script src="/static/js/core.js?v=2"></script>
 <script src="/static/js/features/analysis/analysis.js"></script>
-<script src="/static/js/features/screener/screener.js"></script>
+<script src="/static/js/features/screener/screener.js?v=2"></script>
 <script src="/static/js/features/ipo/ipo.js"></script>
 <script src="/static/js/features/tracker/tracker.js"></script>
 <script src="/static/js/features/bot_crypto/bot_crypto.js"></script>
@@ -1489,6 +1548,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 <script src="/static/js/features/admin/admin.js"></script>
 <script src="/static/js/features/predictions/predictions.js"></script>
 <script src="/static/js/features/congress/congress.js"></script>
+<script src="/static/js/features/watchdog/watchdog.js?v=1"></script>
 <script src="/static/js/init.js"></script>
 <footer style="text-align:center;padding:16px 0 12px;font-size:11px;color:#636b7e;border-top:1px solid rgba(54,58,69,0.4);margin-top:24px;">
     TradeWiz is a product of <strong style="color:#c8ccd4;">Infinity Ventures Group LLC</strong><br>

@@ -148,7 +148,7 @@ def api_admin_invite():
     if tier != "pro":
         bot_access_list = []
     # Validate bot_access values
-    valid_bots = {"crypto", "stock"}
+    valid_bots = {"crypto", "stock", "watchdog"}
     bot_access_list = [b for b in bot_access_list if b in valid_bots]
     bot_access_str = ",".join(bot_access_list) if bot_access_list else "none"
 
@@ -184,7 +184,7 @@ def api_admin_invite_update(email):
         return jsonify({"error": "Invalid tier"}), 400
     if tier != "pro":
         bot_access_list = []
-    valid_bots = {"crypto", "stock"}
+    valid_bots = {"crypto", "stock", "watchdog"}
     bot_access_list = [b for b in bot_access_list if b in valid_bots]
     bot_access_str = ",".join(bot_access_list) if bot_access_list else "none"
     role = "trader" if tier == "pro" else "user"
@@ -316,7 +316,7 @@ def api_admin_user_tier(user_id):
 
     # Build bot_access string
     if bot_access_list is not None:
-        valid_bots = {"crypto", "stock"}
+        valid_bots = {"crypto", "stock", "watchdog"}
         bot_access_list = [b for b in bot_access_list if b in valid_bots]
         bot_access_str = ",".join(bot_access_list) if bot_access_list else "none"
     else:

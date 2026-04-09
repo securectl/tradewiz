@@ -17,9 +17,10 @@ async function loadAdminUsers() {
             const botAccess = (u.bot_access || 'none').split(',').map(b => b.trim()).filter(b => b && b !== 'none');
             const hasCrypto = botAccess.includes('crypto');
             const hasStock = botAccess.includes('stock');
+            const hasWatchdog = botAccess.includes('watchdog');
             const isPro = tier === 'pro';
             return `
-            <tr data-user-id="${u.id}" data-tier="${tier}" data-bot-crypto="${hasCrypto}" data-bot-stock="${hasStock}">
+            <tr data-user-id="${u.id}" data-tier="${tier}" data-bot-crypto="${hasCrypto}" data-bot-stock="${hasStock}" data-bot-watchdog="${hasWatchdog}">
                 <td>
                     <div>${u.name || '—'}${u.is_locked ? ' <span style="color:var(--accent-red);font-size:10px;font-weight:700">LOCKED</span>' : ''}</div>
                     <div style="font-size:10px;color:var(--text-secondary)">${u.email}</div>
@@ -36,6 +37,7 @@ async function loadAdminUsers() {
                     <div class="bot-toggle-group" id="bot-toggles-${u.id}" style="${isPro && !isAdmin ? '' : isAdmin ? '' : 'opacity:0.4;pointer-events:none'}">
                         <button class="bot-toggle-btn${hasCrypto ? ' active' : ''}" data-bot="crypto" onclick="toggleBotAccess(${u.id}, 'crypto', this)">Crypto</button>
                         <button class="bot-toggle-btn${hasStock ? ' active' : ''}" data-bot="stock" onclick="toggleBotAccess(${u.id}, 'stock', this)">Stock</button>
+                        <button class="bot-toggle-btn${hasWatchdog ? ' active' : ''}" data-bot="watchdog" onclick="toggleBotAccess(${u.id}, 'watchdog', this)">Watchdog</button>
                     </div>
                 </td>
                 <td>
@@ -234,8 +236,10 @@ function onInviteTierChange() {
     if (tier !== 'pro') {
         const cb1 = document.getElementById('invite-bot-crypto');
         const cb2 = document.getElementById('invite-bot-stock');
+        const cb3 = document.getElementById('invite-bot-watchdog');
         if (cb1) cb1.checked = false;
         if (cb2) cb2.checked = false;
+        if (cb3) cb3.checked = false;
     }
 }
 
@@ -248,9 +252,11 @@ async function adminInviteUser() {
     const botAccess = [];
     const cryptoCb = document.getElementById('invite-bot-crypto');
     const stockCb = document.getElementById('invite-bot-stock');
+    const watchdogCb = document.getElementById('invite-bot-watchdog');
     if (tier === 'pro') {
         if (cryptoCb && cryptoCb.checked) botAccess.push('crypto');
         if (stockCb && stockCb.checked) botAccess.push('stock');
+        if (watchdogCb && watchdogCb.checked) botAccess.push('watchdog');
     }
 
     // Role is auto-determined by tier on the backend

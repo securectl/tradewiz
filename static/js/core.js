@@ -412,10 +412,11 @@ setInterval(refreshTrumpMood, 3600000);
 async function loadTrumpTab(force) {
     const days = document.getElementById('trump-history-days')?.value || 30;
 
-    // Load current mood + history in parallel
-    const [moodResp, histResp] = await Promise.allSettled([
+    // Load current mood + history + backtracks in parallel
+    const [moodResp, histResp, btResp] = await Promise.allSettled([
         fetch('/api/trump-mood' + (force ? '?force=1' : '')),
         fetch('/api/trump/history?days=' + days),
+        fetch('/api/trump/backtracks?days=' + days),
     ]);
 
     // Check for subscription gate (403)
@@ -435,6 +436,7 @@ async function loadTrumpTab(force) {
     if (moodResp.status === 'fulfilled' && moodResp.value.ok) {
         const mood = await moodResp.value.json();
         renderTrumpCurrentMood(mood);
+        renderTrumpTradeSignals(mood);
         renderTrumpSignals(mood);
         renderTrumpNotable(mood);
     }
@@ -446,8 +448,16 @@ async function loadTrumpTab(force) {
         renderTrumpHistoryTable(history);
     }
 
-    // Auto-load prediction if not forced (cached)
+    // Render backtracks
+    if (btResp.status === 'fulfilled' && btResp.value.ok) {
+        const btData = await btResp.value.json();
+        renderBacktrackStats(btData);
+        renderBacktrackTimeline(btData.backtracks || []);
+    }
+
+    // Auto-load prediction + backtrack prediction if not forced (cached)
     loadTrumpPrediction(false);
+    loadBacktrackPrediction(false);
 }
 
 function renderTrumpCurrentMood(m) {
@@ -493,6 +503,83 @@ function renderTrumpCurrentMood(m) {
         <div style="font-size:9px;color:var(--text-secondary);margin-top:10px;text-align:right;">
             Sources: Truth Social (${m.sources?.truth_social || 0}) | News (${m.sources?.news || 0}) | White House (${m.sources?.whitehouse || 0})
         </div>`;
+}
+
+function renderTrumpTradeSignals(mood) {
+    const el = document.getElementById('trump-trade-signals');
+    if (!el) return;
+
+    const ts = mood.trade_signals;
+    if (!ts || (!ts.buy?.length && !ts.avoid?.length)) {
+        el.innerHTML = '<div style="text-align:center;padding:10px 0;font-size:11px;color:var(--text-secondary);">No active trade signals — rhetoric is neutral or no policy-specific keywords detected.</div>';
+        return;
+    }
+
+    const summary = ts.summary || '';
+    const activePolicies = (ts.active_policies || []).map(p => {
+        const colors = {
+            'china_tariffs':'#ff4757','general_tariffs':'#ff8c42','eu_tariffs':'#ffc837',
+            'trade_deals':'#00c896','iran_conflict':'#ff4757','crypto_policy':'#4f8aff',
+            'mexico_tariffs':'#ff8c42','canada_tariffs':'#ffc837','tax_policy':'#00c896','fed_policy':'#8bc34a'
+        };
+        const c = colors[p] || '#636b7e';
+        return `<span style="padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;background:${c}22;color:${c};border:1px solid ${c}44;">${p.replace(/_/g,' ')}</span>`;
+    }).join(' ');
+
+    function buildSignalRow(s, type) {
+        const color = type === 'buy' ? '#00c896' : '#ff4757';
+        const icon = type === 'buy' ? '&#9650;' : '&#9660;';
+        const strength = Math.round((s.strength || 0.5) * 100);
+        const strengthColor = strength >= 70 ? (type === 'buy' ? '#00c896' : '#ff4757') : strength >= 40 ? '#ffc837' : '#636b7e';
+        const tickers = (s.tickers || []).slice(0, 5).map(t =>
+            `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${color}12;color:${color};border:1px solid ${color}22;cursor:pointer;" onclick="window.analyzeStock && analyzeStock('${t}')">${t}</span>`
+        ).join(' ');
+
+        return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-color);">
+            <div style="min-width:18px;text-align:center;color:${color};font-size:14px;padding-top:2px;">${icon}</div>
+            <div style="flex:1;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                    <span style="font-size:12px;font-weight:700;color:var(--text-bright);">${s.sector}</span>
+                    <span style="font-size:10px;font-weight:700;color:${strengthColor};">${strength}% signal</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">${s.reason}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap;">${tickers}</div>
+            </div>
+        </div>`;
+    }
+
+    let html = '';
+
+    if (summary) {
+        html += `<div style="font-size:12px;color:var(--text-bright);margin-bottom:10px;padding:8px 12px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid ${mood.color || '#ffc837'};">${summary}</div>`;
+    }
+
+    if (activePolicies) {
+        html += `<div style="margin-bottom:10px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;">Active:</span> ${activePolicies}
+        </div>`;
+    }
+
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">';
+
+    // BUY column
+    if (ts.buy?.length) {
+        html += `<div>
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#00c896;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #00c89644;">BUY — Sectors to Watch</div>
+            ${ts.buy.map(s => buildSignalRow(s, 'buy')).join('')}
+        </div>`;
+    }
+
+    // AVOID column
+    if (ts.avoid?.length) {
+        html += `<div>
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#ff4757;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #ff475744;">AVOID — Threatened Sectors</div>
+            ${ts.avoid.map(s => buildSignalRow(s, 'avoid')).join('')}
+        </div>`;
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
 }
 
 async function loadTrumpPrediction(force) {
@@ -681,6 +768,193 @@ function renderTrumpHistoryTable(history) {
         <tbody>${rows}</tbody>
     </table>`;
 }
+
+
+// ─── Backtrack Tracker Functions ─────────────────────────────
+
+async function loadBacktrackPrediction(force) {
+    const el = document.getElementById('trump-backtrack-prediction');
+    if (!el) return;
+
+    if (force) {
+        el.querySelector('div:last-child').innerHTML = '<div style="text-align:center;padding:20px 0;"><div style="font-size:10px;color:var(--text-secondary);">Generating prediction...</div></div>';
+    }
+
+    try {
+        const resp = await fetch('/api/trump/backtracks/predict' + (force ? '?force=1' : ''));
+        if (!resp.ok) return;
+        const p = await resp.json();
+        renderBacktrackPrediction(p);
+    } catch (e) {
+        console.warn('Backtrack prediction failed:', e);
+    }
+}
+
+function renderBacktrackPrediction(p) {
+    const el = document.getElementById('trump-backtrack-prediction');
+    if (!el || p.error) {
+        if (el && p.error) {
+            el.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);">Backtrack Predictor</div>
+                    <button onclick="loadBacktrackPrediction(true)" class="btn-analyze" style="padding:4px 12px;font-size:10px;">Predict</button>
+                </div>
+                <div style="text-align:center;padding:20px 0;">
+                    <div style="font-size:10px;color:var(--text-secondary);">${p.error}</div>
+                </div>`;
+        }
+        return;
+    }
+
+    const policies = (p.active_policies || []).slice(0, 5);
+    const policyRows = policies.map(pol => {
+        const prob = (pol.backtrack_probability * 100).toFixed(0);
+        const barColor = prob >= 70 ? '#00c896' : prob >= 40 ? '#ffc837' : '#ff4757';
+        const impDir = pol.market_impact_if_reversed?.direction || 'neutral';
+        const impColor = impDir === 'bullish' ? '#00c896' : impDir === 'bearish' ? '#ff4757' : '#ffc837';
+        return `
+            <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-color);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                    <span style="font-size:12px;font-weight:700;color:var(--text-bright);">${pol.policy || pol.policy_area || '?'}</span>
+                    <span style="font-size:11px;font-weight:700;color:${barColor};">${prob}%</span>
+                </div>
+                <div style="background:#0d1117;border-radius:4px;height:6px;margin-bottom:6px;">
+                    <div style="background:${barColor};height:100%;border-radius:4px;width:${prob}%;transition:width 0.5s;"></div>
+                </div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">${pol.current_stance || ''}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <span style="padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;background:${impColor}22;color:${impColor};border:1px solid ${impColor}44;">${impDir}</span>
+                    <span style="padding:1px 6px;border-radius:8px;font-size:9px;background:var(--bg-secondary);color:var(--text-secondary);">${pol.estimated_timeframe || pol.estimated_days + 'd'}</span>
+                </div>
+                ${pol.reasoning ? `<div style="font-size:10px;color:var(--text-secondary);margin-top:4px;font-style:italic;">${pol.reasoning}</div>` : ''}
+            </div>`;
+    }).join('');
+
+    const conf = p.confidence ? (p.confidence * 100).toFixed(0) : '?';
+    const nextRev = p.next_likely_reversal || '?';
+    const staleTag = p.stale ? ' <span style="color:#ff8c42;font-size:9px;">(stale)</span>' : '';
+    const cachedTag = p.cached ? ' <span style="color:var(--text-secondary);font-size:9px;">(cached)</span>' : '';
+
+    el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);">Backtrack Predictor${staleTag}${cachedTag}</div>
+            <button onclick="loadBacktrackPrediction(true)" class="btn-analyze" style="padding:4px 12px;font-size:10px;">Predict</button>
+        </div>
+        ${p.overall_insight ? `<div style="font-size:11px;color:var(--text-bright);margin-bottom:12px;line-height:1.4;">${p.overall_insight}</div>` : ''}
+        <div style="display:flex;gap:12px;margin-bottom:12px;">
+            <div style="text-align:center;">
+                <div style="font-size:18px;font-weight:800;color:var(--accent-blue);">${conf}%</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Confidence</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="font-size:12px;font-weight:700;color:var(--text-bright);padding:2px 8px;background:var(--bg-secondary);border-radius:6px;">${nextRev.replace('_', ' ')}</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;margin-top:2px;">Next Reversal</div>
+            </div>
+        </div>
+        ${policyRows || '<div style="font-size:10px;color:var(--text-secondary);">No active policies detected</div>'}`;
+}
+
+function renderBacktrackStats(data) {
+    const el = document.getElementById('trump-backtrack-stats');
+    if (!el) return;
+
+    const stats = data.stats || {};
+    const total = stats.total || 0;
+    const avgDays = stats.avg_days || 0;
+    const medDays = stats.median_days || 0;
+    const avgSwing = stats.avg_mood_swing || 0;
+    const topAreas = (stats.top_areas || []).slice(0, 5);
+
+    const areaBadges = topAreas.map(a => {
+        const colors = {
+            'china_tariffs': '#ff4757', 'general_tariffs': '#ff8c42', 'eu_tariffs': '#ffc837',
+            'trade_deals': '#00c896', 'iran_conflict': '#ff4757', 'crypto_policy': '#4f8aff',
+            'mexico_tariffs': '#ff8c42', 'canada_tariffs': '#ffc837', 'tax_policy': '#00c896', 'fed_policy': '#8bc34a',
+        };
+        const c = colors[a.area] || '#636b7e';
+        return `<span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${c}22;color:${c};border:1px solid ${c}44;">${a.area.replace('_', ' ')} (${a.count})</span>`;
+    }).join(' ');
+
+    el.innerHTML = `
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Reversal Stats</div>
+        ${total === 0 ? '<div style="text-align:center;padding:15px 0;font-size:10px;color:var(--text-secondary);">No backtracks detected yet. Need more mood history data.</div>' : `
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;">
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent-blue);">${total}</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Reversals</div>
+            </div>
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent-orange);">${avgDays}d</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Avg Days</div>
+            </div>
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:var(--text-bright);">${medDays}d</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Median Days</div>
+            </div>
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:${avgSwing >= 0 ? '#00c896' : '#ff4757'};">${avgSwing > 0 ? '+' : ''}${avgSwing}</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Avg Swing</div>
+            </div>
+        </div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;margin-bottom:6px;">Most Reversed</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">${areaBadges || '<span style="font-size:10px;color:var(--text-secondary);">N/A</span>'}</div>
+        `}`;
+}
+
+function renderBacktrackTimeline(backtracks) {
+    const el = document.getElementById('trump-backtrack-timeline');
+    if (!el) return;
+
+    // Filter out the __prediction__ meta-row
+    const items = (backtracks || []).filter(bt => bt.policy_area !== '__prediction__');
+
+    if (!items.length) {
+        el.innerHTML = '<div style="text-align:center;padding:15px 0;font-size:10px;color:var(--text-secondary);">No policy reversals detected yet. As mood data accumulates, backtracks will appear here.</div>';
+        return;
+    }
+
+    const colors = {
+        'china_tariffs': '#ff4757', 'general_tariffs': '#ff8c42', 'eu_tariffs': '#ffc837',
+        'trade_deals': '#00c896', 'iran_conflict': '#ff4757', 'crypto_policy': '#4f8aff',
+        'mexico_tariffs': '#ff8c42', 'canada_tariffs': '#ffc837', 'tax_policy': '#00c896', 'fed_policy': '#8bc34a',
+    };
+
+    const rows = items.slice(0, 20).map(bt => {
+        const c = colors[bt.policy_area] || '#636b7e';
+        const swing = bt.mood_swing || 0;
+        const swingColor = swing > 0 ? '#00c896' : '#ff4757';
+        const impact = typeof bt.market_impact === 'object' ? bt.market_impact : {};
+        const impDir = impact.direction || (swing > 0 ? 'bullish' : 'bearish');
+        const impSev = impact.severity || 'medium';
+        const confPct = bt.confidence ? (bt.confidence * 100).toFixed(0) + '%' : '?';
+
+        const initDate = bt.initial_date ? new Date(bt.initial_date).toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '?';
+        const btDate = bt.backtrack_date ? new Date(bt.backtrack_date).toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '?';
+
+        return `
+            <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);">
+                <div style="min-width:3px;background:${c};border-radius:2px;"></div>
+                <div style="flex:1;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${c}22;color:${c};border:1px solid ${c}44;">${bt.policy_area.replace(/_/g, ' ')}</span>
+                        <span style="font-size:10px;color:var(--text-secondary);">${bt.days_to_reversal || '?'}d | conf: ${confPct}</span>
+                    </div>
+                    <div style="font-size:11px;margin-bottom:4px;">
+                        <span style="color:#ff4757;">${initDate}: ${bt.initial_stance || '?'}</span>
+                        <span style="color:var(--text-secondary);margin:0 6px;">&#8594;</span>
+                        <span style="color:#00c896;">${btDate}: ${bt.backtrack_stance || '?'}</span>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:${swingColor}22;color:${swingColor};">swing: ${swing > 0 ? '+' : ''}${swing}</span>
+                        <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:var(--bg-secondary);color:var(--text-secondary);">${impDir} ${impSev}</span>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+
+    el.innerHTML = rows;
+}
+
 
 function applyUserRole() {
     if (!currentUser) return;
@@ -1006,6 +1280,7 @@ function switchTab(tab, skipHash) {
     const predictionsContent = document.getElementById('predictions-content');
     const congressContent = document.getElementById('congress-content');
     const trumpContent = document.getElementById('trump-content');
+    const watchdogContent = document.getElementById('watchdog-content');
 
     mainContent.style.display = 'none';
     if (qullamaggieContent) qullamaggieContent.style.display = 'none';
@@ -1018,6 +1293,7 @@ function switchTab(tab, skipHash) {
     if (predictionsContent) predictionsContent.style.display = 'none';
     if (congressContent) congressContent.style.display = 'none';
     if (trumpContent) trumpContent.style.display = 'none';
+    if (watchdogContent) watchdogContent.style.display = 'none';
     if (autotradingContent) autotradingContent.style.display = 'none';
     if (stocktradingContent) stocktradingContent.style.display = 'none';
     if (adminContent) adminContent.style.display = 'none';
@@ -1037,6 +1313,11 @@ function switchTab(tab, skipHash) {
         clearInterval(window._stockBotRefreshInterval);
         window._stockBotRefreshInterval = null;
     }
+    // Stop watchdog auto-refresh when leaving watchdog tab
+    if (window._watchdogRefreshInterval) {
+        clearInterval(window._watchdogRefreshInterval);
+        window._watchdogRefreshInterval = null;
+    }
 
     if (tab === 'qullamaggie') {
         qullamaggieContent.style.display = 'flex';
@@ -1053,6 +1334,10 @@ function switchTab(tab, skipHash) {
         loadPredictionMarkets(false);
     } else if (tab === 'congress') {
         congressContent.style.display = 'block';
+    } else if (tab === 'watchdog') {
+        watchdogContent.style.display = 'block';
+        loadWatchdogDashboard();
+        window._watchdogRefreshInterval = setInterval(loadWatchdogDashboard, 60000);
     } else if (tab === 'trump') {
         trumpContent.style.display = 'block';
         loadTrumpTab();

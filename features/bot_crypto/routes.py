@@ -158,7 +158,7 @@ def api_bot_dashboard():
     ytd_start = f"{now.year}-01-01 00:00:00"
 
     # Asset type filter clause
-    if asset_filter in ("crypto", "stock"):
+    if asset_filter in ("crypto", "stock", "watchdog"):
         asset_clause = f" AND asset_type={P}"
         asset_param = (asset_filter,)
     else:

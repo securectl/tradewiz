@@ -119,6 +119,41 @@ Respond with ONLY this JSON:
 
 verdict must be one of: RECOVERY BUY, WATCH, AVOID"""
 
+OVERSOLD_SYSTEM = "You are a technical analyst specializing in oversold/bottom-finding analysis. You identify stocks that have been beaten down over the past month and assess whether they are forming a bottom or still falling. Respond with ONLY valid JSON."
+
+OVERSOLD_USER_TEMPLATE = """This stock is showing oversold signals over the past 1 month. Analyze whether it is forming a bottom or is a falling knife.
+
+{summary}
+
+Analyze: 1) RSI level and trend — is it rebounding from oversold? 2) Price vs 20-day and 50-day moving averages 3) Volume pattern — is selling exhaustion visible? 4) Support levels — is price near a key support? 5) MACD — any bullish divergence or crossover forming? 6) Bollinger Band position — trading near/below lower band? 7) Candlestick patterns — hammer, doji, engulfing at lows? 8) Fundamental catalyst — any reason for the decline?
+
+Respond with ONLY this JSON:
+{{"verdict":"BOTTOM FORMING","confidence":65,"rsi_assessment":"DEEPLY OVERSOLD","bottom_signal_strength":"STRONG","support_level":0.00,"key_indicators":["indicator1"],"decline_reason":"reason for sell-off","recovery_catalysts":["catalyst1"],"risks":["risk1"],"downside_remaining_pct":5,"estimated_bounce_pct":15,"position_limit_pct":3,"summary":"1-2 sentences"}}
+
+verdict must be one of: BOTTOM FORMING, WATCH, FALLING KNIFE"""
+
+OVERSOLD_VALIDATOR_SYSTEM = "You are a senior risk analyst validating oversold/bottom-finding calls. Your job is to challenge the initial analysis and look for reasons the bottom call might be WRONG. Be skeptical. Respond with ONLY valid JSON."
+
+OVERSOLD_VALIDATOR_USER_TEMPLATE = """A technical analyst tagged this stock as potentially bottoming. Validate or challenge this assessment.
+
+STOCK: {ticker}
+Initial Verdict: {initial_verdict}
+Initial Confidence: {initial_confidence}
+Initial Summary: {initial_summary}
+RSI Assessment: {rsi_assessment}
+Bottom Signal Strength: {bottom_signal_strength}
+Decline Reason: {decline_reason}
+
+Additional Data:
+{summary}
+
+Challenge this analysis: 1) Is the "oversold" reading a value trap? 2) Are fundamentals deteriorating (not just price)? 3) Is there sector-wide weakness suggesting more downside? 4) Insider selling or institutional exodus? 5) Debt/liquidity risk that could prevent recovery? 6) Is the decline reason structural or cyclical? 7) Historical false bottoms for this stock? 8) Macro headwinds that could extend the decline?
+
+Respond with ONLY this JSON:
+{{"validated":true,"adjusted_verdict":"BOTTOM FORMING","adjusted_confidence":60,"challenge_points":["point1"],"validation_notes":"why you agree or disagree","risk_flags":["flag1"],"final_position_limit_pct":3,"summary":"1-2 sentence final assessment"}}
+
+adjusted_verdict must be one of: BOTTOM FORMING, WATCH, FALLING KNIFE"""
+
 HOT_SECTORS_SYSTEM = "You are a senior market strategist. Return ONLY valid JSON."
 
 HOT_SECTORS_USER_TEMPLATE = """Identify the top 6 hottest stock market sectors/themes over the {label}.

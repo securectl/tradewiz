@@ -121,6 +121,15 @@ def _get_trade_performance(user_id) -> dict:
         return {}
 
 
+def _is_user_admin(user_id):
+    """Check if user has admin role."""
+    try:
+        row = query_one(f"SELECT role FROM user_roles WHERE user_id = {P} AND role = 'admin'", (user_id,))
+        return row is not None
+    except Exception:
+        return False
+
+
 def _load_user_keys(user_id, provider):
     """Load decrypted API keys for a user from user_api_keys table."""
     try:
@@ -194,22 +203,24 @@ class StockTradingBot:
     def __init__(self, user_id=None):
         self.user_id = user_id
         broker = _get_config(user_id, "stock_broker", "alpaca")
-        # Load per-user keys for the selected broker
+        # Load per-user keys — only admin falls back to env vars
+        is_admin = _is_user_admin(user_id) if user_id else False
         if user_id:
             keys = _load_user_keys(user_id, broker)
-            if broker == "alpaca" and keys:
+            if broker == "alpaca" and (keys or is_admin):
                 self.client = AlpacaClient(
                     api_key=keys.get("api_key"),
                     secret_key=keys.get("secret_key"),
+                    use_env_fallback=is_admin,
                 )
-            elif broker == "webull" and keys:
+            elif broker == "webull" and (keys or is_admin):
                 self.client = WebullClient(
                     app_key=keys.get("app_key"),
                     app_secret=keys.get("app_secret"),
                     account_id=keys.get("account_id"),
                 )
             else:
-                self.client = get_broker_client(broker)
+                self.client = AlpacaClient()  # Empty keys — will error on use
         else:
             self.client = get_broker_client(broker)
         self.broker_name = broker
@@ -1131,16 +1142,17 @@ class StockTradingBot:
                 else:
                     pnl_pct = (entry_price - current_price) / entry_price * 100
 
-                if trade["side"] == "buy":
-                    if current_price <= stop_loss:
-                        should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
-                    elif current_price >= take_profit:
-                        should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
-                else:
-                    if current_price >= stop_loss:
-                        should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
-                    elif current_price <= take_profit:
-                        should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
+                if stop_loss is not None and take_profit is not None:
+                    if trade["side"] == "buy":
+                        if current_price <= stop_loss:
+                            should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
+                        elif current_price >= take_profit:
+                            should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
+                    else:
+                        if current_price >= stop_loss:
+                            should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
+                        elif current_price <= take_profit:
+                            should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
 
                 strategy = trade.get("strategy", "") or ""
                 is_swing_trade = strategy.startswith("swing_")
@@ -1163,7 +1175,7 @@ class StockTradingBot:
                                 should_exit, exit_reason = True, f"Swing trailing stop: locking {trail_floor_pct:.1f}% of {pnl_pct:.1f}% max profit"
 
                 # Scalp trailing stop (original logic)
-                if not should_exit and not is_swing_trade and pnl_pct >= 1.5:
+                if not should_exit and not is_swing_trade and pnl_pct >= 1.5 and take_profit is not None:
                     if trade["side"] == "buy":
                         retracement = (take_profit - current_price) / (take_profit - entry_price) if take_profit != entry_price else 0
                     else:

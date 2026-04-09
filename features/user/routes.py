@@ -15,7 +15,7 @@ bp = Blueprint("user", __name__)
 @bp.route("/api/me")
 @login_required
 def api_me():
-    """Return current user info + roles + bot access."""
+    """Return current user info + roles + bot access + trial status."""
     data = current_user.to_dict()
     # Add bot_access from subscription
     sub_row = query_one(
@@ -23,6 +23,14 @@ def api_me():
         (current_user.id,),
     )
     data["bot_access"] = sub_row["bot_access"] if sub_row and sub_row.get("bot_access") else "none"
+
+    # Add trial status
+    try:
+        from trial_manager import get_trial_status
+        data["trial"] = get_trial_status(current_user.id)
+    except Exception:
+        data["trial"] = {"trial_status": "none", "eligible": False}
+
     return jsonify(data)
 
 

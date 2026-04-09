@@ -71,3 +71,116 @@ def api_hot_sectors():
     if period not in valid:
         period = "1mo"
     return jsonify(get_hot_sectors(period))
+
+
+@bp.route("/api/screener/history")
+@login_required
+def api_screener_history():
+    """Get historical screener results for trend analysis.
+    ?category=lowcap&days=30  — all results for a category over N days
+    ?ticker=AAPL&days=30      — all appearances of a ticker across categories
+    ?category=lowcap&ticker=AAPL&days=30 — specific combo
+    """
+    from db import query, IS_POSTGRES
+    P = "%s" if IS_POSTGRES else "?"
+
+    category = request.args.get("category")
+    ticker = request.args.get("ticker")
+    days = min(int(request.args.get("days", 30)), 90)
+
+    conditions = [f"scan_date >= {P}"]
+    params = []
+
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    params.append(cutoff)
+
+    if category:
+        conditions.append(f"category = {P}")
+        params.append(category)
+    if ticker:
+        conditions.append(f"ticker = {P}")
+        params.append(ticker.upper())
+
+    where = " AND ".join(conditions)
+    rows = query(
+        f"SELECT category, scan_date, ticker, price, verdict, confidence, summary, sector, name, market_cap "
+        f"FROM screener_results WHERE {where} ORDER BY scan_date DESC, confidence DESC LIMIT 500",
+        tuple(params),
+    )
+
+    results = [{
+        "category": r["category"], "scan_date": r["scan_date"], "ticker": r["ticker"],
+        "price": r["price"], "verdict": r["verdict"], "confidence": r["confidence"],
+        "summary": r.get("summary", ""), "sector": r.get("sector"), "name": r.get("name"),
+        "market_cap": r.get("market_cap"),
+    } for r in rows]
+
+    return jsonify({"results": results, "count": len(results), "days": days})
+
+
+@bp.route("/api/screener/trending")
+@login_required
+def api_screener_trending():
+    """Find stocks appearing in multiple scans over recent days — persistent signals.
+    Returns tickers sorted by number of appearances (most persistent first).
+    """
+    from db import query, IS_POSTGRES
+    P = "%s" if IS_POSTGRES else "?"
+
+    days = min(int(request.args.get("days", 7)), 30)
+    category = request.args.get("category")
+
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    if category:
+        rows = query(
+            f"SELECT ticker, name, sector, COUNT(DISTINCT scan_date) as appearances, "
+            f"MAX(scan_date) as last_seen, MIN(scan_date) as first_seen, "
+            f"ROUND(AVG(confidence)::numeric, 1) as avg_confidence, "
+            f"MAX(verdict) as latest_verdict, ROUND(AVG(price)::numeric, 2) as avg_price "
+            f"FROM screener_results WHERE category = {P} AND scan_date >= {P} "
+            f"GROUP BY ticker, name, sector HAVING COUNT(DISTINCT scan_date) >= 2 "
+            f"ORDER BY appearances DESC, avg_confidence DESC LIMIT 50"
+            if IS_POSTGRES else
+            f"SELECT ticker, name, sector, COUNT(DISTINCT scan_date) as appearances, "
+            f"MAX(scan_date) as last_seen, MIN(scan_date) as first_seen, "
+            f"ROUND(AVG(confidence), 1) as avg_confidence, "
+            f"MAX(verdict) as latest_verdict, ROUND(AVG(price), 2) as avg_price "
+            f"FROM screener_results WHERE category = {P} AND scan_date >= {P} "
+            f"GROUP BY ticker, name, sector HAVING COUNT(DISTINCT scan_date) >= 2 "
+            f"ORDER BY appearances DESC, avg_confidence DESC LIMIT 50",
+            (category, cutoff),
+        )
+    else:
+        rows = query(
+            f"SELECT ticker, name, sector, COUNT(DISTINCT scan_date) as appearances, "
+            f"COUNT(DISTINCT category) as categories, "
+            f"MAX(scan_date) as last_seen, MIN(scan_date) as first_seen, "
+            f"ROUND(AVG(confidence)::numeric, 1) as avg_confidence, "
+            f"MAX(verdict) as latest_verdict, ROUND(AVG(price)::numeric, 2) as avg_price "
+            f"FROM screener_results WHERE scan_date >= {P} "
+            f"GROUP BY ticker, name, sector HAVING COUNT(DISTINCT scan_date) >= 2 "
+            f"ORDER BY appearances DESC, categories DESC, avg_confidence DESC LIMIT 50"
+            if IS_POSTGRES else
+            f"SELECT ticker, name, sector, COUNT(DISTINCT scan_date) as appearances, "
+            f"COUNT(DISTINCT category) as categories, "
+            f"MAX(scan_date) as last_seen, MIN(scan_date) as first_seen, "
+            f"ROUND(AVG(confidence), 1) as avg_confidence, "
+            f"MAX(verdict) as latest_verdict, ROUND(AVG(price), 2) as avg_price "
+            f"FROM screener_results WHERE scan_date >= {P} "
+            f"GROUP BY ticker, name, sector HAVING COUNT(DISTINCT scan_date) >= 2 "
+            f"ORDER BY appearances DESC, categories DESC, avg_confidence DESC LIMIT 50",
+            (cutoff,),
+        )
+
+    results = [{
+        "ticker": r["ticker"], "name": r.get("name"), "sector": r.get("sector"),
+        "appearances": r["appearances"], "categories": r.get("categories", 1),
+        "last_seen": r["last_seen"], "first_seen": r["first_seen"],
+        "avg_confidence": r.get("avg_confidence"), "latest_verdict": r.get("latest_verdict"),
+        "avg_price": r.get("avg_price"),
+    } for r in rows]
+
+    return jsonify({"trending": results, "count": len(results), "days": days})

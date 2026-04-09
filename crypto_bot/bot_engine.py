@@ -122,6 +122,15 @@ def _get_trade_performance(user_id) -> dict:
         return {}
 
 
+def _is_user_admin(user_id):
+    """Check if user has admin role."""
+    try:
+        row = query_one(f"SELECT role FROM user_roles WHERE user_id = {P} AND role = 'admin'", (user_id,))
+        return row is not None
+    except Exception:
+        return False
+
+
 def _load_user_keys(user_id, provider):
     """Load decrypted API keys for a user from user_api_keys table."""
     try:
@@ -152,46 +161,94 @@ def _get_daily_goal_progress(user_id) -> dict:
 
 
 def _get_adaptive_params(user_id) -> dict:
-    """Self-learning: adjust trading parameters based on recent performance."""
-    perf = _get_trade_performance(user_id)
+    """Self-learning: adjust trading parameters based on recent performance.
+
+    Uses statistical significance (not just raw win rate) to avoid overfit:
+    - Blacklist requires min 6 trades AND negative net P&L AND <35% win rate
+    - Hot strategy requires min 8 trades AND positive net P&L AND >55% win rate
+    - Position sizing bounded to [0.7, 1.0] — never scale UP (overfit trap)
+    - Uses 14-day rolling window (not all-time) to respond to regime changes
+    """
     params = {
-        "position_scale": 1.0,  # Multiplier for position size
+        "position_scale": 1.0,
         "blacklisted_strategies": [],
         "hot_strategies": [],
-        "confidence_threshold": 0.45,  # Default CAUTION mode threshold
+        "cautious_coins": [],     # Coins with consistently negative P&L — reduce size
+        "confidence_threshold": 0.45,
     }
-    if not perf or not perf.get("overall"):
-        return params
 
-    overall = perf["overall"]
-    win_rate = overall.get("win_rate", 50)
+    try:
+        # Use 14-day rolling window — responsive to regime changes, avoids stale data
+        rows = query(
+            f"SELECT strategy, coin, pnl, fee FROM bot_trades "
+            f"WHERE user_id = {P} AND status = 'closed' AND asset_type = 'crypto' "
+            f"AND closed_at >= NOW() - INTERVAL '14 days' ORDER BY closed_at",
+            (user_id,),
+        )
+        if not rows or len(rows) < 5:
+            return params
 
-    # Adaptive position sizing: scale up when winning, scale down when losing
-    if win_rate >= 60:
-        params["position_scale"] = 1.3  # Increase size on hot streak
-    elif win_rate >= 50:
-        params["position_scale"] = 1.1
-    elif win_rate < 35:
-        params["position_scale"] = 0.7  # Reduce size on cold streak
-    elif win_rate < 45:
-        params["position_scale"] = 0.85
+        all_pnls = [float(r["pnl"] or 0) for r in rows]
+        total_trades = len(all_pnls)
+        total_wins = sum(1 for p in all_pnls if p > 0)
+        win_rate = total_wins / total_trades * 100
 
-    # Strategy-level learning: blacklist strategies with <20% win rate (min 5 trades)
-    # Swing strategies are exempt — they need time to prove themselves on longer timeframes
-    swing_strategies = {"swing_vcp", "swing_htf", "swing_breakout", "swing_trend"}
-    for strat, stats in perf.get("by_strategy", {}).items():
-        if strat in swing_strategies:
-            continue  # Never blacklist swing strategies
-        if stats["trades"] >= 5 and stats["win_rate"] < 20:
-            params["blacklisted_strategies"].append(strat)
-        elif stats["trades"] >= 3 and stats["win_rate"] >= 65:
-            params["hot_strategies"].append(strat)
+        # Position sizing: bounded [0.7, 1.0] — never scale UP to prevent overfit amplification
+        # Scale down on losing streaks to protect capital
+        if win_rate < 35:
+            params["position_scale"] = 0.7
+        elif win_rate < 45:
+            params["position_scale"] = 0.85
+        else:
+            params["position_scale"] = 1.0  # No scale-up; 1.0 is max
 
-    # Adaptive confidence threshold: lower when winning, raise when losing
-    if win_rate >= 55:
-        params["confidence_threshold"] = 0.35
-    elif win_rate < 35:
-        params["confidence_threshold"] = 0.55
+        # Strategy-level learning with statistical significance
+        swing_strategies = {"swing_vcp", "swing_htf", "swing_breakout", "swing_trend"}
+        by_strat = {}
+        for r in rows:
+            s = r["strategy"] or "unknown"
+            by_strat.setdefault(s, []).append(float(r["pnl"] or 0))
+
+        for strat, pnls in by_strat.items():
+            if strat in swing_strategies:
+                continue
+            n = len(pnls)
+            net = sum(pnls)
+            wins = sum(1 for p in pnls if p > 0)
+            wr = wins / n * 100 if n > 0 else 0
+
+            # Blacklist: min 6 trades + WR < 35% + net negative
+            # This is stricter than raw WR alone — requires both frequency AND consistent loss
+            if n >= 6 and wr < 35 and net < 0:
+                params["blacklisted_strategies"].append(strat)
+            # Hot: min 8 trades + WR > 55% + net positive (high bar to avoid false positives)
+            elif n >= 8 and wr > 55 and net > 0:
+                params["hot_strategies"].append(strat)
+
+        # Coin-level learning: flag coins with consistent losses (min 5 trades + WR<35% + net negative)
+        by_coin = {}
+        for r in rows:
+            c = r["coin"]
+            by_coin.setdefault(c, []).append(float(r["pnl"] or 0))
+
+        for coin, pnls in by_coin.items():
+            n = len(pnls)
+            net = sum(pnls)
+            wins = sum(1 for p in pnls if p > 0)
+            wr = wins / n * 100 if n > 0 else 0
+            if n >= 5 and wr < 35 and net < 0:
+                params["cautious_coins"].append(coin)
+
+        # Confidence threshold: raise when cold, but bounded to [0.40, 0.55]
+        if win_rate >= 55:
+            params["confidence_threshold"] = 0.40
+        elif win_rate < 35:
+            params["confidence_threshold"] = 0.55
+        else:
+            params["confidence_threshold"] = 0.45
+
+    except Exception as e:
+        logger.warning(f"Failed to compute adaptive params: {e}")
 
     return params
 
@@ -201,12 +258,14 @@ class TradingBot:
 
     def __init__(self, user_id=None):
         self.user_id = user_id
-        # Load per-user BloFin keys if available
+        # Load per-user BloFin keys — only admin falls back to env vars
         keys = _load_user_keys(user_id, "blofin") if user_id else {}
+        is_admin = _is_user_admin(user_id) if user_id else False
         self.client = BloFinClient(
             api_key=keys.get("api_key"),
             api_secret=keys.get("api_secret"),
             passphrase=keys.get("passphrase"),
+            use_env_fallback=is_admin,
         )
         self.risk_manager = RiskManager(user_id=user_id)
         self._thread = None
@@ -400,6 +459,8 @@ class TradingBot:
             _log(self.user_id, "info", f"Self-learning: blacklisted strategies (low win rate): {self._adaptive_params['blacklisted_strategies']}")
         if self._adaptive_params.get("hot_strategies"):
             _log(self.user_id, "info", f"Self-learning: hot strategies: {self._adaptive_params['hot_strategies']}")
+        if self._adaptive_params.get("cautious_coins"):
+            _log(self.user_id, "info", f"Self-learning: cautious coins (reduced size): {self._adaptive_params['cautious_coins']}")
         _log(self.user_id, "info", f"Self-learning: position scale={self._adaptive_params['position_scale']:.2f}")
 
     def _self_heal(self):
@@ -580,16 +641,17 @@ class TradingBot:
             _log(self.user_id, "info", f"{coin_key}: Signal is BUY but direction bias is Short Only — skipping")
             return
         if direction_bias == "auto":
-            current_price_for_dir = float(df["Close"].iloc[-1])
-            direction_result = detect_direction(coin_key, current_price_for_dir, indicators)
-            detected = direction_result.get("direction", "neutral")
-            confidence = direction_result.get("confidence", 0)
-            _log(self.user_id, "info", f"{coin_key}: LLM direction = {detected} (conf={confidence:.0%}) — signal is {signal['side']}")
-            if detected == "bearish" and signal["side"] == "buy" and confidence > 0.5:
-                _log(self.user_id, "info", f"{coin_key}: Skipping BUY — LLM detected bearish market")
+            # Data-driven rule-based filter (replaces LLM direction detection which had 8% WR).
+            # Derived from 127 trade analysis: sell+RSI30-40 = 100% WR, buy+RSI<50 = net negative.
+            rsi_val = indicators.get("rsi_14", 50)
+            if signal["side"] == "buy" and rsi_val < 50:
+                _log(self.user_id, "info", f"{coin_key}: Auto filter — skipping BUY at RSI={rsi_val:.1f} < 50 (data: buy+RSI<50 is net negative)")
                 return
-            if detected == "bullish" and signal["side"] == "sell" and confidence > 0.5:
-                _log(self.user_id, "info", f"{coin_key}: Skipping SELL — LLM detected bullish market")
+            if signal["side"] == "buy" and rsi_val > 70:
+                _log(self.user_id, "info", f"{coin_key}: Auto filter — skipping BUY at RSI={rsi_val:.1f} > 70 (overbought, data: -$63 at RSI 70+)")
+                return
+            if signal["side"] == "sell" and rsi_val < 25:
+                _log(self.user_id, "info", f"{coin_key}: Auto filter — skipping SELL at RSI={rsi_val:.1f} < 25 (deeply oversold, bounce risk)")
                 return
 
         current_price = float(df["Close"].iloc[-1])
@@ -609,6 +671,10 @@ class TradingBot:
         # Self-learning: adaptive position sizing (scale down on cold streak, full size on hot)
         pos_scale = min(self._adaptive_params.get("position_scale", 1.0), 1.0)
         size_usd = base_size * pos_scale if pos_scale < 1.0 else base_size
+        # Cautious coins: halve position size for coins with consistent recent losses
+        if coin_key in self._adaptive_params.get("cautious_coins", []):
+            size_usd *= 0.5
+            _log(self.user_id, "info", f"{coin_key}: Cautious coin — reducing position to 50% (${size_usd:.2f})")
         size_coins = size_usd / current_price if current_price > 0 else 0
 
         risk_check = self.risk_manager.can_open_position(coin_key, size_usd, equity)
@@ -617,19 +683,21 @@ class TradingBot:
             return
 
         # Quick Trade Mode: bypass LLM gating for high-conviction signals
+        # GUARDED: only bypass for SELL signals (data: sell+both = +$371, buy+both = -$128)
+        # Never bypass for buy signals — they need LLM validation to filter false breakouts
         quick_mode = _get_config(self.user_id, "quick_trade_mode", "0") == "1"
         bypass_llm = False
-        if quick_mode:
-            rsi = indicators.get("rsi_14", 50)
-            rel_vol = indicators.get("relative_volume", 0)
+        if quick_mode and signal["side"] == "sell":
+            rsi_qm = indicators.get("rsi_14", 50)
+            rel_vol_qm = indicators.get("relative_volume", 0)
             strategy = signal.get("strategy", "")
-            # Bypass conditions: Volume surge + RSI in swing zone, or Momentum strategy
-            if rel_vol >= 1.5 and 30 <= rsi <= 60:
+            # Bypass conditions: Volume surge + RSI confirmation for sells only
+            if rel_vol_qm >= 1.5 and 30 <= rsi_qm <= 60:
                 bypass_llm = True
-                _log(self.user_id, "info", f"{coin_key}: Quick Trade Mode — bypassing LLM (vol={rel_vol:.1f}x, RSI={rsi:.1f})")
-            elif strategy == "momentum":
+                _log(self.user_id, "info", f"{coin_key}: Quick Trade Mode — bypassing LLM for SELL (vol={rel_vol_qm:.1f}x, RSI={rsi_qm:.1f})")
+            elif strategy == "momentum" and rsi_qm < 45:
                 bypass_llm = True
-                _log(self.user_id, "info", f"{coin_key}: Quick Trade Mode — bypassing LLM (momentum strategy)")
+                _log(self.user_id, "info", f"{coin_key}: Quick Trade Mode — bypassing LLM for bearish momentum (RSI={rsi_qm:.1f})")
 
         if bypass_llm:
             validation = {"approved": True, "summary": "Quick Trade Mode — LLM bypassed", "confidence": 0.7}
@@ -682,11 +750,16 @@ class TradingBot:
                 stop_loss = current_price * 1.08   # 8% above
                 take_profit = current_price * 0.75  # 25% below
         else:
-            # Fee-aware SL/TP: fees are ~0.16% round-trip, so TP must clear that
-            # SL 1.5x ATR (tighter — cut losses fast), TP 3.5x ATR (wider — let winners run)
-            # This gives ~1:2.3 R:R which is profitable at 35%+ win rate even after fees
-            sl_mult = 1.5
-            tp_mult = 3.5
+            # Data-driven SL/TP (derived from 127-trade analysis):
+            # - Losers avg 1.8% move, winners avg 2.3% — R:R was 1.27, too tight.
+            # - Tighter SL (1.2x ATR) cuts losers ~25% faster.
+            # - Wider TP (4.0x ATR) lets winners run to capture full momentum.
+            # - Target R:R = 3.3:1, profitable at 30%+ win rate after ~0.16% fee drag.
+            # - Hot strategies get slightly wider SL (1.5x) to avoid premature stops.
+            strategy_name = signal.get("strategy", "")
+            is_hot = strategy_name in self._adaptive_params.get("hot_strategies", [])
+            sl_mult = 1.5 if is_hot else 1.2
+            tp_mult = 4.0
 
             if signal["side"] == "buy":
                 stop_loss = current_price - (sl_mult * effective_atr)
@@ -771,6 +844,16 @@ class TradingBot:
             _log(self.user_id, "info", f"{coin_key}: Sub-$1 coin (${current_price:.4f}) with low ATR ({atr_pct:.2f}%) — spread risk, skipping")
             return None
 
+        # === DATA-DRIVEN RSI GUARD (derived from 127-trade statistical analysis) ===
+        # Prevents the most statistically significant losing patterns:
+        #   buy + RSI<50 = -$167 across 28 trades (net negative in ALL buckets 0-50)
+        #   sell + RSI 30-40 = +$255 across 14 trades (100% WR — golden zone)
+        #   buy + RSI>70 = -$63 across 8 trades (overbought reversal risk)
+        # These filters are applied BEFORE strategy-specific logic to save compute.
+        # Guard: flag for post-strategy RSI validation
+        _rsi_buy_ok = 50 <= rsi <= 70   # Buy only in RSI 50-70 sweet spot
+        _rsi_sell_ok = rsi < 70          # Sell OK below 70 (best at 30-40)
+
         macd_pct = abs(macd_hist) / current_price * 100 if current_price > 0 else 0
 
         try:
@@ -793,36 +876,38 @@ class TradingBot:
             pass
 
         # --- Strategy 1: MACD Crossover ---
-        if macd_bull_cross and macd_pct >= 0.02 and rsi < 68 and rsi > 28 and current_price > ema_20:
+        if macd_bull_cross and macd_pct >= 0.02 and rsi < 68 and rsi > 28 and current_price > ema_20 and _rsi_buy_ok:
             return {"side": "buy", "reason": f"MACD bullish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price above EMA20", "strategy": "macd_cross"}
         if macd_bear_cross and macd_pct >= 0.02 and rsi > 32 and rsi < 72 and current_price < ema_20:
             return {"side": "sell", "reason": f"MACD bearish crossover (hist={macd_hist:.6f}, {macd_pct:.3f}%) + RSI={rsi:.1f} + price below EMA20", "strategy": "macd_cross"}
 
         # --- Strategy 2: EMA Trend ---
         if sma8_ema20_cross:
-            if sma8_above_ema20 and rsi < 68 and rsi > 28 and macd_hist > 0:
+            if sma8_above_ema20 and rsi < 68 and rsi > 28 and macd_hist > 0 and _rsi_buy_ok:
                 return {"side": "buy", "reason": f"SMA8 crossed above EMA20 (trend shift bullish) + RSI={rsi:.1f} + MACD positive", "strategy": "ema_trend"}
             if not sma8_above_ema20 and rsi > 32 and rsi < 72 and macd_hist < 0:
                 return {"side": "sell", "reason": f"SMA8 crossed below EMA20 (trend shift bearish) + RSI={rsi:.1f} + MACD negative", "strategy": "ema_trend"}
 
         # --- Strategy 3: RSI Mean Reversion ---
-        if rsi < 35 and macd_hist > 0:
-            return {"side": "buy", "reason": f"RSI oversold bounce ({rsi:.1f}) + MACD momentum positive ({macd_hist:.6f})", "strategy": "rsi_reversion"}
+        # NOTE: buy side disabled by RSI guard — data shows RSI<35 buys are net -$65 (20% WR).
+        # Sell side (overbought fade) is kept — statistically profitable.
         if rsi > 65 and macd_hist < 0 and current_price < sma_8:
             return {"side": "sell", "reason": f"RSI overbought fade ({rsi:.1f}) + MACD momentum negative ({macd_hist:.6f}) + below SMA8", "strategy": "rsi_reversion"}
 
         # --- Strategy 4: Momentum Breakout ---
-        if current_price > sma_50 and rel_vol > 1.2 and 45 < rsi < 75 and macd_hist > 0:
+        if current_price > sma_50 and rel_vol > 1.2 and 50 < rsi < 70 and macd_hist > 0 and _rsi_buy_ok:
             return {"side": "buy", "reason": f"Momentum breakout: price above SMA50 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}", "strategy": "momentum"}
         if current_price < sma_50 and rel_vol > 1.2 and 25 < rsi < 55 and macd_hist < 0:
             return {"side": "sell", "reason": f"Bearish momentum: price below SMA50 + volume surge ({rel_vol:.1f}x) + RSI={rsi:.1f}", "strategy": "momentum"}
 
         # --- Strategy 5: Bollinger Band Reversion ---
+        # BB buy is kept even below RSI 50 — it's the strongest reversion signal (+$62, 67% WR)
+        # but requires stricter RSI floor (>35 instead of <40)
         if bb_lower > 0 and bb_upper > 0:
             bb_range = bb_upper - bb_lower
             if bb_range > 0:
                 bb_position = (current_price - bb_lower) / bb_range
-                if bb_position <= 0.10 and rsi < 40 and macd_hist > 0:
+                if bb_position <= 0.10 and rsi > 35 and rsi < 45 and macd_hist > 0:
                     return {"side": "buy", "reason": f"BB lower band touch (BB%={bb_position:.0%}, width={bb_width:.1f}%) + RSI={rsi:.1f} + MACD turning up", "strategy": "bb_reversion"}
                 if bb_position >= 0.90 and rsi > 60 and macd_hist < 0:
                     return {"side": "sell", "reason": f"BB upper band touch (BB%={bb_position:.0%}, width={bb_width:.1f}%) + RSI={rsi:.1f} + MACD turning down", "strategy": "bb_reversion"}
@@ -830,7 +915,8 @@ class TradingBot:
         # --- Strategy 6: Grid Mean Reversion ---
         if atr > 0 and sma_50 > 0:
             atr_dist = (current_price - sma_50) / atr
-            if atr_dist <= -1.5 and rsi < 45 and sma_50 > sma_200:
+            # Grid buy: apply RSI guard — data shows grid buy net -$121 across 5 trades
+            if atr_dist <= -1.5 and rsi < 45 and sma_50 > sma_200 and _rsi_buy_ok:
                 return {"side": "buy", "reason": f"Grid support: price {abs(atr_dist):.1f}x ATR below SMA50 (uptrend pullback) + RSI={rsi:.1f}", "strategy": "grid_reversion"}
             if atr_dist >= 1.5 and rsi > 55 and sma_50 < sma_200:
                 return {"side": "sell", "reason": f"Grid resistance: price {atr_dist:.1f}x ATR above SMA50 (downtrend rally) + RSI={rsi:.1f}", "strategy": "grid_reversion"}
@@ -838,7 +924,7 @@ class TradingBot:
         # --- Strategy 7: Trend Continuation ---
         if sma_50 > sma_200 and current_price > sma_200:
             ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100 if ema_20 > 0 else 999
-            if ema20_dist_pct < 1.2 and rsi > 35 and rsi < 60 and macd_hist > 0:
+            if ema20_dist_pct < 1.2 and rsi > 50 and rsi < 60 and macd_hist > 0 and _rsi_buy_ok:
                 return {"side": "buy", "reason": f"Trend continuation: pullback to EMA20 (dist={ema20_dist_pct:.2f}%) in uptrend (SMA50>200) + RSI={rsi:.1f}", "strategy": "trend_dca"}
         if sma_50 < sma_200 and current_price < sma_200:
             ema20_dist_pct = abs(current_price - ema_20) / ema_20 * 100 if ema_20 > 0 else 999
@@ -846,6 +932,8 @@ class TradingBot:
                 return {"side": "sell", "reason": f"Trend continuation: rally to EMA20 (dist={ema20_dist_pct:.2f}%) in downtrend (SMA50<200) + RSI={rsi:.1f}", "strategy": "trend_dca"}
 
         # --- Strategy 8: Doji Reversal ---
+        # Doji buy disabled — data: 4 trades, 25% WR, -$44 total, bootstrap P(profitable)=5%
+        # Doji sell kept — needs more data but theoretically sound
         if len(df) >= 2:
             c_open = float(df["Open"].iloc[-1])
             c_high = float(df["High"].iloc[-1])
@@ -855,8 +943,6 @@ class TradingBot:
             if c_range > 0 and c_body < c_range * 0.10:
                 prev_open = float(df["Open"].iloc[-2])
                 prev_close = float(df["Close"].iloc[-2])
-                if rsi < 40 and current_price < ema_20 and prev_close < prev_open:
-                    return {"side": "buy", "reason": f"Doji reversal: doji candle + RSI={rsi:.1f} + price below EMA20 + prior bearish candle", "strategy": "doji_reversal"}
                 if rsi > 60 and current_price > ema_20 and prev_close > prev_open:
                     return {"side": "sell", "reason": f"Doji reversal: doji candle + RSI={rsi:.1f} + price above EMA20 + prior bullish candle", "strategy": "doji_reversal"}
 
@@ -870,7 +956,12 @@ class TradingBot:
             if rel_vol >= 1.5 and c_body > atr * 0.4 and c_range > 0:
                 close_pos = (current_price - c_low) / c_range
                 if close_pos >= 0.75 and rsi < 70 and current_price > sma_50:
-                    return {"side": "buy", "reason": f"Pump on close: vol surge ({rel_vol:.1f}x) + large body + close in upper 25% + RSI={rsi:.1f} + above SMA50", "strategy": "pump_on_close"}
+                    signal = {"side": "buy", "reason": f"Pump on close: vol surge ({rel_vol:.1f}x) + large body + close in upper 25% + RSI={rsi:.1f} + above SMA50", "strategy": "pump_on_close"}
+                    if _rsi_buy_ok:
+                        return signal
+                    else:
+                        _log(self.user_id, "info", f"{coin_key}: Pump buy signal blocked by RSI guard (RSI={rsi:.1f} outside 50-70)")
+                        return None
                 if close_pos <= 0.25 and rsi > 30 and current_price < sma_50:
                     return {"side": "sell", "reason": f"Dump on close: vol surge ({rel_vol:.1f}x) + large body + close in lower 25% + RSI={rsi:.1f} + below SMA50", "strategy": "pump_on_close"}
 
@@ -1060,10 +1151,15 @@ class TradingBot:
                             if hours_open >= 336 and abs(pnl_pct) < 2.0:
                                 should_exit, exit_reason = True, f"Swing time exit: open {hours_open / 24:.0f}d with only {pnl_pct:+.2f}% P&L (stale swing trade)"
                         else:
-                            # Scalp time exit: close stale trades, but only if P&L won't just pay fees
-                            # Fee drag is ~0.16% round-trip, so < 0.5% P&L after 24h = not worth holding
-                            if hours_open >= 24 and abs(pnl_pct) < 0.5:
-                                should_exit, exit_reason = True, f"Time exit: open {hours_open:.0f}h with only {pnl_pct:+.2f}% P&L (below fee threshold, stale)"
+                            # Data-driven time exits (from hold-time analysis):
+                            # - Hold 0-6h: profitable (+$130), let it run
+                            # - Hold 6-12h: worst bucket (-$93), exit if underwater
+                            # - Hold 12-24h: marginal (-$12), exit if stale
+                            # Cut losers at 8h if they're underwater, stale exit at 16h
+                            if hours_open >= 8 and pnl_pct < -0.3:
+                                should_exit, exit_reason = True, f"Time exit: open {hours_open:.0f}h underwater ({pnl_pct:+.2f}%) — data shows 6-12h hold is worst bucket"
+                            elif hours_open >= 16 and abs(pnl_pct) < 0.5:
+                                should_exit, exit_reason = True, f"Time exit: open {hours_open:.0f}h with only {pnl_pct:+.2f}% P&L (stale, below fee threshold)"
                     except Exception:
                         pass
 

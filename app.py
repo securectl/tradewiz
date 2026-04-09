@@ -35,6 +35,7 @@ app.config["SECRET_KEY"] = _secret
 app.config["SESSION_COOKIE_SECURE"] = bool(os.getenv("DATABASE_URL"))
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching for static files
 
 # Trust reverse proxy headers (nginx) so url_for generates https:// URLs
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -61,6 +62,7 @@ from features.user.routes import bp as user_bp
 from features.analysis.routes import bp as analysis_bp
 from features.predictions.routes import bp as predictions_bp
 from features.congress.routes import bp as congress_bp
+from features.watchdog.routes import bp as watchdog_bp
 
 app.register_blueprint(ipo_bp)
 app.register_blueprint(status_bp)
@@ -73,6 +75,137 @@ app.register_blueprint(user_bp)
 app.register_blueprint(analysis_bp)
 app.register_blueprint(predictions_bp)
 app.register_blueprint(congress_bp)
+app.register_blueprint(watchdog_bp)
+
+# ─── Startup: log rotation + cleanup ────────────────────────────
+def _startup_cleanup():
+    """Trim old bot_log and service_checks entries to prevent DB bloat."""
+    import os
+    # Clean stale scheduler lock from previous container run
+    try:
+        os.remove("/tmp/scheduler.lock")
+    except OSError:
+        pass
+    try:
+        from db import execute, IS_POSTGRES
+        if IS_POSTGRES:
+            execute("DELETE FROM bot_log WHERE created_at < NOW() - INTERVAL '7 days'")
+            execute("DELETE FROM service_checks WHERE checked_at < NOW() - INTERVAL '7 days'")
+            execute("DELETE FROM llm_usage_log WHERE created_at < NOW() - INTERVAL '30 days'")
+            import logging
+            logging.getLogger(__name__).info("Startup cleanup: trimmed old log/check entries")
+    except Exception:
+        pass
+
+_startup_cleanup()
+
+
+# ─── Scheduled Jobs (daily screener scans @ 9 AM CST) ───────
+def _run_scheduled_oversold_scan():
+    """Run oversold scan at 9 AM CST daily. Stores results in DB for all users."""
+    import logging
+    log = logging.getLogger("scheduler")
+    log.info("[SCHEDULER] Starting daily oversold scan (9 AM CST)...")
+    try:
+        from screener import _oversold_background_scan
+        _oversold_background_scan(limit=20)
+        log.info("[SCHEDULER] Oversold scan complete")
+    except Exception as e:
+        log.error(f"[SCHEDULER] Oversold scan failed: {e}")
+
+
+def _run_scheduled_screener_scans():
+    """Run ALL category scans to pre-populate cache for the day.
+    Global pull — results shared across all users. Staggered to limit AI load."""
+    import logging
+    import time as _time
+    log = logging.getLogger("scheduler")
+    log.info("[SCHEDULER] Starting daily screener pre-cache (ALL categories)...")
+    try:
+        from screener import run_screener
+        categories = ["lowcap", "midcap", "largecap", "etf", "metals_mining", "crypto", "ai", "gainers", "losers"]
+        for category in categories:
+            try:
+                result = run_screener(category=category, limit=15)
+                opps = len(result.get("opportunities", []))
+                log.info(f"[SCHEDULER] {category} scan: {result.get('candidates_scanned', 0)} scanned, {opps} opportunities")
+                _time.sleep(10)  # stagger between categories to limit AI API load
+            except Exception as e:
+                log.warning(f"[SCHEDULER] {category} scan failed: {e}")
+        log.info("[SCHEDULER] All category scans complete")
+    except Exception as e:
+        log.error(f"[SCHEDULER] Screener pre-cache failed: {e}")
+
+
+def _init_scheduler():
+    """Initialize APScheduler for daily jobs. Only runs in one gunicorn worker."""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        import logging
+
+        scheduler = BackgroundScheduler(daemon=True)
+
+        # Oversold scan at 9:00 AM CST (14:00 UTC)
+        scheduler.add_job(
+            _run_scheduled_oversold_scan,
+            CronTrigger(hour=14, minute=0, timezone="UTC"),  # 9 AM CST = 14:00 UTC
+            id="daily_oversold_scan",
+            replace_existing=True,
+        )
+
+        # Pre-cache ALL screener categories at 9:10 AM CST (staggered to avoid overload)
+        scheduler.add_job(
+            _run_scheduled_screener_scans,
+            CronTrigger(hour=14, minute=10, timezone="UTC"),  # 9:10 AM CST
+            id="daily_screener_precache",
+            replace_existing=True,
+        )
+
+        # Trial expiry check + warning emails at 8:00 AM CST (13:00 UTC)
+        def _run_trial_checks():
+            log = logging.getLogger("scheduler")
+            try:
+                from trial_manager import check_and_expire_trials, check_trial_expiry_warnings
+                expired = check_and_expire_trials()
+                warned = check_trial_expiry_warnings()
+                log.info(f"[SCHEDULER] Trial check: {expired} expired, {warned} warnings sent")
+            except Exception as e:
+                log.error(f"[SCHEDULER] Trial check failed: {e}")
+
+        scheduler.add_job(
+            _run_trial_checks,
+            CronTrigger(hour=13, minute=0, timezone="UTC"),  # 8 AM CST
+            id="daily_trial_check",
+            replace_existing=True,
+        )
+
+        scheduler.start()
+        logging.getLogger("scheduler").info("[SCHEDULER] Started — trials at 8AM CST, oversold at 9AM CST, screener at 9:10AM CST")
+    except Exception as e:
+        import logging
+        logging.getLogger("scheduler").warning(f"[SCHEDULER] Failed to start: {e}")
+
+
+# Start scheduler once via before_first_request equivalent
+_scheduler_started = False
+
+@app.before_request
+def _maybe_start_scheduler():
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    _scheduler_started = True
+    import os
+    _lock_path = "/tmp/scheduler.lock"
+    try:
+        _lock_fd = os.open(_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(_lock_fd, str(os.getpid()).encode())
+        os.close(_lock_fd)
+        _init_scheduler()
+    except (FileExistsError, OSError):
+        pass
+
 
 # Serve feature static files (JS/CSS)
 @app.route('/features/<path:filename>')
@@ -251,6 +384,28 @@ def api_trump_predict():
     force = bool(request.args.get("force"))
     current = get_trump_mood()
     return jsonify(get_ai_prediction(current, force=force))
+
+
+@app.route("/api/trump/backtracks")
+@login_required
+@subscription_required("pro")
+def api_trump_backtracks():
+    """Detected policy reversals with stats — rule-based detection."""
+    from trump_mood import get_backtracks
+    days = request.args.get("days", 90, type=int)
+    force = bool(request.args.get("force"))
+    return jsonify(get_backtracks(min(days, 180), force=force))
+
+
+@app.route("/api/trump/backtracks/predict")
+@login_required
+@subscription_required("pro")
+def api_trump_backtracks_predict():
+    """AI prediction of next policy reversal — LLM-powered, cached 12h.
+    Only makes LLM call when force=1."""
+    from trump_mood import get_backtrack_prediction
+    force = bool(request.args.get("force"))
+    return jsonify(get_backtrack_prediction(force=force))
 
 
 # ─── Health Check (for orchestrators, load balancers, monitoring) ────

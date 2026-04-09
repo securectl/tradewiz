@@ -224,6 +224,7 @@ def _run_postgres(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_user_closed ON bot_trades(user_id, closed_at) WHERE status = 'closed'")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_user_open ON bot_trades(user_id, coin) WHERE status = 'open'")
     cur.execute("ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS fee REAL DEFAULT 0")
+    cur.execute("ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS regime_at_entry TEXT")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS bot_daily_pnl (
@@ -304,6 +305,33 @@ def _run_postgres(conn):
         WHERE id NOT IN (SELECT user_id FROM user_subscriptions)
     """)
 
+    # ── Trial columns on user_subscriptions ──────────────────
+    cur.execute("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMP")
+    cur.execute("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP")
+    cur.execute("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS trial_status TEXT DEFAULT 'none'")
+
+    # ── Trial Fingerprints (fraud prevention) ─────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trial_fingerprints (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            ip_address TEXT,
+            country TEXT,
+            region TEXT,
+            city TEXT,
+            fingerprint_hash TEXT,
+            email_domain TEXT,
+            payment_method_hash TEXT,
+            device_info TEXT,
+            fraud_score REAL DEFAULT 0,
+            fraud_flags TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tf_ip ON trial_fingerprints(ip_address)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tf_fingerprint ON trial_fingerprints(fingerprint_hash)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tf_email_domain ON trial_fingerprints(email_domain)")
+
     # ── Skill Jobs ─────────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS skill_jobs (
@@ -375,6 +403,144 @@ def _run_postgres(conn):
         CREATE INDEX IF NOT EXISTS idx_trump_mood_created
         ON trump_mood_history (created_at DESC)
     """)
+
+    # ── Trump Backtracks (Policy Reversal Tracking) ────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trump_backtracks (
+            id SERIAL PRIMARY KEY,
+            policy_area TEXT NOT NULL,
+            initial_stance TEXT NOT NULL,
+            initial_date TIMESTAMP NOT NULL,
+            initial_mood REAL,
+            backtrack_stance TEXT NOT NULL,
+            backtrack_date TIMESTAMP NOT NULL,
+            backtrack_mood REAL,
+            days_to_reversal INTEGER,
+            mood_swing REAL,
+            market_impact TEXT,
+            detection_method TEXT DEFAULT 'rule',
+            confidence REAL DEFAULT 0.5,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_backtracks_policy
+        ON trump_backtracks (policy_area)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_backtracks_date
+        ON trump_backtracks (backtrack_date DESC)
+    """)
+
+    # ── Watchdog Trader ────────────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS watchdog_snapshots (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            regime TEXT NOT NULL,
+            composite_score REAL NOT NULL,
+            market_score REAL,
+            sentiment_score REAL,
+            technical_score REAL,
+            spy_price REAL,
+            vix REAL,
+            trump_mood REAL,
+            signals_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ws_user_time ON watchdog_snapshots(user_id, created_at DESC)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS watchdog_paper_trades (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            ticker TEXT NOT NULL,
+            side TEXT NOT NULL DEFAULT 'long',
+            shares REAL NOT NULL,
+            entry_price REAL NOT NULL,
+            exit_price REAL,
+            stop_loss REAL,
+            take_profit REAL,
+            pnl REAL,
+            pnl_pct REAL,
+            status TEXT NOT NULL DEFAULT 'open',
+            strategy TEXT,
+            regime_at_entry TEXT,
+            reasoning TEXT,
+            notes TEXT,
+            opened_at TIMESTAMP DEFAULT NOW(),
+            closed_at TIMESTAMP
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wpt_user_status ON watchdog_paper_trades(user_id, status)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS watchdog_signals (
+            id SERIAL PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            confidence REAL,
+            strategy TEXT,
+            reasoning TEXT,
+            regime TEXT,
+            price_at_signal REAL,
+            indicators_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wsig_ticker_time ON watchdog_signals(ticker, created_at DESC)")
+
+    # ── Oversold Daily Tracker ──────────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS oversold_daily (
+            id SERIAL PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            scan_date TEXT NOT NULL,
+            price REAL,
+            rsi_14 REAL,
+            pct_change_1mo REAL,
+            market_cap REAL,
+            sector TEXT,
+            name TEXT,
+            ai_verdict TEXT,
+            ai_confidence REAL,
+            ai_summary TEXT,
+            bottom_signal_strength TEXT,
+            decline_reason TEXT,
+            validated BOOLEAN DEFAULT FALSE,
+            status TEXT DEFAULT 'tracking',
+            days_tracked INTEGER DEFAULT 1,
+            first_seen TEXT,
+            price_trend TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_oversold_ticker_date ON oversold_daily (ticker, scan_date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_oversold_date ON oversold_daily (scan_date DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_oversold_status ON oversold_daily (status)")
+
+    # ── Screener Results Cache (all categories) ────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS screener_results (
+            id SERIAL PRIMARY KEY,
+            category TEXT NOT NULL,
+            scan_date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            price REAL,
+            verdict TEXT,
+            confidence REAL,
+            summary TEXT,
+            sector TEXT,
+            name TEXT,
+            market_cap REAL,
+            data_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_screener_cat_date_ticker ON screener_results (category, scan_date, ticker)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_screener_cat_date ON screener_results (category, scan_date DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_screener_ticker ON screener_results (ticker, scan_date DESC)")
 
     cur.close()
     logger.info("PostgreSQL tables created.")
@@ -656,6 +822,7 @@ def _run_sqlite(conn):
     _sqlite_add_column(conn, "bot_log", "user_id", "INTEGER")
     _sqlite_add_column(conn, "bot_log", "source", "TEXT DEFAULT 'crypto'")
     _sqlite_add_column(conn, "bot_trades", "fee", "REAL DEFAULT 0")
+    _sqlite_add_column(conn, "bot_trades", "regime_at_entry", "TEXT")
     _sqlite_add_column(conn, "searches", "user_id", "INTEGER")
     _sqlite_add_column(conn, "journal_entries", "user_id", "INTEGER")
     _sqlite_add_column(conn, "weekly_goals", "user_id", "INTEGER")
@@ -692,6 +859,29 @@ def _run_sqlite(conn):
         conn.execute("UPDATE user_subscriptions SET tier = 'basic' WHERE tier = 'starter'")
     except Exception:
         pass
+
+    # ── Trial columns ────────────────────────────────────────
+    _sqlite_add_column(conn, "user_subscriptions", "trial_started_at", "TIMESTAMP")
+    _sqlite_add_column(conn, "user_subscriptions", "trial_ends_at", "TIMESTAMP")
+    _sqlite_add_column(conn, "user_subscriptions", "trial_status", "TEXT DEFAULT 'none'")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trial_fingerprints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            ip_address TEXT,
+            country TEXT,
+            region TEXT,
+            city TEXT,
+            fingerprint_hash TEXT,
+            email_domain TEXT,
+            payment_method_hash TEXT,
+            device_info TEXT,
+            fraud_score REAL DEFAULT 0,
+            fraud_flags TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # ── Skill Jobs ────────────────────────────────────────────
     conn.execute("""
@@ -753,6 +943,129 @@ def _run_sqlite(conn):
             src_whitehouse INTEGER DEFAULT 0,
             ai_prediction TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ── Trump Backtracks (Policy Reversal Tracking) ────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trump_backtracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            policy_area TEXT NOT NULL,
+            initial_stance TEXT NOT NULL,
+            initial_date TIMESTAMP NOT NULL,
+            initial_mood REAL,
+            backtrack_stance TEXT NOT NULL,
+            backtrack_date TIMESTAMP NOT NULL,
+            backtrack_mood REAL,
+            days_to_reversal INTEGER,
+            mood_swing REAL,
+            market_impact TEXT,
+            detection_method TEXT DEFAULT 'rule',
+            confidence REAL DEFAULT 0.5,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ── Watchdog Trader ────────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchdog_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            regime TEXT NOT NULL,
+            composite_score REAL NOT NULL,
+            market_score REAL,
+            sentiment_score REAL,
+            technical_score REAL,
+            spy_price REAL,
+            vix REAL,
+            trump_mood REAL,
+            signals_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchdog_paper_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            ticker TEXT NOT NULL,
+            side TEXT NOT NULL DEFAULT 'long',
+            shares REAL NOT NULL,
+            entry_price REAL NOT NULL,
+            exit_price REAL,
+            stop_loss REAL,
+            take_profit REAL,
+            pnl REAL,
+            pnl_pct REAL,
+            status TEXT NOT NULL DEFAULT 'open',
+            strategy TEXT,
+            regime_at_entry TEXT,
+            reasoning TEXT,
+            notes TEXT,
+            opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            closed_at TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchdog_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            confidence REAL,
+            strategy TEXT,
+            reasoning TEXT,
+            regime TEXT,
+            price_at_signal REAL,
+            indicators_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ── Oversold Daily Tracker ──────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS oversold_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            scan_date TEXT NOT NULL,
+            price REAL,
+            rsi_14 REAL,
+            pct_change_1mo REAL,
+            market_cap REAL,
+            sector TEXT,
+            name TEXT,
+            ai_verdict TEXT,
+            ai_confidence REAL,
+            ai_summary TEXT,
+            bottom_signal_strength TEXT,
+            decline_reason TEXT,
+            validated BOOLEAN DEFAULT 0,
+            status TEXT DEFAULT 'tracking',
+            days_tracked INTEGER DEFAULT 1,
+            first_seen TEXT,
+            price_trend TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, scan_date)
+        )
+    """)
+
+    # ── Screener Results Cache (all categories) ────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS screener_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            scan_date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            price REAL,
+            verdict TEXT,
+            confidence REAL,
+            summary TEXT,
+            sector TEXT,
+            name TEXT,
+            market_cap REAL,
+            data_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(category, scan_date, ticker)
         )
     """)
 

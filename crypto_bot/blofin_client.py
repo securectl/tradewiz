@@ -136,11 +136,16 @@ DEMO_URL = "https://demo-trading-openapi.blofin.com"
 class BloFinClient:
     """Wrapper around BloFin SDK. Paper trading only (demo endpoint)."""
 
-    def __init__(self, api_key=None, api_secret=None, passphrase=None):
-        """Initialize with per-user keys, falling back to env var defaults."""
-        self._api_key = api_key or BLOFIN_API_KEY
-        self._api_secret = api_secret or BLOFIN_API_SECRET
-        self._passphrase = passphrase or BLOFIN_PASSPHRASE
+    def __init__(self, api_key=None, api_secret=None, passphrase=None, use_env_fallback=False):
+        """Initialize with per-user keys. Only falls back to env vars when use_env_fallback=True."""
+        if use_env_fallback:
+            self._api_key = api_key or BLOFIN_API_KEY
+            self._api_secret = api_secret or BLOFIN_API_SECRET
+            self._passphrase = passphrase or BLOFIN_PASSPHRASE
+        else:
+            self._api_key = api_key or ""
+            self._api_secret = api_secret or ""
+            self._passphrase = passphrase or ""
         if BLOFIN_DEMO != "1":
             raise RuntimeError("SAFETY: BLOFIN_DEMO must be '1'. Refusing to use production endpoint.")
         self._client = None
