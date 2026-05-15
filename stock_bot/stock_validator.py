@@ -106,7 +106,7 @@ Evaluate the SENTIMENT and MOMENTUM of this stock trade. Respond in JSON:
 
 Approve if momentum generally supports the trade direction. If historical performance shows a losing streak, require reasonable confluence. Reject only if momentum clearly contradicts the trade direction or indicators significantly conflict."""}
     ]
-    raw = _call_openrouter(LLM_BOT_SENTIMENT, messages)
+    raw = _call_openrouter(LLM_BOT_SENTIMENT, messages, role="bot_sentiment")
     return _parse_json(raw)
 
 
@@ -128,7 +128,7 @@ Evaluate the RISK of this stock trade. Consider: earnings gap risk, false signal
 
 Approve trades with acceptable risk/reward ratios. Reject only when risk/reward is clearly unfavorable or false signal probability exceeds 0.65. This is paper trading — err toward taking the trade to gather performance data."""}
     ]
-    raw = _call_openrouter(LLM_BOT_RISK, messages)
+    raw = _call_openrouter(LLM_BOT_RISK, messages, role="bot_risk")
     return _parse_json(raw)
 
 
@@ -171,13 +171,13 @@ def validate_stock_trade(symbol: str, side: str, price: float,
             sentiment_result = sentiment_future.result(timeout=90)
         except Exception as e:
             logger.warning(f"Sentiment future failed/timed out: {e}")
-            sentiment_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — sentiment validator timed out (paper trading auto-approve)"}
+            sentiment_result = {"execute": True, "confidence": 0.25, "reasoning": "Fallback — sentiment validator timed out (paper trading auto-approve, low confidence)"}
 
         try:
             risk_result = risk_future.result(timeout=90)
         except Exception as e:
             logger.warning(f"Risk future failed/timed out: {e}")
-            risk_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — risk validator timed out (paper trading auto-approve)"}
+            risk_result = {"execute": True, "confidence": 0.25, "reasoning": "Fallback — risk validator timed out (paper trading auto-approve, low confidence)"}
 
     result["sentiment"] = sentiment_result
     result["risk"] = risk_result

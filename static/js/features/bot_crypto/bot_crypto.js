@@ -365,7 +365,7 @@ async function loadBotPnl() {
         chartContainer.innerHTML = '';
         botPnlChart = LightweightCharts.createChart(chartContainer, {
             width: chartContainer.clientWidth,
-            height: 250,
+            height: 300,
             layout: {
                 background: {type: 'solid', color: '#1e222d'},
                 textColor: '#787b86',
@@ -375,30 +375,49 @@ async function loadBotPnl() {
                 horzLines: {color: '#2a2e39'},
             },
             rightPriceScale: {borderColor: '#363a45'},
+            leftPriceScale: {borderColor: '#363a45', visible: true},
             timeScale: {borderColor: '#363a45'},
         });
 
-        // Cumulative P&L as area chart
+        // Daily P&L as histogram bars (green = profit, red = loss)
+        const barData = data.map(d => ({
+            time: d.date,
+            value: parseFloat(d.total_pnl.toFixed(2)),
+            color: d.total_pnl >= 0 ? '#26a69a' : '#ef5350',
+        }));
+
+        botPnlSeries = botPnlChart.addHistogramSeries({
+            priceScaleId: 'right',
+            priceFormat: {type: 'custom', formatter: v => '$' + v.toFixed(2)},
+        });
+        botPnlSeries.setData(barData);
+
+        // Cumulative P&L as line overlay
         let cumulative = 0;
-        const seriesData = data.map(d => {
+        const cumulativeData = data.map(d => {
             cumulative += d.total_pnl;
             return {time: d.date, value: parseFloat(cumulative.toFixed(2))};
         });
 
-        botPnlSeries = botPnlChart.addAreaSeries({
-            lineColor: cumulative >= 0 ? '#26a69a' : '#ef5350',
-            topColor: cumulative >= 0 ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)',
-            bottomColor: cumulative >= 0 ? 'rgba(38,166,154,0.05)' : 'rgba(239,83,80,0.05)',
+        const cumulativeSeries = botPnlChart.addLineSeries({
+            color: '#42a5f5',
             lineWidth: 2,
+            priceScaleId: 'left',
+            priceFormat: {type: 'custom', formatter: v => '$' + v.toFixed(2)},
+            lastValueVisible: true,
+            priceLineVisible: false,
         });
-        botPnlSeries.setData(seriesData);
+        cumulativeSeries.setData(cumulativeData);
+
         botPnlChart.timeScale().fitContent();
 
-        // Resize observer
         const ro = new ResizeObserver(() => {
             if (botPnlChart) botPnlChart.applyOptions({width: chartContainer.clientWidth});
         });
         ro.observe(chartContainer);
+
+        // Daily breakdown table
+        _renderDailyTable('bot-daily-table', data);
     } catch (e) {
         console.error('Failed to load bot P&L:', e);
     }
@@ -407,6 +426,58 @@ async function loadBotPnl() {
 function _formatPnl(val) {
     const sign = val >= 0 ? '+' : '';
     return sign + '$' + val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function _renderDailyTable(containerId, data) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Show most recent days first
+    const reversed = [...data].reverse();
+    let totalPnl = 0, totalTrades = 0, totalWins = 0, greenDays = 0, redDays = 0;
+    reversed.forEach(d => {
+        totalPnl += d.total_pnl;
+        totalTrades += d.trade_count;
+        totalWins += d.win_count;
+        if (d.total_pnl >= 0) greenDays++; else redDays++;
+    });
+
+    let html = `
+        <div style="margin-top:12px; padding:0 4px;">
+            <div style="display:flex; gap:16px; margin-bottom:10px; font-size:12px; color:#787b86;">
+                <span>Green Days: <b style="color:#26a69a">${greenDays}</b></span>
+                <span>Red Days: <b style="color:#ef5350">${redDays}</b></span>
+                <span>Avg/Day: <b style="color:${totalPnl/reversed.length >= 0 ? '#26a69a' : '#ef5350'}">$${(totalPnl/reversed.length).toFixed(2)}</b></span>
+                <span style="color:#42a5f5;">Blue line = cumulative</span>
+            </div>
+            <div style="max-height:200px; overflow-y:auto; border:1px solid #2a2e39; border-radius:6px;">
+                <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                    <thead>
+                        <tr style="background:#2a2e39; position:sticky; top:0;">
+                            <th style="padding:6px 8px; text-align:left; color:#787b86;">Date</th>
+                            <th style="padding:6px 8px; text-align:right; color:#787b86;">P&L</th>
+                            <th style="padding:6px 8px; text-align:right; color:#787b86;">Trades</th>
+                            <th style="padding:6px 8px; text-align:right; color:#787b86;">Win Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+    reversed.forEach(d => {
+        const pnl = d.total_pnl;
+        const wr = d.trade_count > 0 ? ((d.win_count / d.trade_count) * 100).toFixed(0) : '—';
+        const pnlColor = pnl >= 0 ? '#26a69a' : '#ef5350';
+        const sign = pnl >= 0 ? '+' : '';
+        html += `
+            <tr style="border-bottom:1px solid #2a2e39;">
+                <td style="padding:5px 8px; color:#d1d4dc;">${d.date}</td>
+                <td style="padding:5px 8px; text-align:right; color:${pnlColor}; font-weight:600;">${sign}$${pnl.toFixed(2)}</td>
+                <td style="padding:5px 8px; text-align:right; color:#d1d4dc;">${d.trade_count}</td>
+                <td style="padding:5px 8px; text-align:right; color:${d.trade_count > 0 && d.win_count/d.trade_count >= 0.5 ? '#26a69a' : '#ef5350'};">${wr}%</td>
+            </tr>`;
+    });
+
+    html += '</tbody></table></div></div>';
+    container.innerHTML = html;
 }
 
 function _setPnlEl(id, data) {
@@ -531,6 +602,7 @@ async function loadBotConfig() {
         const el = (id) => document.getElementById(id);
         if (cfg.daily_goal) el('bot-cfg-daily-goal').value = cfg.daily_goal;
         if (cfg.max_position_pct) el('bot-cfg-max-pct').value = cfg.max_position_pct;
+        if (cfg.max_total_exposure_pct) el('bot-cfg-max-exposure').value = cfg.max_total_exposure_pct;
         if (cfg.daily_loss_limit) el('bot-cfg-loss-limit').value = cfg.daily_loss_limit;
         if (cfg.max_open_positions) el('bot-cfg-max-open').value = cfg.max_open_positions;
         if (cfg.max_daily_trades) el('bot-cfg-max-daily-trades').value = cfg.max_daily_trades;
@@ -731,6 +803,7 @@ async function updateBotConfig() {
         const payload = {
             daily_goal: document.getElementById('bot-cfg-daily-goal').value,
             max_position_pct: document.getElementById('bot-cfg-max-pct').value,
+            max_total_exposure_pct: document.getElementById('bot-cfg-max-exposure').value,
             daily_loss_limit: document.getElementById('bot-cfg-loss-limit').value,
             max_open_positions: document.getElementById('bot-cfg-max-open').value,
             max_daily_trades: document.getElementById('bot-cfg-max-daily-trades').value,

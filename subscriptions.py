@@ -68,8 +68,9 @@ def get_or_create_stripe_customer(user_id, email, name=None):
 
 # ─── Checkout & Portal ──────────────────────────────────────────────
 
-def create_checkout_session(user_id, email, name, tier, success_url, cancel_url):
-    """Create a Stripe Checkout Session for a subscription tier."""
+def create_checkout_session(user_id, email, name, tier, success_url, cancel_url, trial_days=0):
+    """Create a Stripe Checkout Session for a subscription tier.
+    If trial_days > 0, creates a subscription with a free trial period."""
     stripe = _get_stripe()
     price_id = TIER_PRICES.get(tier)
     if not price_id:
@@ -77,14 +78,22 @@ def create_checkout_session(user_id, email, name, tier, success_url, cancel_url)
 
     customer_id = get_or_create_stripe_customer(user_id, email, name)
 
-    session = stripe.checkout.Session.create(
-        customer=customer_id,
-        mode="subscription",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata={"user_id": str(user_id), "tier": tier},
-    )
+    session_params = {
+        "customer": customer_id,
+        "mode": "subscription",
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "metadata": {"user_id": str(user_id), "tier": tier},
+    }
+
+    # Add Stripe-level trial if requested (collects payment method upfront)
+    if trial_days > 0:
+        session_params["subscription_data"] = {
+            "trial_period_days": trial_days,
+        }
+
+    session = stripe.checkout.Session.create(**session_params)
     return session.url
 
 

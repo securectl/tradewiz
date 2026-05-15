@@ -155,7 +155,7 @@
 
 .journal-time {
     font-size: 11px;
-    color: var(--text-secondary);
+    color: var(--text-bright);
 }
 
 .journal-delete-btn {

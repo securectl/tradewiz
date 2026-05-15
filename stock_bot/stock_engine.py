@@ -30,7 +30,12 @@ P = "%s" if IS_POSTGRES else "?"
 
 
 def _get_config(user_id, key, default=None):
-    row = query_one(f"SELECT value FROM bot_config WHERE user_id = {P} AND key = {P}", (user_id, key))
+    # User-specific row wins; falls back to admin-set global row (user_id=0).
+    row = query_one(
+        f"SELECT value FROM bot_config WHERE user_id IN ({P}, 0) AND key = {P} "
+        f"ORDER BY CASE WHEN user_id = 0 THEN 1 ELSE 0 END LIMIT 1",
+        (user_id, key),
+    )
     return row["value"] if row else default
 
 
@@ -121,6 +126,15 @@ def _get_trade_performance(user_id) -> dict:
         return {}
 
 
+def _is_user_admin(user_id):
+    """Check if user has admin role."""
+    try:
+        row = query_one(f"SELECT role FROM user_roles WHERE user_id = {P} AND role = 'admin'", (user_id,))
+        return row is not None
+    except Exception:
+        return False
+
+
 def _load_user_keys(user_id, provider):
     """Load decrypted API keys for a user from user_api_keys table."""
     try:
@@ -194,22 +208,24 @@ class StockTradingBot:
     def __init__(self, user_id=None):
         self.user_id = user_id
         broker = _get_config(user_id, "stock_broker", "alpaca")
-        # Load per-user keys for the selected broker
+        # Load per-user keys — only admin falls back to env vars
+        is_admin = _is_user_admin(user_id) if user_id else False
         if user_id:
             keys = _load_user_keys(user_id, broker)
-            if broker == "alpaca" and keys:
+            if broker == "alpaca" and (keys or is_admin):
                 self.client = AlpacaClient(
                     api_key=keys.get("api_key"),
                     secret_key=keys.get("secret_key"),
+                    use_env_fallback=is_admin,
                 )
-            elif broker == "webull" and keys:
+            elif broker == "webull" and (keys or is_admin):
                 self.client = WebullClient(
                     app_key=keys.get("app_key"),
                     app_secret=keys.get("app_secret"),
                     account_id=keys.get("account_id"),
                 )
             else:
-                self.client = get_broker_client(broker)
+                self.client = AlpacaClient()  # Empty keys — will error on use
         else:
             self.client = get_broker_client(broker)
         self.broker_name = broker
@@ -710,7 +726,9 @@ class StockTradingBot:
         if is_swing:
             base_size = equity * 0.25
             swing_open = query_one(
-                f"SELECT COUNT(*) as cnt FROM bot_trades WHERE user_id = {P} AND status = 'open' AND asset_type = 'stock' AND strategy LIKE 'swing_%'",
+                # Escape literal % as %% — see crypto_bot/bot_engine.py for the
+                # same fix; bare '%' collides with psycopg2's %s placeholder.
+                f"SELECT COUNT(*) as cnt FROM bot_trades WHERE user_id = {P} AND status = 'open' AND asset_type = 'stock' AND strategy LIKE 'swing_%%'",
                 (self.user_id,),
             )
             swing_count = int(swing_open["cnt"]) if swing_open else 0
@@ -843,6 +861,25 @@ class StockTradingBot:
                 stop_loss = current_price + (sl_mult * effective_atr)
                 take_profit = current_price - (tp_mult * effective_atr)
 
+        # Quick backtest: validate signal against recent price history
+        try:
+            from shared.backtest import quick_backtest
+            sl_pct = abs(current_price - stop_loss) / current_price * 100 if current_price > 0 else 2.0
+            tp_pct = abs(take_profit - current_price) / current_price * 100 if current_price > 0 else 5.0
+            bt = quick_backtest(
+                df, side=signal["side"], strategy=signal.get("strategy", "unknown"),
+                stop_loss_pct=sl_pct, take_profit_pct=tp_pct,
+                lookback=5, max_hold_bars=12 if not is_swing else 30,
+            )
+            _log(self.user_id, "info", f"{stock_key}: {bt['detail']}")
+            if not bt["pass"]:
+                _log(self.user_id, "info", f"{stock_key}: Backtest FAILED — signal would have lost money recently, skipping trade")
+                self._record_rejected_signal(stock_key, signal, current_price,
+                    {"approved": False, "summary": f"Backtest rejected: {bt['detail']}"})
+                return
+        except Exception as e:
+            _log(self.user_id, "warn", f"{stock_key}: Backtest check failed: {e}")
+
         order_result = self.client.place_order(
             symbol=stock_key, side=signal["side"], qty=qty,
             stop_loss=round(stop_loss, 2), take_profit=round(take_profit, 2),
@@ -860,11 +897,7 @@ class StockTradingBot:
                  signal.get("strategy", "unknown"), direction_bias),
             )
             _log(self.user_id, "info", f"STOCK TRADE OPENED: {signal['side']} {qty} shares {stock_key} @ ${current_price:,.2f} | SL: ${stop_loss:,.2f} | TP: ${take_profit:,.2f}")
-            _journal_log(self.user_id,
-                ticker=stock_key, action="BUY" if signal["side"] == "buy" else "SELL",
-                entry_price=current_price, shares=qty,
-                notes=f"[Stock Bot] {signal['side'].upper()} — {signal['reason']}",
-            )
+            # Bot trades go in `bot_trades` only — manual journal stays clean.
         else:
             error_msg = order_result.get("error", "unknown")
             _log(self.user_id, "error", f"Order failed for {stock_key}: {error_msg}")
@@ -986,6 +1019,14 @@ class StockTradingBot:
                     return {"side": "buy", "reason": f"Pump on close: vol surge ({rel_vol:.1f}x) + large body + close in upper 25% + RSI={rsi:.1f} + above SMA50", "strategy": "pump_on_close"}
                 if close_pos <= 0.25 and rsi > 30 and current_price < sma_50:
                     return {"side": "sell", "reason": f"Dump on close: vol surge ({rel_vol:.1f}x) + large body + close in lower 25% + RSI={rsi:.1f} + below SMA50", "strategy": "pump_on_close"}
+
+        # Deep oversold rebound — see crypto_bot/bot_engine.py for full notes.
+        # Fires on RSI < 25 alone; accepts knife risk to keep bot trading in
+        # deep selloffs. Self-learning blacklist disciplines if it underperforms.
+        if rsi < 25:
+            return {"side": "buy",
+                    "reason": f"Deep oversold rebound: RSI={rsi:.1f} (<25) — bounce candidate, knife-risk accepted",
+                    "strategy": "deep_oversold_rebound"}
 
         return None
 
@@ -1131,16 +1172,17 @@ class StockTradingBot:
                 else:
                     pnl_pct = (entry_price - current_price) / entry_price * 100
 
-                if trade["side"] == "buy":
-                    if current_price <= stop_loss:
-                        should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
-                    elif current_price >= take_profit:
-                        should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
-                else:
-                    if current_price >= stop_loss:
-                        should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
-                    elif current_price <= take_profit:
-                        should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
+                if stop_loss is not None and take_profit is not None:
+                    if trade["side"] == "buy":
+                        if current_price <= stop_loss:
+                            should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
+                        elif current_price >= take_profit:
+                            should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
+                    else:
+                        if current_price >= stop_loss:
+                            should_exit, exit_reason = True, f"Stop loss hit (${stop_loss:,.2f})"
+                        elif current_price <= take_profit:
+                            should_exit, exit_reason = True, f"Take profit hit (${take_profit:,.2f})"
 
                 strategy = trade.get("strategy", "") or ""
                 is_swing_trade = strategy.startswith("swing_")
@@ -1163,7 +1205,7 @@ class StockTradingBot:
                                 should_exit, exit_reason = True, f"Swing trailing stop: locking {trail_floor_pct:.1f}% of {pnl_pct:.1f}% max profit"
 
                 # Scalp trailing stop (original logic)
-                if not should_exit and not is_swing_trade and pnl_pct >= 1.5:
+                if not should_exit and not is_swing_trade and pnl_pct >= 1.5 and take_profit is not None:
                     if trade["side"] == "buy":
                         retracement = (take_profit - current_price) / (take_profit - entry_price) if take_profit != entry_price else 0
                     else:
@@ -1181,8 +1223,12 @@ class StockTradingBot:
                         hours_open = (datetime.now() - opened).total_seconds() / 3600
                         days_open = hours_open / 24
 
-                        # Swing trades: time exit at 14 days
-                        if is_swing_trade:
+                        # Hard hold cap: force-close anything still open after 48h
+                        # regardless of P&L. Prevents capital lockup on stalled trades.
+                        if hours_open >= 48:
+                            should_exit, exit_reason = True, f"Hard 48h cap: open {days_open:.1f}d, P&L {pnl_pct:+.2f}% (force-close)"
+                        elif is_swing_trade:
+                            # Swing trades: time exit at 14 days
                             if days_open >= 14:
                                 should_exit, exit_reason = True, f"Swing time exit: open {days_open:.0f} days (max 14d), P&L {pnl_pct:+.1f}%"
                         else:
@@ -1230,13 +1276,8 @@ class StockTradingBot:
              f"STOCK TRADE CLOSED: {trade['coin']} {trade['side']} | Entry: ${entry_price:,.2f} → Exit: ${exit_price:,.2f} | "
              f"Gross: ${gross_pnl:,.2f} | Fee: ${fee:,.2f} | Net P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%) | {reason}")
 
-        close_action = "SELL" if trade["side"] == "buy" else "BUY"
-        _journal_log(self.user_id,
-            ticker=trade["coin"], action=close_action,
-            entry_price=entry_price, exit_price=exit_price,
-            shares=size, pnl=pnl,
-            notes=f"[Stock Bot] Closed — {reason} | Gross: ${gross_pnl:,.2f} | Fee: ${fee:,.2f} | Net: ${pnl:,.2f} ({pnl_pct:+.1f}%)",
-        )
+        # Closed trades update `bot_trades` (above) — no journal_entries write
+        # so the user's manual journal stays clean (audit Apr 2026).
 
         _log(self.user_id, "info", f"STOCK TRADE CLOSED: {trade['coin']} {trade['side']} | Entry: ${entry_price:,.2f} -> Exit: ${exit_price:,.2f} | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%) | Fee: ${fee:,.2f} | {reason}")
 

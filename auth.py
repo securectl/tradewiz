@@ -59,7 +59,8 @@ login_manager.login_view = "auth.login"
 
 class User(UserMixin):
     def __init__(self, id, google_id, email, name, picture_url,
-                 roles=None, tier="free", password_hash=None, totp_secret=None):
+                 roles=None, tier="free", password_hash=None, totp_secret=None,
+                 bot_access="none"):
         self.id = id
         self.google_id = google_id
         self.email = email
@@ -69,6 +70,7 @@ class User(UserMixin):
         self.tier = tier
         self.password_hash = password_hash
         self.totp_secret = totp_secret
+        self.bot_access = bot_access or "none"
 
     def has_role(self, role):
         return role in self.roles
@@ -79,7 +81,10 @@ class User(UserMixin):
 
     @property
     def is_trader(self):
-        return "admin" in self.roles or "trader" in self.roles or self.tier == "pro"
+        """Requires explicit bot_access grant — NOT tied to subscription tier."""
+        if "admin" in self.roles:
+            return True
+        return self.bot_access != "none"
 
     @property
     def has_totp(self):
@@ -95,6 +100,7 @@ class User(UserMixin):
             "is_admin": self.is_admin,
             "is_trader": self.is_trader,
             "tier": self.tier,
+            "bot_access": self.bot_access,
         }
 
 
@@ -164,20 +170,21 @@ def load_user(user_id):
                 f"SELECT role FROM user_roles WHERE user_id = {P}", (row["id"],)
             ).fetchall()]
 
-        # Load subscription tier
+        # Load subscription tier + bot_access
         if IS_POSTGRES:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute(f"SELECT tier FROM user_subscriptions WHERE user_id = {P} AND status = 'active'", (row["id"],))
-            tier_row = cur.fetchone()
+            cur.execute(f"SELECT tier, bot_access FROM user_subscriptions WHERE user_id = {P} AND status = 'active'", (row["id"],))
+            sub_row = cur.fetchone()
             cur.close()
         else:
-            tier_row = conn.execute(
-                f"SELECT tier FROM user_subscriptions WHERE user_id = {P} AND status = 'active'", (row["id"],)
+            sub_row = conn.execute(
+                f"SELECT tier, bot_access FROM user_subscriptions WHERE user_id = {P} AND status = 'active'", (row["id"],)
             ).fetchone()
-            if tier_row:
-                tier_row = dict(tier_row)
+            if sub_row:
+                sub_row = dict(sub_row)
 
-        tier = tier_row["tier"] if tier_row else "free"
+        tier = sub_row["tier"] if sub_row else "free"
+        bot_access = sub_row.get("bot_access", "none") if sub_row else "none"
 
         return User(
             id=row["id"],
@@ -189,6 +196,7 @@ def load_user(user_id):
             tier=tier,
             password_hash=row.get("password_hash"),
             totp_secret=row.get("totp_secret"),
+            bot_access=bot_access,
         )
     finally:
         put_db(conn)
@@ -304,6 +312,12 @@ def signup():
     if user:
         login_user(user)
         logger.info(f"New invite-only signup: {email} (tier={user.tier})")
+        # Activate 7-day trial for new users
+        try:
+            from trial_manager import activate_trial
+            activate_trial(user.id, request)
+        except Exception as e:
+            logger.warning(f"Trial activation failed for {email}: {e}")
         return redirect("/")
     else:
         flash("Failed to create account. Please try again.", "error")
@@ -440,6 +454,9 @@ def callback():
                                    google_configured=google_configured,
                                    error="This platform is invite-only. Please contact an admin for access.")
 
+    # Check if user is new (for trial activation)
+    _is_new_google_user = not query_one(f"SELECT id FROM users WHERE google_id = {P} OR email = {P}", (google_id, email.lower()))
+
     user = _upsert_user(google_id, email, name, picture)
 
     # Check if account is locked
@@ -458,6 +475,15 @@ def callback():
                                error="Admin accounts must use the Admin Login page with password + authenticator.")
 
     login_user(user, remember=True)
+
+    # Activate 7-day trial for new Google users
+    if _is_new_google_user:
+        try:
+            from trial_manager import activate_trial
+            activate_trial(user.id, request)
+        except Exception as e:
+            logger.warning(f"Trial activation failed for Google user {user.email}: {e}")
+
     return redirect("/")
 
 

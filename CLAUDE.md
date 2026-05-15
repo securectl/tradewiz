@@ -73,7 +73,7 @@ Frontend (Flask templates + vanilla JS) → Flask API (40+ routes) → Analysis 
 
 ## Important Rules
 
-1. **Never enable live trading** — all broker clients must stay in paper/demo mode
+1. **Live trading is opt-in per user** — paper mode remains the default for every bot. Live orders only route when the user has explicitly set `cb_mode='live'` (or equivalent for other bots). The Alpaca client receives `paper=False` from `_get_broker(user_id)` only in this case. When a bot starts in live mode, log a `LIVE TRADING ENABLED` warning. Risk gates (kill switch, daily loss limit, max positions, hard stop) apply identically to live and paper. Webull stays sandbox-only.
 2. **Always use parameterized queries** — never string-interpolate SQL
 3. **Keep LLM fallbacks** — every LLM call path must have a non-LLM fallback
 4. **Don't break the scan loop** — bot engines run continuously; exceptions must be caught within the loop
@@ -82,6 +82,11 @@ Frontend (Flask templates + vanilla JS) → Flask API (40+ routes) → Analysis 
 7. **Bot access is invite-only** — never expose bot features in public subscription plans
 8. **Bot should actively trade** — LLM validators biased toward approving for paper trading, cooldowns kept short
 9. **Always rebuild after changes** — `docker compose up -d --build` after every code change
+10. **Auto-restart all bots on container restart** — every bot that was enabled before a restart/rebuild must come back up automatically. The bootstrap lives in `_auto_start_bots()` in `app.py`, invoked from `_on_startup()` post-fork. It iterates `bot_config` enable flags (`bot_enabled` / `stock_bot_enabled` / `wd_enabled` / `cb_enabled`) per user and calls each engine's start function, then unconditionally starts the global options-flow scanner. Whenever a new bot is added, register its enable-flag + start path in `_auto_start_bots()`.
+11. **Test every new feature** — for any new route, helper, or behavior change, add at minimum:
+    - **Unit test** in `tests/` covering the happy path + 1–2 edge cases (use `unittest.TestCase`, see `tests/test_routes.py` for the convention).
+    - **Smoke check** that exercises the change end-to-end against the running container (e.g. `docker compose exec app python -c "..."` confirming the new module imports, the new route resolves, the data path round-trips). Smoke checks that already exist as one-off `docker compose exec` invocations should be promoted to `tests/test_<feature>.py` after they pass.
+    - Run the full suite (`docker compose exec app python -m pytest tests/ -v`) before declaring a feature done. Do not mark a task `completed` if tests are red.
 
 ## Running Locally
 

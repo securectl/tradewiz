@@ -120,12 +120,219 @@ function renderAnalysis(data) {
     renderTradePlan(data.trade_plan);
     renderIndicators(data.indicators);
     renderFinancials(data.fundamentals);
+    // Liquidity tile + recent news (24h, multi-source: yfinance / GDELT / Reddit)
+    loadLiquidity(data.ticker);
+    loadNews(data.ticker);
     resetAIValidation();
     resetPrediction();
     resetEarnings();
 
     // Auto-fit chart: show pattern area with S/R context, not arbitrary 80 bars
     autoFitChart(data);
+}
+
+
+// ─── Liquidity tile ───────────────────────────────────────────────────
+
+async function loadLiquidity(ticker) {
+    const box = document.getElementById('liquidity-box');
+    if (!box || !ticker) return;
+    box.innerHTML = '<div style="color:#787b86;font-size:12px;">Loading liquidity...</div>';
+    try {
+        const r = await fetch(`/api/analyze/${encodeURIComponent(ticker)}/liquidity`);
+        if (!r.ok) {
+            box.innerHTML = '<div style="color:#787b86;font-size:12px;">No liquidity data available.</div>';
+            return;
+        }
+        const d = await r.json();
+        renderLiquidity(d);
+    } catch (e) {
+        box.innerHTML = `<div style="color:#ef5350;font-size:12px;">Liquidity load failed: ${e.message}</div>`;
+    }
+}
+
+function _fmtBig(n) {
+    if (n == null || isNaN(n)) return '—';
+    const a = Math.abs(n);
+    if (a >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+    if (a >= 1e9)  return (n / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6)  return (n / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3)  return (n / 1e3).toFixed(2) + 'K';
+    return n.toFixed(2);
+}
+
+function renderLiquidity(d) {
+    const box = document.getElementById('liquidity-box');
+    if (!box) return;
+    const color = d.color || '#787b86';
+    const netCash = d.net_cash != null ? d.net_cash : ((d.total_cash || 0) - (d.total_debt || 0));
+    const netCashColor = netCash >= 0 ? '#00c896' : '#ff4757';
+    const cdRatio = d.cash_to_debt;
+    const cdColor = cdRatio == null ? 'var(--text-secondary)' : cdRatio >= 1 ? '#00c896' : cdRatio >= 0.5 ? '#ffc837' : '#ff4757';
+    const crColor = d.current_ratio == null ? 'var(--text-secondary)' : d.current_ratio >= 1.5 ? '#00c896' : d.current_ratio >= 1.0 ? '#ffc837' : '#ff4757';
+    const fcfColor = (d.free_cf || 0) >= 0 ? '#00c896' : '#ff4757';
+    const runwayLabel = d.cash_runway_months != null
+        ? (d.cash_runway_months > 24 ? '>2y' : d.cash_runway_months.toFixed(1) + ' mo')
+        : 'profitable';
+
+    box.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:8px 12px;background:${color}1a;border:1px solid ${color}66;border-radius:6px;">
+        <div>
+            <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;">Health Rating</div>
+            <div style="font-size:16px;font-weight:800;color:${color};">${d.rating} <span style="font-weight:400;font-size:12px;color:var(--text-secondary);">(${d.health_score}/100)</span></div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;">Net Cash</div>
+            <div style="font-size:16px;font-weight:800;color:${netCashColor};">$${_fmtBig(netCash)}</div>
+        </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;font-size:12px;">
+        <div style="padding:6px 8px;background:var(--bg-secondary);border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-secondary);">Total Cash</div>
+            <div style="font-weight:700;color:#00c896;">$${_fmtBig(d.total_cash)}</div>
+        </div>
+        <div style="padding:6px 8px;background:var(--bg-secondary);border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-secondary);">Total Debt</div>
+            <div style="font-weight:700;color:#ff8c42;">$${_fmtBig(d.total_debt)}</div>
+        </div>
+        <div style="padding:6px 8px;background:var(--bg-secondary);border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-secondary);">Cash / Debt</div>
+            <div style="font-weight:700;color:${cdColor};">${cdRatio != null ? cdRatio.toFixed(2) + 'x' : '—'}</div>
+        </div>
+        <div style="padding:6px 8px;background:var(--bg-secondary);border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-secondary);">Current Ratio</div>
+            <div style="font-weight:700;color:${crColor};">${d.current_ratio != null ? d.current_ratio.toFixed(2) : '—'}</div>
+        </div>
+        <div style="padding:6px 8px;background:var(--bg-secondary);border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-secondary);">Free Cash Flow</div>
+            <div style="font-weight:700;color:${fcfColor};">$${_fmtBig(d.free_cf)}</div>
+        </div>
+        <div style="padding:6px 8px;background:var(--bg-secondary);border-radius:4px;">
+            <div style="font-size:10px;color:var(--text-secondary);">Cash Runway</div>
+            <div style="font-weight:700;color:var(--text-bright);">${runwayLabel}</div>
+        </div>
+    </div>`;
+}
+
+
+// ─── News panel ───────────────────────────────────────────────────────
+
+let _currentNewsTicker = null;
+
+async function loadNews(ticker, force) {
+    const box = document.getElementById('news-box');
+    const btn = document.getElementById('btn-refresh-news');
+    if (!box || !ticker) return;
+    _currentNewsTicker = ticker;
+    if (btn) btn.style.display = '';
+
+    box.innerHTML = '<div style="color:#787b86;font-size:12px;">Loading news...</div>';
+    try {
+        const url = `/api/analyze/${encodeURIComponent(ticker)}/news${force ? '?force=1' : ''}`;
+        const r = await fetch(url);
+        if (!r.ok) {
+            box.innerHTML = '<div style="color:#787b86;font-size:12px;">News load failed.</div>';
+            return;
+        }
+        const d = await r.json();
+        renderNews(d);
+    } catch (e) {
+        box.innerHTML = `<div style="color:#ef5350;font-size:12px;">News load failed: ${e.message}</div>`;
+    }
+}
+
+function refreshNews() {
+    if (_currentNewsTicker) loadNews(_currentNewsTicker, true);
+}
+
+function _ago(iso) {
+    try {
+        const t = new Date(iso);
+        const m = Math.max(0, (Date.now() - t.getTime()) / 60000);
+        if (m < 60) return Math.round(m) + 'm ago';
+        const h = m / 60;
+        if (h < 24) return Math.round(h) + 'h ago';
+        return Math.round(h / 24) + 'd ago';
+    } catch (_) { return ''; }
+}
+
+// Active sentiment tab: 'all' | 'bullish' | 'neutral' | 'bearish'
+// Persisted across renders + page reloads so users don't lose their filter.
+let _newsTab = (() => {
+    try { return localStorage.getItem('newsTab') || 'all'; } catch (_) { return 'all'; }
+})();
+let _newsLastPayload = null;
+
+function _setNewsTab(tab) {
+    _newsTab = tab;
+    try { localStorage.setItem('newsTab', tab); } catch (_) {}
+    if (_newsLastPayload) renderNews(_newsLastPayload);
+}
+
+function _newsItemRow(it) {
+    const isSocial = it.type === 'social';
+    const tagColor = isSocial ? '#ff7043' : '#42a5f5';
+    const score = isSocial && it.score != null ? ` · ${it.score}↑ ${it.comments || 0}💬` : '';
+    const title = (it.title || '').replace(/</g, '&lt;');
+    const sentiment = it.sentiment || 'neutral';
+    const sentColor = sentiment === 'bullish' ? '#26a69a' : sentiment === 'bearish' ? '#ef5350' : 'transparent';
+    const sentLabel = sentiment === 'bullish' ? 'Bullish' : sentiment === 'bearish' ? 'Bearish' : '';
+    const sentBadge = sentLabel
+        ? `<span style="display:inline-block;padding:1px 6px;background:${sentColor}26;color:${sentColor};border-radius:8px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;margin-left:4px;">${sentLabel}</span>`
+        : '';
+    return `<div style="padding:7px 8px;border-bottom:1px solid var(--border-color);border-left:3px solid ${sentColor};">
+        <div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;">
+            <span style="display:inline-block;padding:1px 6px;background:${tagColor}26;color:${tagColor};border-radius:8px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;margin-top:2px;">${it.type}</span>
+            ${sentBadge}
+            <div style="flex:1;min-width:0;">
+                <a href="${it.url}" target="_blank" rel="noopener noreferrer" style="color:var(--text-bright);text-decoration:none;font-size:12px;font-weight:600;line-height:1.4;">${title}</a>
+                <div style="font-size:10px;color:var(--text-secondary);margin-top:2px;">${it.source || '?'} · ${_ago(it.published_at)}${score}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _newsTabBtn(key, label, count, active) {
+    const fg = active ? 'var(--text-bright)' : 'var(--text-secondary)';
+    const bg = active ? 'var(--border-color)' : 'transparent';
+    const accent = key === 'bullish' ? '#26a69a' : key === 'bearish' ? '#ef5350' : key === 'neutral' ? '#787b86' : '#42a5f5';
+    const dot = key === 'all' ? '' : `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${accent};margin-right:5px;"></span>`;
+    return `<button data-news-tab="${key}" style="background:${bg};border:1px solid var(--border-color);color:${fg};padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;">${dot}${label} <span style="margin-left:5px;color:var(--text-secondary);font-weight:500;">${count}</span></button>`;
+}
+
+function renderNews(d) {
+    const box = document.getElementById('news-box');
+    if (!box) return;
+    _newsLastPayload = d;
+    const items = d.items || [];
+    if (!items.length) {
+        box.innerHTML = `<div style="color:#787b86;font-size:12px;">No news in the last ${d.hours || 24}h. Try the refresh button or expand the window.</div>`;
+        return;
+    }
+    const sCounts = d.by_sentiment || {bullish: 0, neutral: 0, bearish: 0};
+    const cached = d.cached ? '<span style="color:#787b86;font-size:10px;">(cached)</span>' : '';
+
+    const head = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:11px;color:var(--text-secondary);">
+        <span><strong style="color:var(--text-bright);">${items.length}</strong> items in last ${d.hours || 24}h ${cached}</span>
+    </div>
+    <div style="display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap;">
+        ${_newsTabBtn('all', 'All', items.length, _newsTab === 'all')}
+        ${_newsTabBtn('bullish', 'Bullish', sCounts.bullish || 0, _newsTab === 'bullish')}
+        ${_newsTabBtn('neutral', 'Neutral', sCounts.neutral || 0, _newsTab === 'neutral')}
+        ${_newsTabBtn('bearish', 'Bearish', sCounts.bearish || 0, _newsTab === 'bearish')}
+    </div>`;
+
+    const filtered = _newsTab === 'all' ? items : items.filter(it => (it.sentiment || 'neutral') === _newsTab);
+    const body = filtered.length
+        ? filtered.map(_newsItemRow).join('')
+        : `<div style="color:#787b86;font-size:12px;padding:12px 4px;">No ${_newsTab} items in this window.</div>`;
+
+    box.innerHTML = head + `<div style="max-height:340px;overflow-y:auto;">${body}</div>`;
+
+    // Wire up tab clicks (delegated each render — cheap, no listener leaks)
+    box.querySelectorAll('[data-news-tab]').forEach(btn => {
+        btn.addEventListener('click', () => _setNewsTab(btn.getAttribute('data-news-tab')));
+    });
 }
 
 function autoFitChart(data) {

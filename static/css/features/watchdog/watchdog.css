@@ -1,0 +1,140 @@
+/* Watchdog Trader Styles */
+
+.wd-panel {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.wd-panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.wd-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.wd-regime-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.wd-regime-badge {
+    font-size: 28px;
+    font-weight: 900;
+    letter-spacing: 1px;
+}
+
+.wd-axis-bar {
+    height: 6px;
+    background: #0d1117;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.wd-axis-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s;
+}
+
+.wd-signal-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid;
+}
+
+.wd-signal-buy { background: #00c89618; color: #00c896; border-color: #00c89633; }
+.wd-signal-sell { background: #ff475718; color: #ff4757; border-color: #ff475733; }
+.wd-signal-hedge { background: #ff8c4218; color: #ff8c42; border-color: #ff8c4233; }
+.wd-signal-watch { background: #ffc83718; color: #ffc837; border-color: #ffc83733; }
+.wd-signal-avoid { background: #ff475718; color: #ef5350; border-color: #ef535033; }
+.wd-signal-error { background: #636b7e18; color: #636b7e; border-color: #636b7e33; }
+
+.wd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.wd-table thead tr {
+    background: #2a2e39;
+    border-bottom: 2px solid #363a45;
+}
+
+.wd-table th {
+    padding: 8px 10px;
+    text-align: left;
+    color: var(--text-secondary);
+    font-size: 10px;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+.wd-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.wd-health-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.wd-trade-form {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.wd-trade-form input, .wd-trade-form select {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-bright);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    width: 100px;
+}
+
+.wd-trade-form label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 3px;
+}
+
+@media (max-width: 768px) {
+    .wd-grid-2 {
+        grid-template-columns: 1fr;
+    }
+    .wd-regime-bar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

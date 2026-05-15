@@ -38,6 +38,8 @@ from shared.prompts.screener import (
     AI_SYSTEM, AI_USER_TEMPLATE,
     GAINERS_SYSTEM, GAINERS_USER_TEMPLATE,
     LOSERS_SYSTEM, LOSERS_USER_TEMPLATE,
+    OVERSOLD_SYSTEM, OVERSOLD_USER_TEMPLATE,
+    OVERSOLD_VALIDATOR_SYSTEM, OVERSOLD_VALIDATOR_USER_TEMPLATE,
     HOT_SECTORS_SYSTEM, HOT_SECTORS_USER_TEMPLATE,
 )
 
@@ -86,6 +88,10 @@ MIDCAP_TICKERS = [
     "GTLB", "PATH", "ESTC", "DOCN", "BRZE", "TOST", "CWAN",
     # Semiconductors
     "MRVL", "ON", "SWKS", "QRVO", "SLAB", "DIOD", "AMBA", "CRUS",
+    "WOLF", "AXTI", "INDI", "NVTS", "POWI", "SITM", "ALGM",
+    # AI Infra / Optical / Networking (the rocket names — Nov '25/'26 leaders)
+    "NBIS", "COHR", "AAOI", "LITE", "FN", "CIEN", "ANET", "CRDO",
+    "ALAB", "VRT", "PSTG", "SMCI", "ARM", "TSM",
     # Healthcare
     "DXCM", "ISRG", "VEEV", "ALGN", "TFX", "NVCR", "INSP", "GMED",
     # Financial Tech
@@ -655,6 +661,188 @@ def scan_top_movers(direction: str = "gainers", period: str = "1d",
     return enriched
 
 
+def scan_oversold_candidates(limit: int = 30) -> list:
+    """Scan universe for stocks oversold in the past 1 month.
+
+    2-stage approach to stay under timeout:
+      Stage 1: Quick 5-day scan of full universe — find stocks down >5% in 5 days (fast).
+      Stage 2: Download 1-month data ONLY for those ~100-150 losers — compute RSI-14.
+    This cuts the heavy download by ~90% vs scanning all tickers with 1mo data."""
+    if not HAS_YFINANCE:
+        return []
+
+    import logging
+    import numpy as np
+
+    log = logging.getLogger(__name__)
+    universe = _get_full_universe()
+    log.info(f"[OVERSOLD] Stage 1: Quick 5-day prefilter on {len(universe)} tickers...")
+
+    # ── Stage 1: Fast 5-day prefilter ──
+    # Download 5d data (very fast) and find tickers that dropped >3%
+    losers_5d = []
+    batch_size = 200
+
+    try:
+        for i in range(0, len(universe), batch_size):
+            batch = universe[i:i + batch_size]
+            try:
+                tickers_str = " ".join(batch)
+                data = yf.download(tickers_str, period="5d", progress=False, threads=True)
+                if data.empty:
+                    continue
+
+                close_data = data.get("Close")
+                if close_data is None:
+                    continue
+
+                tickers_to_check = batch if len(batch) == 1 else [t for t in batch if t in close_data.columns]
+
+                for ticker in tickers_to_check:
+                    try:
+                        col = close_data[ticker].dropna() if len(batch) > 1 else close_data.dropna()
+                        if len(col) < 2:
+                            continue
+                        first = float(col.iloc[0])
+                        last = float(col.iloc[-1])
+                        if first > 0:
+                            pct = (last - first) / first * 100
+                            if pct < -3:  # Down >3% in 5 days = potential oversold
+                                losers_5d.append(ticker)
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    log.info(f"[OVERSOLD] Stage 1 found {len(losers_5d)} tickers down >3% in 5 days")
+
+    if not losers_5d:
+        return []
+
+    # Cap to avoid still being too slow
+    losers_5d = losers_5d[:300]
+
+    # ── Stage 2: 1-month RSI calculation on prefiltered losers only ──
+    log.info(f"[OVERSOLD] Stage 2: Computing RSI-14 on {len(losers_5d)} candidates...")
+    oversold = []
+    batch_size_2 = 100
+
+    try:
+        for i in range(0, len(losers_5d), batch_size_2):
+            batch = losers_5d[i:i + batch_size_2]
+            try:
+                tickers_str = " ".join(batch)
+                data = yf.download(tickers_str, period="1mo", progress=False, threads=True)
+                if data.empty:
+                    continue
+
+                close_data = data.get("Close")
+                volume_data = data.get("Volume")
+                if close_data is None:
+                    continue
+
+                tickers_to_check = batch if len(batch) == 1 else [t for t in batch if t in close_data.columns]
+
+                for ticker in tickers_to_check:
+                    try:
+                        if len(batch) == 1:
+                            col = close_data.dropna()
+                            vol_col = volume_data.dropna() if volume_data is not None else None
+                        else:
+                            col = close_data[ticker].dropna()
+                            vol_col = volume_data[ticker].dropna() if volume_data is not None and ticker in volume_data.columns else None
+
+                        if len(col) < 14:
+                            continue
+
+                        prices = col.values.astype(float)
+                        deltas = np.diff(prices)
+                        gains = np.where(deltas > 0, deltas, 0)
+                        losses = np.where(deltas < 0, -deltas, 0)
+
+                        avg_gain = np.mean(gains[-14:])
+                        avg_loss = np.mean(losses[-14:])
+
+                        if avg_loss == 0:
+                            continue
+                        rs = avg_gain / avg_loss
+                        rsi = 100 - (100 / (1 + rs))
+
+                        if rsi >= 35:
+                            continue
+
+                        last_price = float(prices[-1])
+                        first_price = float(prices[0])
+                        pct_change_1mo = ((last_price - first_price) / first_price) * 100
+
+                        sma_20 = float(np.mean(prices[-20:])) if len(prices) >= 20 else None
+                        sma_10 = float(np.mean(prices[-10:])) if len(prices) >= 10 else None
+                        avg_vol = float(np.mean(vol_col.values[-14:])) if vol_col is not None and len(vol_col) >= 14 else 0
+
+                        oversold.append({
+                            "ticker": ticker,
+                            "price": float(round(last_price, 2)),
+                            "rsi_14": float(round(rsi, 1)),
+                            "pct_change_1mo": float(round(pct_change_1mo, 2)),
+                            "sma_20": float(round(sma_20, 2)) if sma_20 else None,
+                            "sma_10": float(round(sma_10, 2)) if sma_10 else None,
+                            "avg_volume": int(avg_vol),
+                        })
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    log.info(f"[OVERSOLD] Stage 2 found {len(oversold)} tickers with RSI < 35")
+
+    oversold.sort(key=lambda x: x["rsi_14"])
+
+    # ── Stage 3: Enrich top candidates with fundamentals (parallel) ──
+    top_candidates = oversold[:limit * 3]
+
+    def _enrich(c):
+        try:
+            t = yf.Ticker(c["ticker"])
+            info = t.info or {}
+            mkt_cap = info.get("marketCap", 0) or 0
+            if mkt_cap < 100_000_000:
+                return None
+            return {
+                **c,
+                "market_cap": mkt_cap,
+                "name": info.get("shortName", info.get("longName", c["ticker"])),
+                "sector": info.get("sector", "Unknown"),
+                "industry": info.get("industry", "Unknown"),
+                "forward_pe": info.get("forwardPE"),
+                "revenue_growth": info.get("revenueGrowth"),
+                "profit_margins": info.get("profitMargins"),
+                "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+                "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
+                "short_ratio": info.get("shortRatio"),
+                "analyst_target": info.get("targetMeanPrice"),
+            }
+        except Exception:
+            return None
+
+    enriched = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_enrich, c): c for c in top_candidates}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                enriched.append(result)
+                if len(enriched) >= limit:
+                    break
+
+    enriched.sort(key=lambda x: x["rsi_14"])
+    log.info(f"[OVERSOLD] Returning {len(enriched)} enriched oversold candidates")
+    return enriched[:limit]
+
+
 # ─── AI Vet Functions ──────────────────────────────────────────
 
 def vet_candidate(candidate: dict) -> dict:
@@ -697,7 +885,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         {"role": "user", "content": LOWCAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -744,7 +932,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         {"role": "user", "content": MIDCAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_midcap_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -793,7 +981,7 @@ Recommendation: {info.get('recommendationKey', 'N/A')}"""
         {"role": "user", "content": LARGECAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_largecap_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -832,7 +1020,7 @@ YTD Return: {ytd_str}
         {"role": "user", "content": ETF_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_etf_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -876,7 +1064,7 @@ Debt/Equity: {info.get('debtToEquity', 'N/A')}
         {"role": "user", "content": METALS_MINING_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_metals_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -904,7 +1092,7 @@ Avg Volume: {candidate.get('volume', 0):,.0f}"""
         {"role": "user", "content": CRYPTO_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_crypto_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -949,13 +1137,124 @@ ROE: {info.get('returnOnEquity', 'N/A')}
         {"role": "user", "content": AI_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_ai_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
     result["market_cap"] = candidate.get("market_cap")
     result["name"] = candidate.get("name")
     result["sector"] = candidate.get("sector")
+    return result
+
+
+def vet_oversold_candidate(candidate: dict) -> dict:
+    """Dual-LLM oversold vetting: LLM #1 tags bottom signals, LLM #2 validates."""
+    if not is_configured():
+        return {"error": "AI not configured", "ticker": candidate.get("ticker")}
+
+    ticker = candidate.get("ticker", "???")
+    rsi = candidate.get("rsi_14", "N/A")
+    pct_change = candidate.get("pct_change_1mo", 0)
+
+    summary = f"""STOCK: {ticker}
+Name: {candidate.get('name', 'N/A')}
+Price: ${candidate.get('price', 0)}
+RSI-14: {rsi}
+1-Month Change: {pct_change:+.2f}%
+Market Cap: ${candidate.get('market_cap', 0):,.0f}
+Sector: {candidate.get('sector', 'N/A')} | Industry: {candidate.get('industry', 'N/A')}
+Avg Volume (14d): {candidate.get('avg_volume', 0):,.0f}
+SMA-10: ${candidate.get('sma_10', 'N/A')} | SMA-20: ${candidate.get('sma_20', 'N/A')}
+Forward P/E: {candidate.get('forward_pe', 'N/A')}
+Revenue Growth: {candidate.get('revenue_growth', 'N/A')}
+Profit Margins: {candidate.get('profit_margins', 'N/A')}
+52W Low: ${candidate.get('fifty_two_week_low', 'N/A')} | 52W High: ${candidate.get('fifty_two_week_high', 'N/A')}
+Short Ratio: {candidate.get('short_ratio', 'N/A')}
+Analyst Target: ${candidate.get('analyst_target', 'N/A')}"""
+
+    # Enrich with additional yfinance data
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info or {}
+        summary += f"""
+Beta: {info.get('beta', 'N/A')}
+Debt/Equity: {info.get('debtToEquity', 'N/A')}
+Current Ratio: {info.get('currentRatio', 'N/A')}
+Insider Ownership: {info.get('heldPercentInsiders', 'N/A')}
+Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
+    except Exception:
+        pass
+
+    # ── LLM #1: Tag / Identify bottom signals ──
+    messages_tag = [
+        {"role": "system", "content": OVERSOLD_SYSTEM},
+        {"role": "user", "content": OVERSOLD_USER_TEMPLATE.format(summary=summary)},
+    ]
+
+    raw_tag = _call_openrouter(LLM_SCREENER, messages_tag, max_tokens=768, timeout=20, role="screener")
+    tag_result = _parse_json_response(raw_tag, "screener_oversold_tag")
+
+    initial_verdict = tag_result.get("verdict", "WATCH")
+    initial_confidence = tag_result.get("confidence", 50)
+    initial_summary = tag_result.get("summary", "")
+    rsi_assessment = tag_result.get("rsi_assessment", "N/A")
+    bottom_signal = tag_result.get("bottom_signal_strength", "N/A")
+    decline_reason = tag_result.get("decline_reason", "N/A")
+
+    # ── LLM #2: Validate / Challenge the initial call ──
+    messages_validate = [
+        {"role": "system", "content": OVERSOLD_VALIDATOR_SYSTEM},
+        {"role": "user", "content": OVERSOLD_VALIDATOR_USER_TEMPLATE.format(
+            ticker=ticker,
+            initial_verdict=initial_verdict,
+            initial_confidence=initial_confidence,
+            initial_summary=initial_summary,
+            rsi_assessment=rsi_assessment,
+            bottom_signal_strength=bottom_signal,
+            decline_reason=decline_reason,
+            summary=summary,
+        )},
+    ]
+
+    raw_validate = _call_openrouter(LLM_SUPERVISOR if LLM_SUPERVISOR else LLM_SCREENER,
+                                     messages_validate, max_tokens=768, timeout=20,
+                                     role="supervisor" if LLM_SUPERVISOR else "screener")
+    val_result = _parse_json_response(raw_validate, "screener_oversold_validate")
+
+    # Merge results — validator gets final say
+    validated = val_result.get("validated", True)
+    final_verdict = val_result.get("adjusted_verdict", initial_verdict) if validated else "FALLING KNIFE"
+    final_confidence = val_result.get("adjusted_confidence", initial_confidence)
+
+    result = {
+        "ticker": ticker,
+        "price": candidate.get("price"),
+        "rsi_14": rsi,
+        "pct_change_1mo": pct_change,
+        "market_cap": candidate.get("market_cap"),
+        "name": candidate.get("name"),
+        "sector": candidate.get("sector"),
+        "verdict": final_verdict,
+        "confidence": final_confidence,
+        # From tagger
+        "rsi_assessment": rsi_assessment,
+        "bottom_signal_strength": bottom_signal,
+        "decline_reason": decline_reason,
+        "support_level": tag_result.get("support_level"),
+        "key_indicators": tag_result.get("key_indicators", []),
+        "recovery_catalysts": tag_result.get("recovery_catalysts", []),
+        "downside_remaining_pct": tag_result.get("downside_remaining_pct"),
+        "estimated_bounce_pct": tag_result.get("estimated_bounce_pct"),
+        "position_limit_pct": val_result.get("final_position_limit_pct", tag_result.get("position_limit_pct", 3)),
+        # From validator
+        "validated": validated,
+        "challenge_points": val_result.get("challenge_points", []),
+        "validation_notes": val_result.get("validation_notes", ""),
+        "risk_flags": val_result.get("risk_flags", []),
+        "summary": val_result.get("summary", initial_summary),
+        # Risks from both
+        "risks": tag_result.get("risks", []) + val_result.get("risk_flags", []),
+    }
     return result
 
 
@@ -1004,7 +1303,7 @@ Analyst Target: ${info.get('targetMeanPrice', 'N/A')}"""
         {"role": "user", "content": user_msg},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, f"screener_{direction}_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1087,7 +1386,7 @@ def get_hot_sectors(period: str = "1mo") -> dict:
     ]
 
     try:
-        raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=1024, timeout=25)
+        raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=1024, timeout=25, role="screener")
         parsed = _parse_json_response(raw, "hot_sectors")
         return {
             "period": period,
@@ -1103,18 +1402,386 @@ def get_hot_sectors(period: str = "1mo") -> dict:
         }
 
 
+def _oversold_background_scan(limit=20):
+    """Heavy oversold scan — runs in background thread, stores results in DB."""
+    import logging
+    log = logging.getLogger(__name__)
+
+    try:
+        from db import query, execute, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+    except ImportError:
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    log.info("[OVERSOLD-BG] Background scan started...")
+
+    try:
+        candidates = scan_oversold_candidates(limit=limit)
+        if not candidates:
+            log.info("[OVERSOLD-BG] No candidates found")
+            return
+
+        vetted = _parallel_vet(candidates, vet_oversold_candidate)
+
+        for v in vetted:
+            ticker = v.get("ticker", "???")
+            price = v.get("price", 0)
+            rsi = v.get("rsi_14")
+            verdict = v.get("verdict", "WATCH")
+            confidence = v.get("confidence", 50)
+
+            # Look up history
+            history = []
+            try:
+                history = query(
+                    f"SELECT scan_date, price, rsi_14, status FROM oversold_daily "
+                    f"WHERE ticker = {P} AND scan_date < {P} ORDER BY scan_date DESC LIMIT 5",
+                    (ticker, today),
+                )
+            except Exception:
+                pass
+
+            first_seen = history[-1]["scan_date"] if history else today
+            days_tracked = len(history) + 1
+
+            # Consolidation detection
+            status = "tracking"
+            price_trend = "new"
+
+            if len(history) >= 3:
+                recent_prices = [float(h["price"]) for h in history[:3]]
+                recent_prices.reverse()
+                recent_prices.append(float(price))
+
+                changes = []
+                for i in range(1, len(recent_prices)):
+                    if recent_prices[i - 1] > 0:
+                        changes.append((recent_prices[i] - recent_prices[i - 1]) / recent_prices[i - 1] * 100)
+
+                if changes:
+                    declining_days = sum(1 for c in changes if c < -1.0)
+                    stable_days = sum(1 for c in changes if -1.0 <= c <= 1.5)
+                    rising_days = sum(1 for c in changes if c > 1.5)
+
+                    if declining_days >= 2 and changes[-1] < -0.5:
+                        status, price_trend = "tracking", "falling"
+                    elif stable_days >= 2 or (rising_days >= 1 and declining_days <= 1):
+                        status = "consolidating"
+                        price_trend = "stabilizing" if stable_days >= 2 else "bouncing"
+                    elif changes[-1] > 0 and len(history) >= 4:
+                        status, price_trend = "consolidating", "first_bounce"
+                    else:
+                        status, price_trend = "tracking", "mixed"
+            elif len(history) >= 1:
+                prev_price = float(history[0]["price"])
+                if prev_price > 0:
+                    chg = (float(price) - prev_price) / prev_price * 100
+                    price_trend = "falling" if chg < -1.0 else "stabilizing" if chg > -1.0 else "flat"
+                status = "tracking"
+
+            if verdict == "FALLING KNIFE":
+                status = "tracking"
+            if status == "consolidating" and confidence < 45:
+                status = "tracking"
+
+            # Store in oversold_daily
+            try:
+                if IS_POSTGRES:
+                    execute(
+                        f"INSERT INTO oversold_daily (ticker, scan_date, price, rsi_14, pct_change_1mo, "
+                        f"market_cap, sector, name, ai_verdict, ai_confidence, ai_summary, "
+                        f"bottom_signal_strength, decline_reason, validated, status, days_tracked, "
+                        f"first_seen, price_trend) "
+                        f"VALUES ({P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P}) "
+                        f"ON CONFLICT (ticker, scan_date) DO UPDATE SET "
+                        f"price=EXCLUDED.price, rsi_14=EXCLUDED.rsi_14, ai_verdict=EXCLUDED.ai_verdict, "
+                        f"ai_confidence=EXCLUDED.ai_confidence, ai_summary=EXCLUDED.ai_summary, "
+                        f"status=EXCLUDED.status, days_tracked=EXCLUDED.days_tracked, price_trend=EXCLUDED.price_trend",
+                        (ticker, today, price, rsi, v.get("pct_change_1mo"),
+                         v.get("market_cap"), v.get("sector"), v.get("name"),
+                         verdict, confidence, v.get("summary", ""),
+                         v.get("bottom_signal_strength"), v.get("decline_reason"),
+                         v.get("validated", False), status, days_tracked, first_seen, price_trend),
+                    )
+                else:
+                    execute(
+                        f"INSERT OR REPLACE INTO oversold_daily (ticker, scan_date, price, rsi_14, "
+                        f"pct_change_1mo, market_cap, sector, name, ai_verdict, ai_confidence, "
+                        f"ai_summary, bottom_signal_strength, decline_reason, validated, status, "
+                        f"days_tracked, first_seen, price_trend) "
+                        f"VALUES ({P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P})",
+                        (ticker, today, price, rsi, v.get("pct_change_1mo"),
+                         v.get("market_cap"), v.get("sector"), v.get("name"),
+                         verdict, confidence, v.get("summary", ""),
+                         v.get("bottom_signal_strength"), v.get("decline_reason"),
+                         v.get("validated", False), status, days_tracked, first_seen, price_trend),
+                    )
+            except Exception as e:
+                log.warning(f"[OVERSOLD-BG] Failed to store {ticker}: {e}")
+
+        # Also store in screener_results for history UI
+        all_for_cache = []
+        for v in vetted:
+            all_for_cache.append(v)
+        _store_screener_results("oversold", all_for_cache)
+
+        log.info(f"[OVERSOLD-BG] Scan complete — {len(vetted)} tickers stored")
+    except Exception as e:
+        log.error(f"[OVERSOLD-BG] Scan failed: {e}")
+
+
+# Track if a background scan is already running
+_oversold_scan_running = False
+
+
+def _run_oversold_pipeline(limit: int = 20, sectors: list = None) -> dict:
+    """Oversold pipeline — always serves from DB, triggers background scan if needed.
+
+    Never blocks the web request with heavy yfinance downloads.
+    - If today's data exists in DB → serve immediately
+    - If not → kick off background thread, serve most recent available data
+    """
+    import logging
+    import threading
+    log = logging.getLogger(__name__)
+
+    try:
+        from db import query, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+    except ImportError:
+        return {"candidates_scanned": 0, "opportunities": [], "risky": [],
+                "tracking": [], "avoided": 0, "category": "oversold",
+                "timestamp": datetime.now().isoformat(), "error": "DB not available"}
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # ── Try today's data first ──
+    cached = []
+    try:
+        cached = query(
+            f"SELECT * FROM oversold_daily WHERE scan_date = {P} ORDER BY rsi_14 ASC",
+            (today,),
+        )
+    except Exception:
+        pass
+
+    # ── If no today data, try most recent available (any date) ──
+    scan_label = today
+    if not cached:
+        try:
+            cached = query(
+                "SELECT * FROM oversold_daily WHERE scan_date = "
+                f"(SELECT MAX(scan_date) FROM oversold_daily) ORDER BY rsi_14 ASC",
+                (),
+            )
+            if cached:
+                scan_label = cached[0].get("scan_date", "unknown")
+                log.info(f"[OVERSOLD] No today data, serving from {scan_label} ({len(cached)} tickers)")
+        except Exception:
+            pass
+
+    # ── Trigger background scan if no today data ──
+    global _oversold_scan_running
+    if scan_label != today and not _oversold_scan_running:
+        _oversold_scan_running = True
+        def _bg():
+            global _oversold_scan_running
+            try:
+                _oversold_background_scan(limit=limit)
+            finally:
+                _oversold_scan_running = False
+        t = threading.Thread(target=_bg, daemon=True)
+        t.start()
+        log.info("[OVERSOLD] Background scan triggered")
+
+    # ── Build response from DB data ──
+    if not cached:
+        scanning_msg = "Oversold scan is running in the background. Results will appear shortly — refresh in 2-3 minutes." if _oversold_scan_running else "No oversold data yet. Scan runs daily at 10 AM EST."
+        return {
+            "candidates_scanned": 0, "opportunities": [], "risky": [],
+            "tracking": [], "avoided": 0, "category": "oversold",
+            "timestamp": datetime.now().isoformat(),
+            "error": scanning_msg, "scan_running": _oversold_scan_running,
+        }
+
+    all_results = []
+    for r in cached:
+        all_results.append({
+            "ticker": r["ticker"], "price": r["price"], "rsi_14": r["rsi_14"],
+            "pct_change_1mo": r["pct_change_1mo"], "market_cap": r["market_cap"],
+            "sector": r.get("sector", "Unknown"), "name": r.get("name", r["ticker"]),
+            "verdict": r.get("ai_verdict", "WATCH"), "confidence": r.get("ai_confidence", 50),
+            "summary": r.get("ai_summary", ""), "bottom_signal_strength": r.get("bottom_signal_strength"),
+            "decline_reason": r.get("decline_reason"), "validated": r.get("validated", False),
+            "status": r.get("status", "tracking"), "days_tracked": r.get("days_tracked", 1),
+            "first_seen": r.get("first_seen", today), "price_trend": r.get("price_trend"),
+        })
+
+    if sectors:
+        all_results = [r for r in all_results if r.get("sector", "") in sectors]
+
+    # Ensure in screener_results for past scans UI
+    _store_screener_results("oversold", all_results)
+
+    # Split into categories
+    opportunities, tracking, risky = [], [], []
+    avoided = 0
+    for r in all_results:
+        if r.get("status") == "consolidating" and r.get("verdict") in ("BOTTOM FORMING", "WATCH"):
+            opportunities.append(r)
+        elif r.get("verdict") == "FALLING KNIFE":
+            avoided += 1
+        elif r.get("status") == "tracking":
+            tracking.append(r)
+        else:
+            risky.append(r)
+
+    return {
+        "candidates_scanned": len(all_results),
+        "opportunities": opportunities,
+        "risky": risky,
+        "tracking": tracking,
+        "avoided": avoided,
+        "category": "oversold",
+        "timestamp": datetime.now().isoformat(),
+        "scan_date": scan_label,
+        "scan_running": _oversold_scan_running,
+    }
+
+
+def _store_screener_results(category, results_list):
+    """Store vetted screener results in screener_results table for history + caching."""
+    try:
+        from db import execute, IS_POSTGRES
+        import json as _json
+        P = "%s" if IS_POSTGRES else "?"
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        for r in results_list:
+            ticker = r.get("ticker", "???")
+            # Store full result as JSON for future reconstruction
+            data_blob = _json.dumps({k: v for k, v in r.items()
+                                     if k not in ("ticker", "price", "verdict", "confidence",
+                                                   "summary", "sector", "name", "market_cap")},
+                                    default=str)
+            try:
+                if IS_POSTGRES:
+                    execute(
+                        f"INSERT INTO screener_results (category, scan_date, ticker, price, verdict, "
+                        f"confidence, summary, sector, name, market_cap, data_json) "
+                        f"VALUES ({P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P}) "
+                        f"ON CONFLICT (category, scan_date, ticker) DO UPDATE SET "
+                        f"price=EXCLUDED.price, verdict=EXCLUDED.verdict, confidence=EXCLUDED.confidence, "
+                        f"summary=EXCLUDED.summary, data_json=EXCLUDED.data_json",
+                        (category, today, ticker, r.get("price"), r.get("verdict"),
+                         r.get("confidence"), r.get("summary", ""), r.get("sector"),
+                         r.get("name"), r.get("market_cap"), data_blob),
+                    )
+                else:
+                    execute(
+                        f"INSERT OR REPLACE INTO screener_results (category, scan_date, ticker, price, "
+                        f"verdict, confidence, summary, sector, name, market_cap, data_json) "
+                        f"VALUES ({P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P})",
+                        (category, today, ticker, r.get("price"), r.get("verdict"),
+                         r.get("confidence"), r.get("summary", ""), r.get("sector"),
+                         r.get("name"), r.get("market_cap"), data_blob),
+                    )
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def _load_cached_screener(category, sectors=None):
+    """Load today's cached screener results from DB. Returns (results, found) tuple."""
+    try:
+        from db import query, IS_POSTGRES
+        import json as _json
+        P = "%s" if IS_POSTGRES else "?"
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        rows = query(
+            f"SELECT * FROM screener_results WHERE category = {P} AND scan_date = {P} ORDER BY confidence DESC",
+            (category, today),
+        )
+        if not rows or len(rows) == 0:
+            return [], False
+
+        results = []
+        for r in rows:
+            entry = {
+                "ticker": r["ticker"], "price": r["price"], "verdict": r["verdict"],
+                "confidence": r["confidence"], "summary": r.get("summary", ""),
+                "sector": r.get("sector"), "name": r.get("name"), "market_cap": r.get("market_cap"),
+            }
+            # Merge extra data from JSON blob
+            if r.get("data_json"):
+                try:
+                    extra = _json.loads(r["data_json"])
+                    entry.update(extra)
+                except Exception:
+                    pass
+            results.append(entry)
+
+        # Filter by sectors if specified
+        if sectors:
+            results = [r for r in results if r.get("sector", "") in sectors]
+
+        return results, True
+    except Exception:
+        return [], False
+
+
 def run_screener(min_price: float = 2.0, max_price: float = 15.0,
                  limit: int = 20, category: str = "lowcap",
                  sectors: list = None, timeframe: str = "1d") -> dict:
     """
     Full screener pipeline: scan -> parallel AI vet -> categorize -> return.
-    Supports categories: lowcap, midcap, largecap, etf, metals_mining, crypto, ai, gainers, losers.
+    Supports categories: lowcap, midcap, largecap, etf, metals_mining, crypto, ai, gainers, losers, oversold.
+
+    Cache-first: checks screener_results DB for today's scan before running AI.
+    Results are stored for history tracking and shared across all users.
     """
     if not is_configured():
         return {
             "error": "OpenRouter API key not configured.",
             "candidates_scanned": 0, "opportunities": [], "risky": [],
             "avoided": 0, "timestamp": datetime.now().isoformat(),
+        }
+
+    # ── Cache-first: serve today's results from DB if available ──
+    # Gainers/losers with different timeframes get a composite cache key
+    cache_key = f"{category}_{timeframe}" if category in ("gainers", "losers") else category
+    cached_results, cache_hit = _load_cached_screener(cache_key, sectors)
+    if cache_hit and cached_results:
+        # Reconstruct the categorized response from cached data
+        positive_map = {
+            "lowcap": ["OPPORTUNITY"], "midcap": ["OPPORTUNITY"], "largecap": ["STRONG GROWTH"],
+            "etf": ["STRONG BUY"], "metals_mining": ["OPPORTUNITY"], "crypto": ["BULLISH"],
+            "ai": ["OPPORTUNITY"], "gainers_1d": ["MOMENTUM BUY"], "gainers_1w": ["MOMENTUM BUY"],
+            "gainers_3mo": ["MOMENTUM BUY"], "losers_1d": ["RECOVERY BUY"],
+            "losers_1w": ["RECOVERY BUY"], "losers_3mo": ["RECOVERY BUY"],
+        }
+        cautious_map = {
+            "lowcap": ["RISKY"], "midcap": ["RISKY"], "largecap": ["STEADY"],
+            "etf": ["ACCUMULATE"], "metals_mining": ["RISKY"], "crypto": ["NEUTRAL"],
+            "ai": ["RISKY"], "gainers_1d": ["WATCH"], "gainers_1w": ["WATCH"],
+            "gainers_3mo": ["WATCH"], "losers_1d": ["WATCH"],
+            "losers_1w": ["WATCH"], "losers_3mo": ["WATCH"],
+        }
+        pos = positive_map.get(cache_key, ["OPPORTUNITY"])
+        caut = cautious_map.get(cache_key, ["RISKY"])
+        opps = [r for r in cached_results if r.get("verdict") in pos]
+        risky = [r for r in cached_results if r.get("verdict") in caut]
+        return {
+            "candidates_scanned": len(cached_results),
+            "opportunities": opps,
+            "risky": risky,
+            "avoided": len(cached_results) - len(opps) - len(risky),
+            "category": category,
+            "timestamp": datetime.now().isoformat(),
+            "from_cache": True,
         }
 
     # Scan based on category
@@ -1158,6 +1825,9 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
         vet_fn = lambda c: vet_mover_candidate(c, "losers", timeframe)
         positive = ["RECOVERY BUY"]
         cautious = ["WATCH"]
+    elif category == "oversold":
+        # Oversold uses a dedicated pipeline with daily tracking + consolidation detection
+        return _run_oversold_pipeline(limit=limit, sectors=sectors)
     else:  # lowcap
         candidates = scan_lowcap_candidates(min_price, max_price, limit=limit)
         vet_fn = vet_candidate
@@ -1206,6 +1876,11 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
             result["avoided"] += supervisor_vetoed
         except Exception:
             pass  # Graceful degradation
+
+    # ── Store results for history tracking (shared across all users) ──
+    all_vetted = result["opportunities"] + result["risky"]
+    store_key = f"{category}_{timeframe}" if category in ("gainers", "losers") else category
+    _store_screener_results(store_key, all_vetted)
 
     return {
         "candidates_scanned": len(candidates),

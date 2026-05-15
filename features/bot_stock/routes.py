@@ -160,7 +160,8 @@ def api_stock_bot_config():
 
     data = request.get_json()
     allowed_keys = {
-        "stock_max_position_pct", "stock_daily_loss_limit", "stock_max_open_positions",
+        "stock_max_position_pct", "stock_max_total_exposure_pct",
+        "stock_daily_loss_limit", "stock_max_open_positions",
         "stock_scan_interval_sec", "stock_daily_goal", "stock_direction_bias",
         "stock_extended_hours", "stock_trade_mode", "stock_quick_trade_mode",
     }
@@ -228,6 +229,9 @@ def api_stock_bot_stocks_add():
 @bp.route("/api/stock-bot/log")
 @trader_required
 def api_stock_bot_log():
+    """Stock bot activity feed — merges live bot_log entries with synthetic
+    'TRADE CLOSED' rows derived from bot_trades, so closed trades stay visible
+    in the feed beyond bot_log's 30-day retention."""
     uid = _uid()
     level = request.args.get("level")
     limit = int(request.args.get("limit", 100))
@@ -242,10 +246,49 @@ def api_stock_bot_log():
     params.append(limit)
     rows = query(f"SELECT * FROM bot_log{where} ORDER BY created_at DESC LIMIT {P}", params)
 
-    return jsonify([{
+    out = [{
         "id": r["id"], "level": r["level"], "message": r["message"],
         "details": r["details"], "created_at": r["created_at"],
-    } for r in rows])
+    } for r in rows]
+
+    CLOSE_TAIL = 20
+    if level in (None, "info"):
+        closes = query(
+            f"SELECT id, coin, side, entry_price, exit_price, pnl, pnl_pct, strategy, closed_at "
+            f"FROM bot_trades WHERE user_id = {P} AND asset_type = 'stock' "
+            f"AND status = 'closed' AND closed_at IS NOT NULL "
+            f"ORDER BY closed_at DESC LIMIT {P}",
+            (uid, CLOSE_TAIL),
+        )
+        existing_close_ids = set()
+        for r in out:
+            msg = r.get("message") or ""
+            if msg.startswith("TRADE CLOSED:"):
+                existing_close_ids.add((msg[:60], str(r.get("created_at") or "")[:16]))
+
+        for c in closes:
+            entry = float(c["entry_price"] or 0)
+            exit_ = float(c["exit_price"] or 0)
+            pnl = float(c["pnl"] or 0)
+            pct = float(c["pnl_pct"] or 0)
+            strat = c["strategy"] or "—"
+            msg = (f"TRADE CLOSED: {c['coin']} {c['side']} | "
+                   f"Entry: ${entry:,.2f} → Exit: ${exit_:,.2f} | "
+                   f"Net P&L: ${pnl:,.2f} ({pct:+.1f}%) | Strategy: {strat}")
+            key = (msg[:60], str(c["closed_at"] or "")[:16])
+            if key in existing_close_ids:
+                continue
+            out.append({
+                "id": -int(c["id"]),
+                "level": "info",
+                "message": msg,
+                "details": None,
+                "created_at": c["closed_at"],
+            })
+
+        out.sort(key=lambda r: str(r["created_at"] or ""), reverse=True)
+
+    return jsonify(out)
 
 
 @bp.route("/api/stock-bot/top-movers")

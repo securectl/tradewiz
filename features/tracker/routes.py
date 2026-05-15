@@ -60,15 +60,25 @@ def api_journal_list():
     per_page = int(request.args.get("per_page", 50))
     offset = (page - 1) * per_page
 
+    # Exclude bot-auto-logged entries — historically crypto/stock bots wrote
+    # rows here with notes prefixed by "[Crypto Bot]"/"[Stock Bot]", which
+    # polluted the user's manual journal with crypto-pair entries. The
+    # auto-logging was removed Apr 2026; this filter hides legacy rows so
+    # the journal panel only shows user-created notes.
+    bot_filter = f"AND (notes IS NULL OR notes NOT LIKE {P})"
+    bot_param = ("[%Bot]%",)
+
     if ticker:
         rows = query(
-            f"SELECT * FROM journal_entries WHERE user_id = {P} AND ticker = {P} ORDER BY created_at DESC LIMIT {P} OFFSET {P}",
-            (uid, ticker, per_page, offset),
+            f"SELECT * FROM journal_entries WHERE user_id = {P} AND ticker = {P} {bot_filter} "
+            f"ORDER BY created_at DESC LIMIT {P} OFFSET {P}",
+            (uid, ticker) + bot_param + (per_page, offset),
         )
     else:
         rows = query(
-            f"SELECT * FROM journal_entries WHERE user_id = {P} ORDER BY created_at DESC LIMIT {P} OFFSET {P}",
-            (uid, per_page, offset),
+            f"SELECT * FROM journal_entries WHERE user_id = {P} {bot_filter} "
+            f"ORDER BY created_at DESC LIMIT {P} OFFSET {P}",
+            (uid,) + bot_param + (per_page, offset),
         )
 
     return jsonify([{
@@ -282,3 +292,118 @@ def api_goals_balance():
             (uid, str(balance), str(balance)),
         )
     return jsonify({"ok": True})
+
+
+# ─── Bot trades (per-user, all four sources) ─────────────────
+
+VALID_BOT_SOURCES = {"crypto", "stock", "claude", "watchdog"}
+
+
+@bp.route("/api/tracker/bot-trades")
+@login_required
+def api_tracker_bot_trades():
+    """All bot trades for the current user, with optional source filter.
+
+    Query params:
+        source = all | crypto | stock | claude | watchdog (default all)
+        limit  = max trades returned (default 100, capped 500)
+        status = open | closed | all (default all)
+
+    Returns per-source summary + filtered trade list. Per-user isolation
+    is enforced by `user_id = _uid()`; non-logged-in users get 401 from
+    @login_required and never see another user's trades.
+    """
+    uid = _uid()
+    source = (request.args.get("source") or "all").lower()
+    status = (request.args.get("status") or "all").lower()
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 100))))
+    except ValueError:
+        limit = 100
+
+    # Per-source summary (always all 4 sources, regardless of filter, so the
+    # UI can show counts on the filter pills without a second request).
+    by_source = {}
+    for src in sorted(VALID_BOT_SOURCES):
+        row = query_one(
+            f"SELECT COUNT(*) AS trades, "
+            f"SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_count, "
+            f"SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) AS closed_count, "
+            f"COALESCE(SUM(CASE WHEN status='closed' THEN pnl ELSE 0 END), 0) AS total_pnl, "
+            f"SUM(CASE WHEN status='closed' AND pnl > 0 THEN 1 ELSE 0 END) AS wins "
+            f"FROM bot_trades WHERE user_id = {P} AND asset_type = {P}",
+            (uid, src),
+        )
+        if row and int(row["trades"] or 0) > 0:
+            closed = int(row["closed_count"] or 0)
+            wins = int(row["wins"] or 0)
+            by_source[src] = {
+                "trades": int(row["trades"]),
+                "open": int(row["open_count"] or 0),
+                "closed": closed,
+                "wins": wins,
+                "win_rate": round(wins / closed * 100, 1) if closed > 0 else 0.0,
+                "total_pnl": round(float(row["total_pnl"] or 0), 2),
+            }
+
+    # `overall` reflects the ACTIVE filter so the headline P&L line on the
+    # tracker UI moves when the user clicks a source pill (audit Apr 2026:
+    # "when filter is used on tracker it does not show correct data").
+    # When source='all', sum across all sources. When a single source is
+    # picked, scope to that bucket only.
+    if source in VALID_BOT_SOURCES:
+        scoped = by_source.get(source, {"trades": 0, "open": 0, "closed": 0,
+                                         "wins": 0, "total_pnl": 0.0, "win_rate": 0.0})
+        overall_pnl = round(scoped["total_pnl"], 2)
+        overall_trades = scoped["trades"]
+        overall_wins = scoped["wins"]
+        overall_closed = scoped["closed"]
+        overall_win_rate = scoped["win_rate"]
+    else:
+        overall_pnl = round(sum(s["total_pnl"] for s in by_source.values()), 2)
+        overall_trades = sum(s["trades"] for s in by_source.values())
+        overall_wins = sum(s["wins"] for s in by_source.values())
+        overall_closed = sum(s["closed"] for s in by_source.values())
+        overall_win_rate = round(overall_wins / overall_closed * 100, 1) if overall_closed > 0 else 0.0
+
+    # Filtered trade list
+    clauses = [f"user_id = {P}"]
+    params = [uid]
+    if source in VALID_BOT_SOURCES:
+        clauses.append(f"asset_type = {P}")
+        params.append(source)
+    elif source != "all":
+        return jsonify({"error": f"invalid source — use one of all/{'/'.join(sorted(VALID_BOT_SOURCES))}"}), 400
+    if status in ("open", "closed"):
+        clauses.append(f"status = {P}")
+        params.append(status)
+
+    where = " AND ".join(clauses)
+    params.append(limit)
+    rows = query(
+        f"SELECT id, coin, side, size, entry_price, exit_price, pnl, pnl_pct, status, "
+        f"asset_type, strategy, opened_at, closed_at "
+        f"FROM bot_trades WHERE {where} ORDER BY opened_at DESC LIMIT {P}",
+        params,
+    )
+    trades = [{
+        "id": r["id"], "coin": r["coin"], "side": r["side"], "size": r["size"],
+        "entry_price": r["entry_price"], "exit_price": r["exit_price"],
+        "pnl": r["pnl"], "pnl_pct": r["pnl_pct"], "status": r["status"],
+        "source": r["asset_type"], "strategy": r["strategy"],
+        "opened_at": str(r["opened_at"]) if r["opened_at"] else None,
+        "closed_at": str(r["closed_at"]) if r["closed_at"] else None,
+    } for r in (rows or [])]
+
+    return jsonify({
+        "trades": trades,
+        "by_source": by_source,
+        "overall": {
+            "pnl": overall_pnl,
+            "trades": overall_trades,
+            "wins": overall_wins,
+            "closed": overall_closed,
+            "win_rate": overall_win_rate,
+        },
+        "filter": {"source": source, "status": status, "limit": limit},
+    })

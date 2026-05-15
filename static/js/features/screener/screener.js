@@ -15,6 +15,7 @@ const SCREENER_CATEGORY_CONFIG = {
     ai: { label: 'Artificial Intelligence', banner: 'AI stocks carry high growth expectations and elevated valuations. Many are priced for perfection — earnings misses can cause sharp drops.', showPrice: false },
     gainers: { label: 'Top Gainers', banner: 'Top gaining stocks across all major indices. AI evaluates momentum sustainability, overbought risk, and continuation probability.', showPrice: false, showTimeframe: true },
     losers: { label: 'Top Losers', banner: 'Top losing stocks across all major indices. AI evaluates oversold recovery potential vs falling knife risk, balance sheet strength, and support levels.', showPrice: false, showTimeframe: true },
+    oversold: { label: 'Oversold', banner: 'Stocks with RSI < 35 over the past month. Dual-LLM analysis: one AI identifies bottom signals, a second AI validates. Once-daily scan — no need for real-time data.', showPrice: false },
 };
 
 // ─── Sector Filter ───────────────────────────────────────────
@@ -28,6 +29,7 @@ const SECTOR_OPTIONS = {
     ai: ["Pure-Play AI","AI Chips/Infra","AI Cloud/SaaS","AI Tools","AI Robotics","AI Security"],
     gainers: ["Technology","Healthcare","Financial Services","Energy","Industrials","Consumer Cyclical","Basic Materials","Communication Services"],
     losers: ["Technology","Healthcare","Financial Services","Energy","Industrials","Consumer Cyclical","Basic Materials","Communication Services"],
+    oversold: ["Technology","Healthcare","Financial Services","Energy","Industrials","Consumer Cyclical","Basic Materials","Communication Services"],
 };
 let selectedSectors = [];
 let screenerTimeframe = '1d';
@@ -230,6 +232,10 @@ function switchScreenerCategory(cat) {
         banner.style.background = 'rgba(239, 83, 80, 0.1)';
         banner.style.borderColor = 'rgba(239, 83, 80, 0.3)';
         banner.style.color = '#ef5350';
+    } else if (cat === 'oversold') {
+        banner.style.background = 'rgba(171, 71, 188, 0.1)';
+        banner.style.borderColor = 'rgba(171, 71, 188, 0.3)';
+        banner.style.color = '#ab47bc';
     } else {
         banner.style.background = 'rgba(41, 98, 255, 0.08)';
         banner.style.borderColor = 'rgba(41, 98, 255, 0.3)';
@@ -335,8 +341,8 @@ function renderScreenerResults(data, fromCache = false) {
     }
 
     // Category-specific labels
-    const positiveLabel = cat === 'largecap' ? 'Strong Growth' : cat === 'etf' ? 'Strong Buy' : cat === 'crypto' ? 'Bullish' : cat === 'gainers' ? 'Momentum Buy' : cat === 'losers' ? 'Recovery Buy' : 'Opportunities';
-    const cautiousLabel = cat === 'largecap' ? 'Steady' : cat === 'etf' ? 'Accumulate' : cat === 'crypto' ? 'Neutral' : cat === 'gainers' ? 'Watch' : cat === 'losers' ? 'Watch' : 'Risky';
+    const positiveLabel = cat === 'largecap' ? 'Strong Growth' : cat === 'etf' ? 'Strong Buy' : cat === 'crypto' ? 'Bullish' : cat === 'gainers' ? 'Momentum Buy' : cat === 'losers' ? 'Recovery Buy' : cat === 'oversold' ? 'Bottom Forming' : 'Opportunities';
+    const cautiousLabel = cat === 'largecap' ? 'Steady' : cat === 'etf' ? 'Accumulate' : cat === 'crypto' ? 'Neutral' : cat === 'gainers' ? 'Watch' : cat === 'losers' ? 'Watch' : cat === 'oversold' ? 'Watch' : 'Risky';
 
     // Cache age indicator
     let cacheIndicator = '';
@@ -350,11 +356,13 @@ function renderScreenerResults(data, fromCache = false) {
         }
     }
 
+    const trackingCount = (data.tracking && data.tracking.length) || 0;
+    const trackingHtml = cat === 'oversold' && trackingCount > 0 ? ` | <span style="color:#ff9800;">${trackingCount} Tracking</span>` : '';
     let html = `
         <div class="screener-summary">
             Scanned ${data.candidates_scanned} candidates |
             <span style="color:#26a69a;">${data.opportunities.length} ${positiveLabel}</span> |
-            <span style="color:#ff9800;">${data.risky.length} ${cautiousLabel}</span> |
+            <span style="color:#ff9800;">${data.risky.length} ${cautiousLabel}</span>${trackingHtml} |
             <span style="color:#ef5350;">${data.avoided} Avoided</span>
             ${cacheIndicator}
         </div>
@@ -362,29 +370,107 @@ function renderScreenerResults(data, fromCache = false) {
 
     if (data.opportunities.length > 0) {
         html += `<div class="screener-section-title" style="color:#26a69a;">${positiveLabel}</div>`;
+        if (cat === 'oversold') {
+            html += `<div style="color:#787b86; font-size:11px; margin:-8px 0 8px 4px;">Price consolidating after decline — potential bottom forming. Confirmed by 5-day history.</div>`;
+        }
         html += '<div class="screener-grid">';
         data.opportunities.forEach(c => { html += buildScreenerCard(c, 'opportunity', cat); });
         html += '</div>';
     }
 
+    // Oversold: show tracking section (stocks still falling — monitored but not recommended)
+    if (cat === 'oversold' && data.tracking && data.tracking.length > 0) {
+        html += `<div class="screener-section-title" style="color:#ff9800;">Tracking — Still Falling (${data.tracking.length})</div>`;
+        html += `<div style="color:#787b86; font-size:11px; margin:-8px 0 8px 4px;">Price still declining. Monitored daily — will be promoted to opportunities once consolidation is detected.</div>`;
+        html += '<div class="screener-grid">';
+        data.tracking.forEach(c => { html += buildScreenerCard(c, 'risky', cat); });
+        html += '</div>';
+    }
+
     if (data.risky.length > 0) {
-        const cautiousSubtitle = cat === 'largecap' ? 'Steady — Moderate Growth' : cat === 'etf' ? 'Accumulate — Gradual Position' : 'Risky — Proceed with Caution';
+        const cautiousSubtitle = cat === 'largecap' ? 'Steady — Moderate Growth' : cat === 'etf' ? 'Accumulate — Gradual Position' : cat === 'oversold' ? 'Watch — Needs More Data' : 'Risky — Proceed with Caution';
         html += `<div class="screener-section-title" style="color:#ff9800;">${cautiousSubtitle}</div>`;
         html += '<div class="screener-grid">';
         data.risky.forEach(c => { html += buildScreenerCard(c, 'risky', cat); });
         html += '</div>';
     }
 
-    if (data.opportunities.length === 0 && data.risky.length === 0) {
+    if (data.opportunities.length === 0 && data.risky.length === 0 && (!data.tracking || data.tracking.length === 0)) {
         html += `<div style="text-align:center; padding:40px; color:#787b86;">No viable opportunities found. All candidates were filtered by AI vetting.</div>`;
     }
 
     results.innerHTML = html;
 }
 
+// Semi-circle gauge for numeric metrics. value is clamped to [0, max].
+//   options.inverted = true → high = bad (red at top)
+//   options.colorFn = fn(v) → custom color (used for RSI bands)
+//   options.displayValue = override the number shown in center
+//   options.suffix = "%" appended to value
+function _screenerGauge(value, max, label, options) {
+    options = options || {};
+    const v = Math.max(0, Math.min(max, Number(value) || 0));
+    const ratio = max > 0 ? v / max : 0;
+    const suffix = options.suffix || '';
+    let color;
+    if (options.colorFn) {
+        color = options.colorFn(v);
+    } else if (options.inverted) {
+        color = ratio >= 0.7 ? '#ef5350' : ratio >= 0.4 ? '#ff9800' : '#26a69a';
+    } else {
+        color = ratio >= 0.7 ? '#26a69a' : ratio >= 0.4 ? '#ff9800' : '#ef5350';
+    }
+    // 180° arc: center (40,40), radius 32. Sweeps left→right, clockwise.
+    const cx = 40, cy = 40, r = 32;
+    const angle = Math.PI - ratio * Math.PI;
+    const fgX = cx + r * Math.cos(angle);
+    const fgY = cy - r * Math.sin(angle);
+    const startX = cx - r, startY = cy, endX = cx + r, endY = cy;
+    const bgArc = `M ${startX} ${startY} A ${r} ${r} 0 0 1 ${endX} ${endY}`;
+    const fgArc = `M ${startX} ${startY} A ${r} ${r} 0 0 1 ${fgX.toFixed(1)} ${fgY.toFixed(1)}`;
+    const display = options.displayValue != null ? options.displayValue : v.toFixed(0) + suffix;
+    return `<div class="screener-metric-gauge">
+        <svg viewBox="0 0 80 48" width="100%" height="42" style="display:block;">
+            <path d="${bgArc}" stroke="#2a2e39" stroke-width="6" fill="none" stroke-linecap="round"/>
+            <path d="${fgArc}" stroke="${color}" stroke-width="6" fill="none" stroke-linecap="round"/>
+            <text x="40" y="42" text-anchor="middle" fill="${color}" font-size="13" font-weight="700">${display}</text>
+        </svg>
+        <div class="gauge-label">${label}</div>
+    </div>`;
+}
+
+// RSI gauge color: red in oversold (<30) AND overbought (>70), green in middle
+function _rsiGaugeColor(v) {
+    if (v < 30) return '#ef5350';
+    if (v > 70) return '#ef5350';
+    if (v < 40 || v > 60) return '#ff9800';
+    return '#26a69a';
+}
+
+// Map any verdict string to one of five visual tiers. Used to drive card
+// border + verdict-pill colors so each conviction band is distinct instead
+// of collapsing every non-opportunity into a single orange tone.
+function _screenerVerdictTier(verdict) {
+    const v = (verdict || '').toUpperCase();
+    if (v.includes('FALLING') || v === 'AVOID') return 'avoid';
+    if (v === 'RISKY' || v.includes('CAUTIOUS')) return 'cautious';
+    if (v.includes('OPPORTUNITY') || v.includes('STRONG') || v === 'BULLISH') return 'strong';
+    if (v.includes('BOTTOM') || v.includes('MOMENTUM') || v.includes('RECOVERY') || v.includes('ACCELERAT')) return 'momentum';
+    return 'watch';
+}
+
+const _SCREENER_TIER_COLOR = {
+    strong: '#00c896',     // --accent-green (high conviction long)
+    momentum: '#7c5dfa',   // --accent-purple (improving setup)
+    watch: '#4f8aff',      // --accent-blue (wait/neutral)
+    cautious: '#ffc837',   // --accent-yellow (proceed with care)
+    avoid: '#ff4757',      // --accent-red (stay away)
+};
+
 function buildScreenerCard(c, type, cat) {
     cat = cat || screenerCategory;
-    const verdictColor = type === 'opportunity' ? '#26a69a' : '#ff9800';
+    const tier = _screenerVerdictTier(c.verdict);
+    const verdictColor = _SCREENER_TIER_COLOR[tier];
 
     // Category-specific catalysts/risks field names
     const catalystList = c.growth_catalysts || c.catalysts || [];
@@ -460,6 +546,26 @@ function buildScreenerCard(c, type, cat) {
                 <div class="screener-metric"><div class="metric-label">Oversold</div><div class="metric-value" style="color:#42a5f5;">${c.oversold_level || 'N/A'}</div></div>
                 <div class="screener-metric"><div class="metric-label">Balance Sheet</div><div class="metric-value" style="color:${c.balance_sheet === 'WEAK' || c.balance_sheet === 'CRITICAL' ? '#ef5350' : '#26a69a'};">${c.balance_sheet || 'N/A'}</div></div>
             </div>`;
+    } else if (cat === 'oversold') {
+        const trendColors = { falling: '#ef5350', stabilizing: '#26a69a', bouncing: '#42a5f5', first_bounce: '#ab47bc', new: '#787b86', mixed: '#ff9800' };
+        const trendLabels = { falling: 'Still Falling', stabilizing: 'Stabilizing', bouncing: 'Bouncing', first_bounce: 'First Bounce', new: 'New', mixed: 'Mixed' };
+        const trendColor = trendColors[c.price_trend] || '#787b86';
+        const trendLabel = trendLabels[c.price_trend] || c.price_trend || 'N/A';
+        const statusColor = c.status === 'consolidating' ? '#26a69a' : '#ff9800';
+        const statusLabel = c.status === 'consolidating' ? 'Consolidating' : 'Tracking';
+        metricsHtml = `
+            <div class="screener-card-metrics">
+                <div class="screener-metric"><div class="metric-label">RSI-14</div><div class="metric-value" style="color:#ef5350; font-size:16px; font-weight:bold;">${(c.rsi_14 || 0).toFixed(1)}</div></div>
+                <div class="screener-metric"><div class="metric-label">1M Change</div><div class="metric-value" style="color:#ef5350;">${(c.pct_change_1mo || 0) >= 0 ? '+' : ''}${(c.pct_change_1mo || 0).toFixed(1)}%</div></div>
+                <div class="screener-metric"><div class="metric-label">Trend</div><div class="metric-value" style="color:${trendColor};">${trendLabel}</div></div>
+                <div class="screener-metric"><div class="metric-label">Status</div><div class="metric-value" style="color:${statusColor};">${statusLabel}</div></div>
+            </div>
+            <div class="screener-card-metrics" style="margin-top:4px;">
+                <div class="screener-metric"><div class="metric-label">Days Tracked</div><div class="metric-value">${c.days_tracked || 1}</div></div>
+                <div class="screener-metric"><div class="metric-label">Confidence</div><div class="metric-value">${c.confidence || 0}%</div></div>
+                <div class="screener-metric"><div class="metric-label">Signal</div><div class="metric-value" style="color:#42a5f5;">${c.bottom_signal_strength || 'N/A'}</div></div>
+                <div class="screener-metric"><div class="metric-label">First Seen</div><div class="metric-value" style="font-size:10px;">${c.first_seen || 'Today'}</div></div>
+            </div>`;
     } else {
         // lowcap
         metricsHtml = `
@@ -528,27 +634,53 @@ function buildScreenerCard(c, type, cat) {
             ${c.position_limit_pct ? `<div class="indicator-row"><span class="indicator-label">Max Position</span><span class="indicator-value" style="font-size:11px;">${c.position_limit_pct}% of account</span></div>` : ''}`;
     }
 
+    // Compact-by-default card. Header row is always visible; details expand on click.
+    // Header shows: ticker, name, verdict pill, price, confidence bar/gauge, expand chevron.
+    const conf = Number(c.confidence || 0);
+    const confColor = conf >= 70 ? '#26a69a' : conf >= 40 ? '#ff9800' : '#ef5350';
+    const cardId = `screener-card-${c.ticker}-${type}`;
+    const compactConfidenceGauge = _screenerGauge(conf, 100, 'Confidence', { suffix: '%' });
+
     return `
-        <div class="screener-card ${type}">
-            <div class="screener-card-header">
-                <div>
-                    <span class="screener-ticker">${c.ticker}</span>
-                    <span class="screener-name">${c.name || ''}</span>
+        <div class="screener-card ${type} tier-${tier}" id="${cardId}">
+            <div class="screener-card-compact" onclick="_toggleScreenerCardDetail('${cardId}')">
+                <div class="screener-compact-main">
+                    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+                        <span class="screener-ticker">${yahooFinanceLink(c.ticker, {stopPropagation: true})}</span>
+                        <span class="screener-name">${c.name || ''}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:#787b86;margin-top:2px;">
+                        <span style="color:#d1d4dc;font-weight:600;">$${c.price}</span>
+                        <span>${c.sector || ''}</span>
+                    </div>
                 </div>
-                <span class="screener-verdict" style="color:${verdictColor};">${c.verdict}</span>
+                <div class="screener-compact-gauge">${compactConfidenceGauge}</div>
+                <div class="screener-compact-right">
+                    <span class="screener-verdict" style="color:${verdictColor};border:1px solid ${verdictColor}44;background:${verdictColor}18;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap;">${c.verdict || '—'}</span>
+                    <span class="screener-card-chevron" style="color:#787b86;font-size:14px;transition:transform 0.2s;">▾</span>
+                </div>
             </div>
-            <div class="screener-card-price">
-                <span>$${c.price}</span>
-                <span class="screener-sector">${c.sector || ''}</span>
+            <div class="screener-card-details" style="display:none;">
+                ${metricsHtml}
+                <div class="screener-card-detail">${detailHtml}</div>
+                ${catalysts ? `<div style="margin-top:6px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">CATALYSTS</div>${catalysts}</div>` : ''}
+                ${flags ? `<div style="margin-top:4px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">${cat === 'lowcap' ? 'RED FLAGS' : 'RISKS'}</div>${flags}</div>` : ''}
+                <div style="margin-top:8px; font-size:11px; color:#787b86; line-height:1.5;">${c.summary || ''}</div>
+                <button class="btn-screener-analyze" onclick="event.stopPropagation();analyzeFromScreener('${c.ticker}')">Full Analysis</button>
             </div>
-            ${metricsHtml}
-            <div class="screener-card-detail">${detailHtml}</div>
-            ${catalysts ? `<div style="margin-top:6px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">CATALYSTS</div>${catalysts}</div>` : ''}
-            ${flags ? `<div style="margin-top:4px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">${cat === 'lowcap' ? 'RED FLAGS' : 'RISKS'}</div>${flags}</div>` : ''}
-            <div style="margin-top:8px; font-size:11px; color:#787b86; line-height:1.5;">${c.summary || ''}</div>
-            <button class="btn-screener-analyze" onclick="analyzeFromScreener('${c.ticker}')">Full Analysis</button>
         </div>
     `;
+}
+
+function _toggleScreenerCardDetail(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    const details = card.querySelector('.screener-card-details');
+    const chevron = card.querySelector('.screener-card-chevron');
+    if (!details) return;
+    const willOpen = details.style.display === 'none';
+    details.style.display = willOpen ? 'block' : 'none';
+    if (chevron) chevron.style.transform = willOpen ? 'rotate(180deg)' : 'rotate(0deg)';
 }
 
 function analyzeFromScreener(ticker) {
@@ -635,18 +767,45 @@ function renderQullamaggieResults(data) {
     let html = `<div style="font-size:12px; color:#787b86; margin-bottom:12px;">Found ${results.length} setups from ${data.scanned} stocks scanned</div>`;
     html += '<div class="qullamaggie-grid">';
 
-    results.forEach(r => {
-        const badgeClass = r.setup_type === 'HTF' ? 'setup-badge-htf' : r.setup_type === 'VCP' ? 'setup-badge-vcp' : 'setup-badge-ep';
-        const scoreColor = r.score >= 8 ? '#26a69a' : r.score >= 6 ? '#ff9800' : '#787b86';
+    // Split Stage 2 (recovery / rocket-potential) from momentum setups
+    const stage2 = results.filter(r => r.setup_type === 'STAGE2');
+    const momentum = results.filter(r => r.setup_type !== 'STAGE2');
 
-        html += `
+    function renderCard(r) {
+        const badgeClass = r.setup_type === 'HTF' ? 'setup-badge-htf'
+                         : r.setup_type === 'VCP' ? 'setup-badge-vcp'
+                         : r.setup_type === 'STAGE2' ? 'setup-badge-stage2'
+                         : 'setup-badge-ep';
+        const scoreColor = r.score >= 8 ? '#26a69a' : r.score >= 6 ? '#ff9800' : '#787b86';
+        const isStage2 = r.setup_type === 'STAGE2';
+        const phaseColor = r.phase === 'breakout' ? '#26a69a' : r.phase === 'loaded' ? '#ff9800' : '#787b86';
+
+        const stage2Detail = isStage2 ? `
+                    <div class="indicator-row"><span class="indicator-label">Phase</span><span class="indicator-value" style="font-size:11px; color:${phaseColor}; font-weight:700; text-transform:uppercase;">${r.phase}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Above 52w Low</span><span class="indicator-value" style="font-size:11px;">${r.above_52w_low_pct}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Below 52w High</span><span class="indicator-value" style="font-size:11px;">${r.below_52w_high_pct}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Days Since Low</span><span class="indicator-value" style="font-size:11px;">${r.days_since_52w_low}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">RSI</span><span class="indicator-value" style="font-size:11px;">${r.rsi}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Vol Expansion</span><span class="indicator-value" style="font-size:11px; color:${r.vol_expansion >= 1.4 ? '#26a69a' : 'inherit'};">${r.vol_expansion}x</span></div>
+                    <div class="indicator-row"><span class="indicator-label">SMA50/200</span><span class="indicator-value" style="font-size:11px; color:${r.sma_ratio >= 1.0 ? '#26a69a' : 'inherit'};">${r.sma_ratio}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Base High</span><span class="indicator-value" style="font-size:11px;">$${r.base_high}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Base Range</span><span class="indicator-value" style="font-size:11px;">${r.consolidation_depth_pct}%</span></div>` : `
+                    <div class="indicator-row"><span class="indicator-label">1M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_1m >= 25 ? '#26a69a' : 'inherit'};">${r.rel_strength_1m}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">3M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_3m >= 50 ? '#26a69a' : 'inherit'};">${r.rel_strength_3m}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Vol Ratio</span><span class="indicator-value" style="font-size:11px;">${r.volume_ratio}x</span></div>
+                    <div class="indicator-row"><span class="indicator-label">$ Vol</span><span class="indicator-value" style="font-size:11px;">${r.dollar_volume}M</span></div>
+                    ${r.consolidation_days ? `<div class="indicator-row"><span class="indicator-label">Consol.</span><span class="indicator-value" style="font-size:11px;">${r.consolidation_days}d / -${r.consolidation_depth_pct}%</span></div>` : ''}
+                    ${r.prior_move_pct ? `<div class="indicator-row"><span class="indicator-label">Prior Move</span><span class="indicator-value" style="font-size:11px; color:#26a69a;">+${r.prior_move_pct}%</span></div>` : ''}
+                    <div class="indicator-row"><span class="indicator-label">MA Aligned</span><span class="indicator-value" style="font-size:11px; color:${r.ma_aligned ? '#26a69a' : '#ef5350'};">${r.ma_aligned ? 'Yes' : 'No'}</span></div>`;
+
+        return `
             <div class="qullamaggie-card" onclick="analyzeFromScreener('${r.ticker}')">
                 <div class="qullamaggie-card-header">
                     <div>
                         <span class="qullamaggie-ticker">${r.ticker}</span>
                         <span class="qullamaggie-name">${r.name || ''}</span>
                     </div>
-                    <span class="${badgeClass}">${r.setup_type}</span>
+                    <span class="${badgeClass}">${isStage2 ? 'STAGE 2' : r.setup_type}</span>
                 </div>
                 <div class="qullamaggie-card-price">$${r.current_price} <span style="color:#787b86; font-size:11px;">${r.sector || ''}</span></div>
                 <div class="qullamaggie-card-metrics">
@@ -656,21 +815,258 @@ function renderQullamaggieResults(data) {
                     <div class="qullamaggie-metric"><div class="metric-label">ADR%</div><div class="metric-value">${r.adr_pct}%</div></div>
                 </div>
                 <div class="qullamaggie-card-detail">
-                    <div class="indicator-row"><span class="indicator-label">1M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_1m >= 25 ? '#26a69a' : 'inherit'};">${r.rel_strength_1m}%</span></div>
-                    <div class="indicator-row"><span class="indicator-label">3M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_3m >= 50 ? '#26a69a' : 'inherit'};">${r.rel_strength_3m}%</span></div>
-                    <div class="indicator-row"><span class="indicator-label">Vol Ratio</span><span class="indicator-value" style="font-size:11px;">${r.volume_ratio}x</span></div>
-                    <div class="indicator-row"><span class="indicator-label">$ Vol</span><span class="indicator-value" style="font-size:11px;">${r.dollar_volume}M</span></div>
-                    ${r.consolidation_days ? `<div class="indicator-row"><span class="indicator-label">Consol.</span><span class="indicator-value" style="font-size:11px;">${r.consolidation_days}d / -${r.consolidation_depth_pct}%</span></div>` : ''}
-                    ${r.prior_move_pct ? `<div class="indicator-row"><span class="indicator-label">Prior Move</span><span class="indicator-value" style="font-size:11px; color:#26a69a;">+${r.prior_move_pct}%</span></div>` : ''}
-                    <div class="indicator-row"><span class="indicator-label">MA Aligned</span><span class="indicator-value" style="font-size:11px; color:${r.ma_aligned ? '#26a69a' : '#ef5350'};">${r.ma_aligned ? 'Yes' : 'No'}</span></div>
+                    ${stage2Detail}
                 </div>
                 <div style="margin-top:6px; padding:6px 8px; background:rgba(41,98,255,0.08); border-radius:4px; font-size:10px; color:#787b86;">
                     ${r.shares} shares @ $${r.entry_price} = $${r.position_value} | Risk: $${r.risk_amount}
                     <br>${r.sell_plan}
                 </div>
             </div>`;
-    });
+    }
 
-    html += '</div>';
+    if (stage2.length) {
+        html += `<div style="font-size:13px; font-weight:700; color:#ff9800; margin:14px 0 8px 0; padding:6px 0; border-bottom:1px solid rgba(255,152,0,0.3);">🚀 Rocket Setups — Stage 2 Recovery (${stage2.length})</div>`;
+        html += '<div class="qullamaggie-grid">';
+        stage2.forEach(r => { html += renderCard(r); });
+        html += '</div>';
+    }
+
+    if (momentum.length) {
+        html += `<div style="font-size:13px; font-weight:700; color:#26a69a; margin:18px 0 8px 0; padding:6px 0; border-bottom:1px solid rgba(38,166,154,0.3);">⚡ Momentum Breakouts — HTF / VCP / EP (${momentum.length})</div>`;
+        html += '<div class="qullamaggie-grid">';
+        momentum.forEach(r => { html += renderCard(r); });
+        html += '</div>';
+    }
+
     container.innerHTML = html;
+}
+
+
+// ─── Trending Signals & Past Scans ───────────────────────────
+
+function showScreenerTab(tab) {
+    const trendingPanel = document.getElementById('screener-trending-panel');
+    const historyPanel = document.getElementById('screener-history-panel');
+    const btnTrending = document.getElementById('btn-trending-tab');
+    const btnHistory = document.getElementById('btn-history-tab');
+    if (!trendingPanel || !historyPanel) return;
+
+    if (tab === 'trending') {
+        trendingPanel.style.display = '';
+        historyPanel.style.display = 'none';
+        btnTrending.classList.add('active');
+        btnHistory.classList.remove('active');
+        loadTrendingSignals();
+    } else {
+        trendingPanel.style.display = 'none';
+        historyPanel.style.display = '';
+        btnTrending.classList.remove('active');
+        btnHistory.classList.add('active');
+        loadPastScans();
+    }
+}
+
+async function loadTrendingSignals() {
+    const panel = document.getElementById('screener-trending-panel');
+    if (!panel) return;
+    panel.innerHTML = '<div style="text-align:center; padding:20px; color:#787b86;">Loading trending signals...</div>';
+
+    try {
+        const resp = await fetch('/api/screener/trending?days=7');
+        const data = await resp.json();
+
+        if (!data.trending || data.trending.length === 0) {
+            panel.innerHTML = '<div style="text-align:center; padding:30px; color:#787b86;">No trending signals yet. Run screener scans across multiple days to build up data.</div>';
+            return;
+        }
+
+        let html = `<div style="margin-bottom:10px; color:#787b86; font-size:12px;">Stocks appearing in multiple scans over the past ${data.days} days — persistent AI signals.</div>`;
+        html += `<div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr style="background:#2a2e39; border-bottom:1px solid #363a45;">
+                        <th style="padding:8px 10px; text-align:left; color:#787b86;">Ticker</th>
+                        <th style="padding:8px 10px; text-align:left; color:#787b86;">Name</th>
+                        <th style="padding:8px 10px; text-align:left; color:#787b86;">Sector</th>
+                        <th style="padding:8px 10px; text-align:center; color:#787b86;">Appearances</th>
+                        <th style="padding:8px 10px; text-align:center; color:#787b86;">Avg Confidence</th>
+                        <th style="padding:8px 10px; text-align:left; color:#787b86;">Latest Verdict</th>
+                        <th style="padding:8px 10px; text-align:right; color:#787b86;">Avg Price</th>
+                        <th style="padding:8px 10px; text-align:left; color:#787b86;">First Seen</th>
+                        <th style="padding:8px 10px; text-align:left; color:#787b86;">Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        data.trending.forEach(t => {
+            const verdictColor = _SCREENER_TIER_COLOR[_screenerVerdictTier(t.latest_verdict)];
+            const appBadge = t.appearances >= 5 ? '#26a69a' : t.appearances >= 3 ? '#42a5f5' : '#ff9800';
+            html += `
+                <tr style="border-bottom:1px solid #2a2e39;">
+                    <td style="padding:6px 10px; color:#d1d4dc; font-weight:600;">${yahooFinanceLink(t.ticker)}</td>
+                    <td style="padding:6px 10px; color:#787b86; font-size:12px;">${t.name || '—'}</td>
+                    <td style="padding:6px 10px; color:#787b86; font-size:12px;">${t.sector || '—'}</td>
+                    <td style="padding:6px 10px; text-align:center;"><span style="background:${appBadge}; color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">${t.appearances}x</span></td>
+                    <td style="padding:6px 10px; text-align:center; color:#d1d4dc;">${t.avg_confidence || '—'}%</td>
+                    <td style="padding:6px 10px; color:${verdictColor}; font-size:12px; font-weight:600;">${t.latest_verdict || '—'}</td>
+                    <td style="padding:6px 10px; text-align:right; color:#d1d4dc;">$${(t.avg_price || 0).toFixed(2)}</td>
+                    <td style="padding:6px 10px; color:#787b86; font-size:11px;">${t.first_seen || '—'}</td>
+                    <td style="padding:6px 10px; color:#787b86; font-size:11px;">${t.last_seen || '—'}</td>
+                </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+        panel.innerHTML = html;
+    } catch (e) {
+        panel.innerHTML = `<div style="text-align:center; padding:20px; color:#ef5350;">Failed to load trending signals: ${e.message}</div>`;
+    }
+}
+
+// Store grouped past scan data so day buttons can switch without re-fetching
+let _pastScanData = {};
+
+async function loadPastScans() {
+    const daysBar = document.getElementById('screener-history-days');
+    const tableEl = document.getElementById('screener-history-table');
+    if (!daysBar || !tableEl) return;
+
+    daysBar.innerHTML = '';
+    tableEl.innerHTML = '<div style="text-align:center; padding:20px; color:#787b86;">Loading past scans...</div>';
+
+    try {
+        const resp = await fetch(`/api/screener/history?category=${screenerCategory}&days=14`);
+        const data = await resp.json();
+
+        if (!data.results || data.results.length === 0) {
+            tableEl.innerHTML = '<div style="text-align:center; padding:30px; color:#787b86;">No past scans for this category yet. Data is pre-fetched daily at 9 AM CST.</div>';
+            return;
+        }
+
+        // Group by date
+        _pastScanData = {};
+        data.results.forEach(r => {
+            _pastScanData[r.scan_date] = _pastScanData[r.scan_date] || [];
+            _pastScanData[r.scan_date].push(r);
+        });
+
+        const dates = Object.keys(_pastScanData).sort().reverse();
+        const today = new Date().toISOString().split('T')[0];
+
+        // Render day buttons
+        let buttonsHtml = '';
+        dates.forEach((date, i) => {
+            const isToday = date === today;
+            const label = isToday ? 'Today' : new Date(date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const count = _pastScanData[date].length;
+            const opps = _pastScanData[date].filter(r => !['AVOID','RISKY','WATCH','FALLING KNIFE','SLOWING','BEARISH','NEUTRAL','STEADY'].includes(r.verdict)).length;
+            const isActive = i === 0; // auto-select most recent (today if exists)
+            buttonsHtml += `<button onclick="selectPastScanDay('${date}')" data-scan-date="${date}" class="screener-category-btn${isActive ? ' active' : ''}" style="font-size:11px; padding:5px 12px; position:relative;">
+                ${label}
+                <span style="font-size:9px; color:#787b86; margin-left:3px;">${count}/${opps}</span>
+            </button>`;
+        });
+        daysBar.innerHTML = buttonsHtml;
+
+        // Auto-show the first date (today or most recent)
+        if (dates.length > 0) {
+            renderPastScanTable(dates[0]);
+        }
+    } catch (e) {
+        tableEl.innerHTML = `<div style="text-align:center; padding:20px; color:#ef5350;">Failed to load past scans: ${e.message}</div>`;
+    }
+}
+
+function selectPastScanDay(date) {
+    // Update active button
+    const buttons = document.querySelectorAll('#screener-history-days .screener-category-btn');
+    buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.scanDate === date);
+    });
+    renderPastScanTable(date);
+}
+
+function renderPastScanTable(date) {
+    const tableEl = document.getElementById('screener-history-table');
+    if (!tableEl) return;
+
+    const items = _pastScanData[date];
+    if (!items || items.length === 0) {
+        tableEl.innerHTML = '<div style="text-align:center; padding:20px; color:#787b86;">No results for this date.</div>';
+        return;
+    }
+
+    const RISKY_VERDICTS = ['AVOID', 'RISKY', 'WATCH', 'FALLING KNIFE', 'SLOWING', 'BEARISH', 'NEUTRAL', 'STEADY'];
+    const opps = items.filter(r => !RISKY_VERDICTS.includes(r.verdict));
+    const catLabel = SCREENER_CATEGORY_CONFIG[screenerCategory]?.label || screenerCategory;
+
+    const rows = items.map(r => {
+        const verdictColor = _SCREENER_TIER_COLOR[_screenerVerdictTier(r.verdict)];
+        const confColor = (r.confidence || 0) >= 75 ? '#26a69a' : (r.confidence || 0) >= 50 ? '#ff9800' : '#ef5350';
+        const mcap = r.market_cap ? (r.market_cap >= 1e9 ? `$${(r.market_cap / 1e9).toFixed(1)}B` : r.market_cap >= 1e6 ? `$${(r.market_cap / 1e6).toFixed(0)}M` : '—') : '—';
+
+        return `<tr style="border-bottom:1px solid #2a2e39;">
+            <td style="padding:8px 10px; color:#d1d4dc; font-weight:700; font-size:13px; white-space:nowrap;">${yahooFinanceLink(r.ticker)}</td>
+            <td style="padding:8px 10px; color:#a0a4b0; font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.name || '—'}</td>
+            <td style="padding:8px 10px; color:#787b86; font-size:11px; white-space:nowrap;">${r.sector || '—'}</td>
+            <td style="padding:8px 10px; white-space:nowrap;">
+                <span style="background:${verdictColor}18; color:${verdictColor}; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; border:1px solid ${verdictColor}33;">${r.verdict || '—'}</span>
+            </td>
+            <td style="padding:8px 10px; text-align:center; font-weight:700; color:${confColor}; font-size:13px;">${r.confidence || 0}%</td>
+            <td style="padding:8px 10px; text-align:right; color:#d1d4dc; font-weight:600; font-size:13px;">$${(r.price || 0).toFixed(2)}</td>
+            <td style="padding:8px 10px; color:#787b86; font-size:11px; white-space:nowrap;">${mcap}</td>
+            <td style="padding:8px 10px; color:#787b86; font-size:11px; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(r.summary || '').replace(/"/g, '&quot;')}">${r.summary || '—'}</td>
+        </tr>`;
+    }).join('');
+
+    tableEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div style="color:#787b86; font-size:12px;">${catLabel} — ${date} — <span style="color:#d1d4dc; font-weight:600;">${items.length}</span> scanned, <span style="color:#26a69a; font-weight:600;">${opps.length}</span> opportunities</div>
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+                <tr style="background:#2a2e39; border-bottom:2px solid #363a45;">
+                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Ticker</th>
+                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Name</th>
+                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Sector</th>
+                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Verdict</th>
+                    <th style="padding:8px 10px; text-align:center; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Conf</th>
+                    <th style="padding:8px 10px; text-align:right; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Price</th>
+                    <th style="padding:8px 10px; text-align:right; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Mkt Cap</th>
+                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Summary</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+}
+
+// ─── Archive toggle (Trending + Past Scans collapse) ─────────
+
+function toggleScreenerArchive() {
+    const body = document.getElementById('screener-archive-body');
+    const chev = document.getElementById('screener-archive-chevron');
+    const sum = document.getElementById('screener-archive-summary');
+    if (!body) return;
+    const willOpen = body.style.display === 'none';
+    body.style.display = willOpen ? '' : 'none';
+    if (chev) chev.style.transform = willOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+    if (sum) sum.textContent = willOpen ? 'click to collapse' : 'click to expand';
+    try { localStorage.setItem('screenerArchiveOpen', willOpen ? '1' : '0'); } catch (_) {}
+    // Lazy-load trending data the first time we open
+    if (willOpen && !_screenerArchiveLoaded) {
+        _screenerArchiveLoaded = true;
+        loadTrendingSignals();
+    }
+}
+
+let _screenerArchiveLoaded = false;
+
+// Restore prior open/close state on init; skip auto-load when collapsed
+// (this is the perf win — avoids hitting /api/screener/trending on every page load)
+if (document.getElementById('screener-archive-body')) {
+    let savedOpen = '0';
+    try { savedOpen = localStorage.getItem('screenerArchiveOpen') || '0'; } catch (_) {}
+    if (savedOpen === '1') {
+        // Mimic a click so the chevron + label sync up
+        toggleScreenerArchive();
+    }
 }

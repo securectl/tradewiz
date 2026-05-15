@@ -114,3 +114,50 @@ def _upsert_api_key(user_id, provider, key_name, encrypted_value):
             f"VALUES ({P}, {P}, {P}, {P}, datetime('now'))",
             (user_id, provider, key_name, encrypted_value),
         )
+
+
+def get_user_api_keys(user_id, provider) -> dict:
+    """Return decrypted API keys for a user/provider as {key_name: plaintext}.
+
+    Empty dict on any failure or when no rows exist. Used by broker init in
+    claude_bot to inject per-user keys; falls through silently so callers can
+    chain to env-var defaults.
+    """
+    if not user_id:
+        return {}
+    try:
+        from db import query
+        from crypto_utils import decrypt
+        rows = query(
+            f"SELECT key_name, encrypted_value FROM user_api_keys "
+            f"WHERE user_id = {P} AND provider = {P}",
+            (user_id, provider),
+        )
+        out = {}
+        for r in rows or []:
+            try:
+                out[r["key_name"]] = decrypt(r["encrypted_value"])
+            except Exception:
+                # Decrypt failure (corrupted row, key rotation) — skip silently
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def mask_api_key(plaintext: str) -> str:
+    """Return a UI-safe preview of an API key — first 2 + last 4, dots between.
+    Used so /api/user/api-keys never echoes real plaintext back to the browser."""
+    if not plaintext:
+        return ""
+    if len(plaintext) <= 6:
+        return "•" * len(plaintext)
+    return f"{plaintext[:2]}•••{plaintext[-4:]}"
+
+
+def delete_user_api_key(user_id, provider, key_name):
+    """Delete a single user-scoped API key row."""
+    execute(
+        f"DELETE FROM user_api_keys WHERE user_id = {P} AND provider = {P} AND key_name = {P}",
+        (user_id, provider, key_name),
+    )

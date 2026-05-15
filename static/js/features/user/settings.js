@@ -50,6 +50,17 @@ async function loadSettings() {
             }
         }
 
+        const webullStatus = document.getElementById('set-webull-app-key-status');
+        if (webullStatus && data.api_keys && data.api_keys.webull_app_key) {
+            if (data.api_keys.webull_app_key.configured) {
+                webullStatus.textContent = 'Configured (' + data.api_keys.webull_app_key.masked_value + ')';
+                webullStatus.className = 'settings-status configured';
+            } else {
+                webullStatus.textContent = 'Not configured';
+                webullStatus.className = 'settings-status not-configured';
+            }
+        }
+
         // LLM Settings (preferences)
         if (data.llm_settings) {
             document.getElementById('set-llm-fast-mode').checked = !!data.llm_settings.LLM_FAST_MODE;
@@ -71,14 +82,18 @@ async function saveSettings() {
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
+    const _val = (id) => (document.getElementById(id) || {}).value || '';
     const payload = {
         api_keys: {
-            OPENROUTER_API_KEY: document.getElementById('set-openrouter-key').value,
-            BLOFIN_API_KEY: document.getElementById('set-blofin-key').value,
-            BLOFIN_API_SECRET: document.getElementById('set-blofin-secret').value,
-            BLOFIN_PASSPHRASE: document.getElementById('set-blofin-pass').value,
-            ALPACA_API_KEY: document.getElementById('set-alpaca-key').value,
-            ALPACA_SECRET_KEY: document.getElementById('set-alpaca-secret').value,
+            OPENROUTER_API_KEY: _val('set-openrouter-key'),
+            BLOFIN_API_KEY: _val('set-blofin-key'),
+            BLOFIN_API_SECRET: _val('set-blofin-secret'),
+            BLOFIN_PASSPHRASE: _val('set-blofin-pass'),
+            ALPACA_API_KEY: _val('set-alpaca-key'),
+            ALPACA_SECRET_KEY: _val('set-alpaca-secret'),
+            WEBULL_APP_KEY: _val('set-webull-app-key'),
+            WEBULL_APP_SECRET: _val('set-webull-app-secret'),
+            WEBULL_ACCOUNT_ID: _val('set-webull-account-id'),
         },
         llm_settings: {
             LLM_FAST_MODE: document.getElementById('set-llm-fast-mode').checked,
@@ -100,12 +115,10 @@ async function saveSettings() {
             statusEl.textContent = 'Saved ' + (data.updated ? data.updated.length : 0) + ' settings';
             statusEl.style.color = '#26a69a';
             // Clear password fields after successful save
-            document.getElementById('set-openrouter-key').value = '';
-            document.getElementById('set-blofin-key').value = '';
-            document.getElementById('set-blofin-secret').value = '';
-            document.getElementById('set-blofin-pass').value = '';
-            document.getElementById('set-alpaca-key').value = '';
-            document.getElementById('set-alpaca-secret').value = '';
+            ['set-openrouter-key', 'set-blofin-key', 'set-blofin-secret', 'set-blofin-pass',
+             'set-alpaca-key', 'set-alpaca-secret',
+             'set-webull-app-key', 'set-webull-app-secret', 'set-webull-account-id']
+                .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
             // Refresh status badges
             await loadSettings();
         } else {

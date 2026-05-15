@@ -13,6 +13,58 @@ let isLoading = false;
 let currentUser = null;
 let billingStatus = null;
 
+// ─── Yahoo Finance ticker link (shared) ──────────────────────
+//
+// Renders a ticker as a Yahoo-Finance link with an external-link glyph.
+// Used across ThunderBot, Screener, watchlist UIs, and the paper-trades
+// table so every visible ticker is one click away from the YF quote page.
+//
+// opts:
+//   stopPropagation: emit onclick="event.stopPropagation();" so the link
+//     won't trigger an enclosing element's click handler (e.g. screener
+//     cards that toggle details on row-click).
+//   compact: smaller glyph + no underline (for chips/inline use).
+function yahooFinanceLink(ticker, opts = {}) {
+    if (!ticker) return '';
+    const url = `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}`;
+    const stop = opts.stopPropagation ? 'onclick="event.stopPropagation();"' : '';
+    const glyph = opts.compact
+        ? '<span style="font-size:8px;color:var(--text-secondary);margin-left:2px;">↗</span>'
+        : '<span style="font-size:9px;color:var(--text-secondary);margin-left:3px;">↗</span>';
+    const underline = opts.compact ? 'none' : '1px dashed var(--border-color)';
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" ${stop} title="Open ${ticker} on Yahoo Finance" style="color:inherit;text-decoration:none;border-bottom:${underline};">${ticker}${glyph}</a>`;
+}
+
+
+// ─── Bot config modals (shared) ──────────────────────────────
+//
+// Pattern: each bot's config panel lives inside a hidden
+// `.settings-modal` (and a `.settings-backdrop` sibling for click-to-close).
+// Open with openBotConfig('cb'), close with closeBotConfig('cb').
+// Reuses the same CSS that the user Settings modal already uses.
+
+function openBotConfig(slug) {
+    const m = document.getElementById(`${slug}-config-modal`);
+    const b = document.getElementById(`${slug}-config-backdrop`);
+    if (m) m.style.display = 'flex';
+    if (b) b.style.display = 'block';
+}
+
+function closeBotConfig(slug) {
+    const m = document.getElementById(`${slug}-config-modal`);
+    const b = document.getElementById(`${slug}-config-backdrop`);
+    if (m) m.style.display = 'none';
+    if (b) b.style.display = 'none';
+}
+
+// Close any open bot config when Escape is pressed.
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        ['cb', 'crypto-bot', 'stock-bot', 'watchdog'].forEach(closeBotConfig);
+    }
+});
+
+
 // ─── Auth: Load Current User ─────────────────────────────────
 
 async function loadCurrentUser() {
@@ -412,10 +464,11 @@ setInterval(refreshTrumpMood, 3600000);
 async function loadTrumpTab(force) {
     const days = document.getElementById('trump-history-days')?.value || 30;
 
-    // Load current mood + history in parallel
-    const [moodResp, histResp] = await Promise.allSettled([
+    // Load current mood + history + backtracks in parallel
+    const [moodResp, histResp, btResp] = await Promise.allSettled([
         fetch('/api/trump-mood' + (force ? '?force=1' : '')),
         fetch('/api/trump/history?days=' + days),
+        fetch('/api/trump/backtracks?days=' + days),
     ]);
 
     // Check for subscription gate (403)
@@ -434,21 +487,438 @@ async function loadTrumpTab(force) {
     // Render current mood card
     if (moodResp.status === 'fulfilled' && moodResp.value.ok) {
         const mood = await moodResp.value.json();
+        renderTrumpActionable(mood);
         renderTrumpCurrentMood(mood);
+        renderTrumpTradeSignals(mood);
         renderTrumpSignals(mood);
         renderTrumpNotable(mood);
     }
 
-    // Render history chart + table
+    // Parse backtracks first so we can pass them to chart
+    let btData = null;
+    if (btResp.status === 'fulfilled' && btResp.value.ok) {
+        btData = await btResp.value.json();
+    }
+
+    // Render history chart + table (with backtrack milestones)
     if (histResp.status === 'fulfilled' && histResp.value.ok) {
         const history = await histResp.value.json();
-        renderTrumpChart(history);
+        renderTrumpChart(history, btData ? btData.backtracks || [] : []);
         renderTrumpHistoryTable(history);
     }
 
-    // Auto-load prediction if not forced (cached)
+    // Render backtracks
+    if (btData) {
+        renderBacktrackStats(btData);
+        renderBacktrackTimeline(btData.backtracks || []);
+    }
+
+    // Auto-load prediction + backtrack prediction if not forced (cached)
     loadTrumpPrediction(false);
+    loadBacktrackPrediction(false);
+
+    // Auto-load ML forecast + correlation (cached by default)
+    loadTrumpForecast(false);
+    loadTrumpCorrelation();
 }
+
+
+// ─── Trump → Market ML Forecaster ────────────────────────────
+
+async function loadTrumpForecast(force) {
+    const grid = document.getElementById('trump-forecast-grid');
+    const accEl = document.getElementById('trump-forecast-accuracy');
+    if (!grid) return;
+
+    if (force) {
+        grid.innerHTML = `<div style="padding:24px;text-align:center;font-size:11px;color:var(--text-secondary);grid-column:1/-1;">
+            <div class="spinner" style="margin:0 auto 8px;"></div>
+            Running self-learning ensemble (Ridge + KNN + EWMA + Opus)...
+        </div>`;
+    }
+
+    try {
+        const resp = await fetch('/api/trump/forecast' + (force ? '?force=1' : ''));
+        if (!resp.ok) {
+            grid.innerHTML = `<div style="padding:16px;text-align:center;font-size:11px;color:#ff4757;grid-column:1/-1;">Forecast unavailable.</div>`;
+            return;
+        }
+        const data = await resp.json();
+        renderTrumpForecast(data);
+        renderForecastAccuracySummary(data.accuracy || {}, accEl);
+    } catch (e) {
+        console.warn('Trump forecast failed:', e);
+        grid.innerHTML = `<div style="padding:16px;text-align:center;font-size:11px;color:#ff4757;grid-column:1/-1;">Error loading forecast.</div>`;
+    }
+}
+
+function renderTrumpForecast(data) {
+    const grid = document.getElementById('trump-forecast-grid');
+    if (!grid) return;
+    // Make the grid take full row for our custom layout
+    grid.style.display = 'block';
+
+    const forecasts = data.forecasts || {};
+    const keys = Object.keys(forecasts);
+    if (!keys.length) {
+        grid.innerHTML = `<div style="padding:16px;text-align:center;font-size:11px;color:var(--text-secondary);">No forecast data.</div>`;
+        return;
+    }
+
+    const horizonOrder = ['1D','5D','21D'];
+    const horizonLabel = {'1D':'1D','5D':'1W','21D':'1M'};
+
+    // ── Erratic gauge strip (all visual) ─────────────────────
+    const em = data.erratic_metrics || {};
+    const persistPct = Math.round((em.persistence_score || 0.5) * 100);
+    const persistColor = persistPct >= 70 ? '#00c896' : persistPct >= 45 ? '#ffc837' : '#ff4757';
+    const persistLabel = persistPct >= 70 ? 'STABLE' : persistPct >= 45 ? 'MIXED' : 'ERRATIC';
+    const volPct = Math.min(100, Math.round((em.mood_volatility_14d || 0) * 2));
+    const flips = em.swing_count_14d || 0;
+    const mrp = em.mean_reversion_pressure || 0;
+    const mrpColor = mrp >= 1.5 ? '#ff4757' : mrp >= 1.0 ? '#ff8c42' : '#8bc34a';
+
+    // Tiny arc gauge generator (SVG semi-circle)
+    function arcGauge(pct, color, label, sublabel) {
+        const angle = Math.PI * (pct / 100);
+        const r = 26, cx = 32, cy = 30;
+        const x = cx - r * Math.cos(angle);
+        const y = cy - r * Math.sin(angle);
+        const large = pct > 50 ? 1 : 0;
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:76px;">
+            <svg width="64" height="38" viewBox="0 0 64 38">
+                <path d="M 6 30 A 26 26 0 0 1 58 30" stroke="var(--border-color)" stroke-width="4" fill="none" stroke-linecap="round"/>
+                <path d="M 6 30 A 26 26 0 ${large} 1 ${x.toFixed(1)} ${y.toFixed(1)}" stroke="${color}" stroke-width="4" fill="none" stroke-linecap="round"/>
+                <text x="32" y="28" text-anchor="middle" fill="${color}" font-size="12" font-weight="800">${pct}</text>
+            </svg>
+            <div style="font-size:8px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">${label}</div>
+            <div style="font-size:9px;color:${color};font-weight:700;">${sublabel}</div>
+        </div>`;
+    }
+
+    // Dot-pattern for flip count
+    function flipDots(n) {
+        const max = 8;
+        let d = '';
+        for (let i = 0; i < max; i++) {
+            const active = i < n;
+            d += `<span style="width:8px;height:8px;border-radius:50%;background:${active ? '#ff8c42' : 'var(--border-color)'};display:inline-block;"></span>`;
+        }
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;min-width:80px;">
+            <div style="display:flex;gap:3px;align-items:center;height:38px;">${d}</div>
+            <div style="font-size:8px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Flips 14d</div>
+            <div style="font-size:9px;color:${n > 2 ? '#ff8c42' : '#8bc34a'};font-weight:700;">${n}</div>
+        </div>`;
+    }
+
+    // Mean reversion pressure as horizontal needle
+    function needleGauge(zScore, color) {
+        const pct = Math.min(100, Math.max(0, (zScore / 3) * 100));
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;min-width:90px;">
+            <div style="height:38px;display:flex;align-items:center;width:74px;position:relative;">
+                <div style="width:100%;height:6px;background:linear-gradient(to right,#8bc34a,#ffc837,#ff8c42,#ff4757);border-radius:3px;position:relative;">
+                    <div style="position:absolute;left:${pct}%;top:-4px;width:3px;height:14px;background:var(--text-bright);transform:translateX(-50%);border-radius:2px;box-shadow:0 1px 3px rgba(0,0,0,0.6);"></div>
+                </div>
+            </div>
+            <div style="font-size:8px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Revert z</div>
+            <div style="font-size:9px;color:${color};font-weight:700;">${zScore.toFixed(2)}</div>
+        </div>`;
+    }
+
+    // Current vs 30d baseline — delta bar
+    const cvb = em.current_vs_baseline || 0;
+    const cvbAbs = Math.min(100, Math.abs(cvb));
+    const cvbColor = cvb > 10 ? '#00c896' : cvb < -10 ? '#ff4757' : '#ffc837';
+    function deltaBar(cur, baseline) {
+        const a = Math.max(-100, Math.min(100, cur));
+        const b = Math.max(-100, Math.min(100, baseline));
+        const toX = v => 50 + (v / 2); // -100..100 → 0..100
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;min-width:120px;">
+            <div style="height:38px;width:110px;position:relative;display:flex;align-items:center;">
+                <div style="width:100%;height:6px;background:linear-gradient(to right,#ff4757,#ff8c42,#ffc837,#8bc34a,#00c896);border-radius:3px;position:relative;">
+                    <div title="30d baseline" style="position:absolute;left:${toX(b)}%;top:-3px;width:2px;height:12px;background:var(--text-secondary);transform:translateX(-50%);"></div>
+                    <div title="Current" style="position:absolute;left:${toX(a)}%;top:-6px;width:10px;height:18px;background:var(--text-bright);border:2px solid var(--bg-tertiary);border-radius:3px;transform:translateX(-50%);"></div>
+                </div>
+            </div>
+            <div style="font-size:8px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Mood vs 30d</div>
+            <div style="font-size:9px;color:${cvbColor};font-weight:700;">${cvb > 0 ? '+' : ''}${cvb} pts</div>
+        </div>`;
+    }
+
+    let html = `
+        <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 16px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+                <div style="display:flex;flex-direction:column;min-width:110px;">
+                    <span style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Behavior</span>
+                    <span style="font-size:18px;font-weight:900;color:${persistColor};line-height:1;margin-top:2px;">${persistLabel}</span>
+                    <span style="font-size:10px;color:var(--text-secondary);">${persistPct}% persistence</span>
+                </div>
+                <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+                    ${arcGauge(volPct, volPct > 70 ? '#ff4757' : volPct > 40 ? '#ff8c42' : '#8bc34a', 'Volatility', em.mood_volatility_14d || 0)}
+                    ${flipDots(flips)}
+                    ${needleGauge(mrp, mrpColor)}
+                    ${deltaBar(data.mood_snapshot?.mood || 0, em.baseline_mood_30d || 0)}
+                </div>
+            </div>
+        </div>`;
+
+    // ── Forecast matrix (assets × horizons) ────────────────
+    // Header row
+    html += `<div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:10px;overflow:hidden;">
+        <div style="display:grid;grid-template-columns:110px repeat(3,1fr);gap:0;background:var(--bg-secondary);padding:8px 12px;border-bottom:1px solid var(--border-color);">
+            <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;font-weight:800;letter-spacing:0.5px;">Asset</div>
+            ${horizonOrder.map(h => `<div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;font-weight:800;letter-spacing:0.5px;text-align:center;">${horizonLabel[h]}</div>`).join('')}
+        </div>`;
+
+    // Compute global max pred for bar scaling
+    let globalMax = 1;
+    keys.forEach(a => horizonOrder.forEach(h => {
+        const pct = Math.abs(forecasts[a]?.horizons?.[h]?.predicted_return_pct || 0);
+        if (pct > globalMax) globalMax = pct;
+    }));
+
+    keys.forEach((asset, rowIdx) => {
+        const f = forecasts[asset];
+        const isCrypto = f.class === 'crypto';
+        const accent = isCrypto ? '#f7931a' : '#4f8aff';
+
+        html += `<div style="display:grid;grid-template-columns:110px repeat(3,1fr);gap:0;padding:10px 12px;border-bottom:${rowIdx < keys.length - 1 ? '1px solid var(--border-color)' : 'none'};align-items:stretch;">
+            <div style="display:flex;flex-direction:column;justify-content:center;padding-right:8px;">
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <span style="width:6px;height:22px;background:${accent};border-radius:3px;"></span>
+                    <div>
+                        <div style="font-size:14px;font-weight:900;color:var(--text-bright);line-height:1;">${asset}</div>
+                        <div style="font-size:9px;color:var(--text-secondary);margin-top:2px;">${f.label}</div>
+                    </div>
+                </div>
+            </div>`;
+
+        horizonOrder.forEach(h => {
+            const hf = f.horizons[h];
+            if (!hf) {
+                html += `<div style="text-align:center;color:var(--text-secondary);font-size:10px;">—</div>`;
+                return;
+            }
+            const pct = hf.predicted_return_pct;
+            const absPct = Math.abs(pct);
+            const barW = Math.min(100, (absPct / globalMax) * 100);
+            const color = pct > 0.15 ? '#00c896' : pct < -0.15 ? '#ff4757' : '#ffc837';
+            const arrow = pct > 0.15 ? '&#9650;' : pct < -0.15 ? '&#9660;' : '&#9654;';
+            const conf = Math.round(hf.confidence * 100);
+            const rr = hf.reversal_risk || {};
+            const rrP = Math.round((rr.probability || 0) * 100);
+            const rrColor = rr.assessment === 'HIGH' ? '#ff4757' : rr.assessment === 'MEDIUM' ? '#ff8c42' : '#8bc34a';
+
+            const sc = hf.scenarios || {};
+            const persist = sc.persist || {};
+            const flip = sc.flip || {};
+            const persistP = Math.round((persist.probability || 0) * 100);
+            const flipP = Math.round((flip.probability || 0) * 100);
+            const persistColor2 = (persist.predicted_return_pct || 0) >= 0 ? '#00c896' : '#ff4757';
+            const flipColor2 = (flip.predicted_return_pct || 0) >= 0 ? '#00c896' : '#ff4757';
+
+            // Full tooltip (for hover only)
+            const tipParts = [];
+            if (hf.reasoning) tipParts.push(hf.reasoning);
+            tipParts.push(`Persist ${persistP}%: ${persist.predicted_return_pct > 0 ? '+' : ''}${persist.predicted_return_pct}%`);
+            tipParts.push(`Flip ${flipP}%: ${flip.predicted_return_pct > 0 ? '+' : ''}${flip.predicted_return_pct}%`);
+            const mp = hf.model_predictions || {};
+            tipParts.push(Object.keys(mp).map(m => `${m}:${mp[m] > 0 ? '+' : ''}${mp[m]}%`).join(' | '));
+            const tip = tipParts.join('\n').replace(/"/g, '&quot;');
+
+            html += `<div title="${tip}" style="padding:0 6px;display:flex;flex-direction:column;justify-content:center;align-items:center;cursor:help;">
+                <!-- Big arrow + number -->
+                <div style="display:flex;align-items:baseline;gap:4px;">
+                    <span style="font-size:14px;color:${color};font-weight:900;">${arrow}</span>
+                    <span style="font-size:22px;font-weight:900;color:${color};line-height:1;">${pct > 0 ? '+' : ''}${pct}<span style="font-size:13px;">%</span></span>
+                </div>
+                <!-- Magnitude bar -->
+                <div style="width:80%;height:4px;background:var(--bg-secondary);border-radius:2px;margin:5px 0 3px;overflow:hidden;">
+                    <div style="width:${barW}%;height:100%;background:${color};border-radius:2px;"></div>
+                </div>
+                <!-- Persist vs flip stacked bar -->
+                <div style="width:80%;height:8px;background:var(--bg-secondary);border-radius:4px;display:flex;overflow:hidden;margin:3px 0;" title="Persist ${persistP}% / Flip ${flipP}%">
+                    <div style="width:${persistP}%;background:${persistColor2};opacity:0.9;" title="Persist: ${persistP}%"></div>
+                    <div style="width:${flipP}%;background:${flipColor2};opacity:0.55;border-left:1px solid rgba(255,255,255,0.2);" title="Flip: ${flipP}%"></div>
+                </div>
+                <!-- Confidence + flip risk chips -->
+                <div style="display:flex;gap:5px;align-items:center;margin-top:4px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;font-weight:700;">
+                    <span title="Confidence" style="color:var(--text-secondary);">
+                        <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${conf >= 50 ? '#00c896' : conf >= 30 ? '#ffc837' : '#ff4757'};margin-right:3px;vertical-align:middle;"></span>${conf}%
+                    </span>
+                    <span style="color:var(--text-secondary);opacity:0.5;">&middot;</span>
+                    <span title="Reversal risk: ${rr.assessment}" style="color:${rrColor};">
+                        &#8634; ${rrP}%
+                    </span>
+                </div>
+            </div>`;
+        });
+
+        html += `</div>`;
+    });
+    html += `</div>`;
+
+    // ── Bottom legend (compact) ──────────────────────────
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:9px;color:var(--text-secondary);flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;gap:12px;align-items:center;">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#00c896;opacity:0.9;margin-right:4px;"></span>Persist</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ff4757;opacity:0.55;margin-right:4px;"></span>Flip scenario</span>
+            <span>&#8634; = reversal probability</span>
+            <span>&#8226; = confidence</span>
+        </div>
+        <div>${data.training_rows || 0} rows &middot; ${data.cached ? 'cached' : 'fresh'}</div>
+    </div>`;
+
+    grid.innerHTML = html;
+}
+
+function renderForecastAccuracySummary(accuracy, el) {
+    if (!el) return;
+    const assets = Object.keys(accuracy);
+    if (!assets.length) { el.innerHTML = ''; return; }
+    const hOrder = ['1D','5D','21D'];
+    const hLabel = {'1D':'1D','5D':'1W','21D':'1M'};
+
+    // Build compact badge matrix — one strip per asset
+    let strips = '';
+    let anyData = false;
+    assets.forEach(a => {
+        const h = accuracy[a] || {};
+        const chips = hOrder.map(hk => {
+            const s = h[hk];
+            if (!s || !s.n) {
+                return `<span style="padding:2px 6px;border-radius:4px;background:var(--bg-secondary);color:var(--text-secondary);opacity:0.5;font-size:9px;">${hLabel[hk]} —</span>`;
+            }
+            anyData = true;
+            const dir = Math.round((s.direction_accuracy || 0) * 100);
+            const dc = dir >= 60 ? '#00c896' : dir >= 45 ? '#ffc837' : '#ff4757';
+            return `<span title="MAE ${s.mae}%, n=${s.n}" style="padding:2px 6px;border-radius:4px;background:${dc}22;color:${dc};font-weight:700;font-size:9px;">${hLabel[hk]} ${dir}%</span>`;
+        }).join(' ');
+        strips += `<span style="margin-right:10px;display:inline-flex;gap:4px;align-items:center;"><strong style="color:var(--text-bright);font-size:9px;">${a}</strong> ${chips}</span>`;
+    });
+    el.innerHTML = anyData
+        ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;">Accuracy:</span>${strips}</div>`
+        : '';
+}
+
+
+// ─── Mood ↔ Market Correlation Timeline ─────────────────────
+
+async function loadTrumpCorrelation() {
+    const el = document.getElementById('trump-correlation');
+    if (!el) return;
+    try {
+        const resp = await fetch('/api/trump/correlation?days=60');
+        if (!resp.ok) { el.innerHTML = '<em>Correlation unavailable.</em>'; return; }
+        const data = await resp.json();
+        renderCorrelationHeatmap(data, el);
+    } catch (e) {
+        console.warn('Correlation failed:', e);
+        el.innerHTML = '<em>Error loading correlation.</em>';
+    }
+}
+
+function renderCorrelationHeatmap(data, el) {
+    const assets = data.assets || {};
+    const best = data.best_lag || {};
+    const keys = Object.keys(assets);
+    if (!keys.length) {
+        el.innerHTML = `<div style="text-align:center;padding:20px;font-size:11px;color:var(--text-secondary);">${data.note || 'No correlation data yet.'}</div>`;
+        return;
+    }
+
+    const lags = [0,1,2,3,4,5,6,7];
+
+    function cellColor(c) {
+        if (c === null || c === undefined || isNaN(c)) return 'transparent';
+        const intensity = Math.min(1, Math.abs(c) * 2.5);
+        if (c > 0) return `rgba(0,200,150,${intensity})`;
+        return `rgba(255,71,87,${intensity})`;
+    }
+
+    let headerCells = '<th style="padding:6px;text-align:left;font-weight:700;color:var(--text-secondary);">Asset</th>' +
+        lags.map(l => `<th style="padding:6px;text-align:center;font-weight:700;color:var(--text-secondary);">t-${l}d</th>`).join('') +
+        '<th style="padding:6px;text-align:left;font-weight:700;color:var(--text-secondary);">Best Lag</th>';
+
+    let rows = keys.map(k => {
+        const a = assets[k];
+        const bl = best[k];
+        const cells = lags.map(l => {
+            const c = a.lags[l];
+            const txt = c !== undefined ? c.toFixed(2) : '—';
+            const textColor = c !== undefined && Math.abs(c) > 0.15 ? '#fff' : 'var(--text-secondary)';
+            return `<td style="padding:6px;text-align:center;background:${cellColor(c)};color:${textColor};font-family:monospace;font-size:11px;">${txt}</td>`;
+        }).join('');
+        const bestTxt = bl ? `<span style="color:${bl.corr > 0 ? '#00c896' : '#ff4757'};font-weight:700;">lag ${bl.lag_days}d (r=${bl.corr})</span>` : '—';
+        return `<tr style="border-bottom:1px solid var(--border-color);">
+            <td style="padding:6px;font-weight:700;color:var(--text-bright);">${k} <span style="font-size:9px;color:var(--text-secondary);">${a.label}</span></td>
+            ${cells}
+            <td style="padding:6px;font-size:10px;">${bestTxt}</td>
+        </tr>`;
+    }).join('');
+
+    let interpretation = '';
+    const sigPairs = [];
+    keys.forEach(k => {
+        const bl = best[k];
+        if (bl && Math.abs(bl.corr) >= 0.20) {
+            const dir = bl.corr > 0 ? 'leads up-moves' : 'leads down-moves';
+            sigPairs.push(`${k} ${dir} in ${bl.lag_days}d (r=${bl.corr})`);
+        }
+    });
+    if (sigPairs.length) {
+        interpretation = `<div style="margin-top:10px;padding:8px 12px;background:var(--bg-secondary);border-radius:6px;border-left:3px solid #4f8aff;font-size:11px;color:var(--text-bright);">
+            <strong>Mood Signal:</strong> ${sigPairs.join(' &middot; ')}
+        </div>`;
+    }
+
+    el.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead><tr style="border-bottom:2px solid var(--border-color);">${headerCells}</tr></thead>
+        <tbody>${rows}</tbody>
+    </table></div>
+    <div style="font-size:9px;color:var(--text-secondary);margin-top:8px;">
+        <strong>Interpretation:</strong> t-k = mood k days ago vs. today's return. Positive (green) = bullish mood preceded up-move. Negative (red) = rhetoric preceded drawdown. Best lag identifies how many days Trump rhetoric leads the asset.
+    </div>
+    ${interpretation}`;
+}
+
+function renderTrumpActionable(m) {
+    const el = document.getElementById('trump-actionable');
+    if (!el) return;
+    const sig = m.actionable_signal;
+    if (!sig) { el.innerHTML = ''; return; }
+
+    const color = sig.color || '#787b86';
+    const icon = sig.action === 'BUY' ? '⬆' : sig.action === 'TRIM' ? '⬇' : sig.action === 'WAIT_QUIET' ? '⏸' : '⏺';
+    const reasons = (sig.reasons || []).map(r => `<li style="margin:4px 0;font-size:12px;color:var(--text-secondary);">${r}</li>`).join('');
+    const factors = (sig.key_factors || []).filter(Boolean).map(f =>
+        `<span style="display:inline-block;padding:3px 10px;background:rgba(255,255,255,0.06);border:1px solid var(--border-color);border-radius:12px;font-size:11px;margin:2px 4px 2px 0;color:var(--text-bright);">${f}</span>`
+    ).join('');
+
+    el.innerHTML = `
+    <div style="background:linear-gradient(135deg,${color}1a,${color}05);border:2px solid ${color};border-radius:14px;padding:20px 24px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:280px;">
+                <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+                    <div style="font-size:34px;line-height:1;color:${color};">${icon}</div>
+                    <div>
+                        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary);">Actionable Signal</div>
+                        <div style="font-size:22px;font-weight:800;color:${color};line-height:1.1;">${sig.label}</div>
+                    </div>
+                </div>
+                <div style="font-size:14px;color:var(--text-bright);font-weight:600;line-height:1.4;margin-bottom:10px;">${sig.headline}</div>
+                <ul style="list-style:none;padding:0;margin:0 0 10px 0;">${reasons}</ul>
+                ${factors ? `<div style="margin-top:10px;"><div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Driving signals</div>${factors}</div>` : ''}
+                ${sig.next_watch ? `<div style="margin-top:12px;padding:8px 12px;background:rgba(0,0,0,0.15);border-radius:6px;font-size:11px;color:var(--text-secondary);"><strong style="color:var(--text-bright);">Next:</strong> ${sig.next_watch}</div>` : ''}
+            </div>
+            <div style="text-align:center;min-width:90px;">
+                <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Confidence</div>
+                <div style="font-size:32px;font-weight:800;color:${color};line-height:1.1;">${sig.confidence}<span style="font-size:14px;color:var(--text-secondary);">%</span></div>
+            </div>
+        </div>
+    </div>`;
+}
+
 
 function renderTrumpCurrentMood(m) {
     const el = document.getElementById('trump-current-mood');
@@ -493,6 +963,83 @@ function renderTrumpCurrentMood(m) {
         <div style="font-size:9px;color:var(--text-secondary);margin-top:10px;text-align:right;">
             Sources: Truth Social (${m.sources?.truth_social || 0}) | News (${m.sources?.news || 0}) | White House (${m.sources?.whitehouse || 0})
         </div>`;
+}
+
+function renderTrumpTradeSignals(mood) {
+    const el = document.getElementById('trump-trade-signals');
+    if (!el) return;
+
+    const ts = mood.trade_signals;
+    if (!ts || (!ts.buy?.length && !ts.avoid?.length)) {
+        el.innerHTML = '<div style="text-align:center;padding:10px 0;font-size:11px;color:var(--text-secondary);">No active trade signals — rhetoric is neutral or no policy-specific keywords detected.</div>';
+        return;
+    }
+
+    const summary = ts.summary || '';
+    const activePolicies = (ts.active_policies || []).map(p => {
+        const colors = {
+            'china_tariffs':'#ff4757','general_tariffs':'#ff8c42','eu_tariffs':'#ffc837',
+            'trade_deals':'#00c896','iran_conflict':'#ff4757','crypto_policy':'#4f8aff',
+            'mexico_tariffs':'#ff8c42','canada_tariffs':'#ffc837','tax_policy':'#00c896','fed_policy':'#8bc34a'
+        };
+        const c = colors[p] || '#636b7e';
+        return `<span style="padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;background:${c}22;color:${c};border:1px solid ${c}44;">${p.replace(/_/g,' ')}</span>`;
+    }).join(' ');
+
+    function buildSignalRow(s, type) {
+        const color = type === 'buy' ? '#00c896' : '#ff4757';
+        const icon = type === 'buy' ? '&#9650;' : '&#9660;';
+        const strength = Math.round((s.strength || 0.5) * 100);
+        const strengthColor = strength >= 70 ? (type === 'buy' ? '#00c896' : '#ff4757') : strength >= 40 ? '#ffc837' : '#636b7e';
+        const tickers = (s.tickers || []).slice(0, 5).map(t =>
+            `<span style="padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${color}12;color:${color};border:1px solid ${color}22;cursor:pointer;" onclick="window.analyzeStock && analyzeStock('${t}')">${t}</span>`
+        ).join(' ');
+
+        return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-color);">
+            <div style="min-width:18px;text-align:center;color:${color};font-size:14px;padding-top:2px;">${icon}</div>
+            <div style="flex:1;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+                    <span style="font-size:12px;font-weight:700;color:var(--text-bright);">${s.sector}</span>
+                    <span style="font-size:10px;font-weight:700;color:${strengthColor};">${strength}% signal</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">${s.reason}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap;">${tickers}</div>
+            </div>
+        </div>`;
+    }
+
+    let html = '';
+
+    if (summary) {
+        html += `<div style="font-size:12px;color:var(--text-bright);margin-bottom:10px;padding:8px 12px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid ${mood.color || '#ffc837'};">${summary}</div>`;
+    }
+
+    if (activePolicies) {
+        html += `<div style="margin-bottom:10px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;font-weight:700;">Active:</span> ${activePolicies}
+        </div>`;
+    }
+
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">';
+
+    // BUY column
+    if (ts.buy?.length) {
+        html += `<div>
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#00c896;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #00c89644;">BUY — Sectors to Watch</div>
+            ${ts.buy.map(s => buildSignalRow(s, 'buy')).join('')}
+        </div>`;
+    }
+
+    // AVOID column
+    if (ts.avoid?.length) {
+        html += `<div>
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#ff4757;margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid #ff475744;">AVOID — Threatened Sectors</div>
+            ${ts.avoid.map(s => buildSignalRow(s, 'avoid')).join('')}
+        </div>`;
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
 }
 
 async function loadTrumpPrediction(force) {
@@ -611,41 +1158,177 @@ function renderTrumpNotable(mood) {
     }).join('');
 }
 
-function renderTrumpChart(history) {
+function renderTrumpChart(history, backtracks) {
     const el = document.getElementById('trump-chart');
     if (!el || !history.length) {
         if (el) el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:40px;font-size:12px;">No history data yet. Mood snapshots are recorded every hour.</div>';
         return;
     }
 
-    // Sort oldest first for chart
-    const sorted = [...history].reverse();
+    // Sort oldest first, then downsample to max ~120 points for chart readability
+    // Keep 1 representative point per time bucket (more granular for recent data)
+    const allSorted = [...history].reverse();
+    let sorted;
+    if (allSorted.length > 120) {
+        const buckets = {};
+        allSorted.forEach(h => {
+            // Bucket by date + 6-hour window (4 points per day max)
+            const d = h.created_at ? new Date(h.created_at) : new Date();
+            const key = d.toISOString().slice(0, 10) + '-' + Math.floor(d.getHours() / 6);
+            if (!buckets[key]) buckets[key] = h;
+        });
+        sorted = Object.values(buckets).sort((a, b) => {
+            const da = a.created_at ? new Date(a.created_at) : new Date();
+            const db = b.created_at ? new Date(b.created_at) : new Date();
+            return da - db;
+        });
+    } else {
+        sorted = allSorted;
+    }
     const maxAbs = Math.max(...sorted.map(h => Math.abs(h.mood)), 1);
     const chartW = el.clientWidth || 600;
-    const chartH = 200;
+    const chartH = 240;
     const barW = Math.max(4, Math.min(20, (chartW - 40) / sorted.length - 2));
-    const midY = chartH / 2;
+    const midY = (chartH - 30) / 2;  // leave room at bottom for labels
+
+    // Build backtrack date lookup for TACO milestones
+    const btMap = {};
+    if (backtracks && backtracks.length) {
+        backtracks.filter(bt => bt.policy_area !== '__prediction__').forEach(bt => {
+            if (bt.backtrack_date) {
+                const d = new Date(bt.backtrack_date).toISOString().slice(0, 10);
+                btMap[d] = bt;
+            }
+        });
+    }
 
     let barsHtml = '';
+    let milestonesHtml = '';
+    const barData = []; // Store bar positions for tooltip
+
     sorted.forEach((h, i) => {
         const x = 30 + i * (barW + 2);
         const barH = (Math.abs(h.mood) / Math.max(maxAbs, 1)) * (midY - 10);
         const y = h.mood >= 0 ? midY - barH : midY;
         const color = h.mood >= 30 ? '#00c896' : h.mood >= 10 ? '#8bc34a' : h.mood >= -10 ? '#ffc837' : h.mood >= -30 ? '#ff8c42' : '#ff4757';
-        const date = h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', {month:'short',day:'numeric'}) : '';
-        const time = h.created_at ? new Date(h.created_at).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'}) : '';
-        barsHtml += `<rect x="${x}" y="${y}" width="${barW}" height="${Math.max(barH, 1)}" rx="2" fill="${color}" opacity="0.85">
-            <title>${date} ${time}: ${h.mood} (${h.label})</title></rect>`;
+        const dateStr = h.created_at ? new Date(h.created_at).toISOString().slice(0, 10) : '';
+
+        barData.push({ x, y, w: barW, h: Math.max(barH, 1), mood: h.mood, label: h.label, created_at: h.created_at, signals: h.top_signals, trend: h.pattern_trend });
+
+        barsHtml += `<rect class="mood-bar" data-idx="${i}" x="${x}" y="${y}" width="${barW}" height="${Math.max(barH, 1)}" rx="2" fill="${color}" opacity="0.85" style="cursor:crosshair;"/>`;
+
+        // TACO milestone: check if this bar date matches a backtrack
+        const bt = btMap[dateStr];
+        if (bt) {
+            const labelY = Math.min(y, midY) - 6;
+            milestonesHtml += `<g class="taco-milestone" data-idx="${i}" style="cursor:pointer;">
+                <line x1="${x + barW/2}" y1="${labelY}" x2="${x + barW/2}" y2="${Math.max(y, midY) + Math.max(barH,1)}" stroke="#ffc837" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+                <text x="${x + barW/2}" y="${labelY - 2}" text-anchor="middle" fill="#ffc837" font-size="12" style="cursor:pointer;">&#127790;</text>
+                <text x="${x + barW/2}" y="${chartH - 4}" text-anchor="middle" fill="#ffc837" font-size="7" font-weight="700">${bt.policy_area.replace(/_/g,' ').toUpperCase().slice(0,12)}</text>
+            </g>`;
+            // Remove from map so we only show one marker per date
+            delete btMap[dateStr];
+        }
     });
 
-    el.innerHTML = `<svg width="100%" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" preserveAspectRatio="none">
-        <!-- Zero line -->
-        <line x1="25" y1="${midY}" x2="${chartW}" y2="${midY}" stroke="var(--border-color)" stroke-width="1" stroke-dasharray="4,4"/>
-        <text x="2" y="${midY + 3}" fill="var(--text-secondary)" font-size="9">0</text>
-        <text x="2" y="12" fill="#00c896" font-size="9">+${Math.round(maxAbs)}</text>
-        <text x="2" y="${chartH - 4}" fill="#ff4757" font-size="9">-${Math.round(maxAbs)}</text>
-        ${barsHtml}
-    </svg>`;
+    el.innerHTML = `
+        <div style="position:relative;">
+            <svg width="100%" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" preserveAspectRatio="none" id="trump-chart-svg">
+                <!-- Zero line -->
+                <line x1="25" y1="${midY}" x2="${chartW}" y2="${midY}" stroke="var(--border-color)" stroke-width="1" stroke-dasharray="4,4"/>
+                <text x="2" y="${midY + 3}" fill="var(--text-secondary)" font-size="9">0</text>
+                <text x="2" y="12" fill="#00c896" font-size="9">+${Math.round(maxAbs)}</text>
+                <text x="2" y="${chartH - 34}" fill="#ff4757" font-size="9">-${Math.round(maxAbs)}</text>
+                ${barsHtml}
+                ${milestonesHtml}
+            </svg>
+            <div id="mood-tooltip" style="display:none;position:absolute;pointer-events:none;z-index:100;
+                background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;
+                padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,0.3);min-width:180px;font-size:11px;"></div>
+        </div>`;
+
+    // Attach hover events
+    const svg = document.getElementById('trump-chart-svg');
+    const tooltip = document.getElementById('mood-tooltip');
+    if (!svg || !tooltip) return;
+
+    svg.querySelectorAll('.mood-bar').forEach(bar => {
+        bar.addEventListener('mouseenter', (e) => {
+            const idx = parseInt(bar.getAttribute('data-idx'));
+            const d = barData[idx];
+            if (!d) return;
+            bar.setAttribute('opacity', '1');
+            bar.setAttribute('stroke', '#fff');
+            bar.setAttribute('stroke-width', '1.5');
+            const date = d.created_at ? new Date(d.created_at).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}) : '';
+            const time = d.created_at ? new Date(d.created_at).toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : '';
+            const moodColor = d.mood >= 30 ? '#00c896' : d.mood >= 10 ? '#8bc34a' : d.mood >= -10 ? '#ffc837' : d.mood >= -30 ? '#ff8c42' : '#ff4757';
+            const signals = (d.signals || []).slice(0, 3).map(s => {
+                const txt = typeof s === 'string' ? s : s.text || '';
+                const sc = typeof s === 'object' ? s.score : 0;
+                const scColor = sc > 0 ? '#00c896' : sc < 0 ? '#ff4757' : 'var(--text-secondary)';
+                return `<div style="display:flex;justify-content:space-between;gap:8px;"><span>${txt}</span><span style="color:${scColor};font-weight:600;">${sc > 0 ? '+' : ''}${sc || ''}</span></div>`;
+            }).join('');
+            tooltip.innerHTML = `
+                <div style="font-weight:700;color:var(--text-bright);margin-bottom:4px;">${date} ${time}</div>
+                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
+                    <span style="font-size:22px;font-weight:800;color:${moodColor};">${d.mood > 0 ? '+' : ''}${d.mood}</span>
+                    <span style="font-size:10px;font-weight:600;color:${moodColor};text-transform:uppercase;">${d.label}</span>
+                </div>
+                ${d.trend ? `<div style="color:var(--text-secondary);margin-bottom:4px;">Trend: <span style="font-weight:600;color:var(--text-bright);">${d.trend}</span></div>` : ''}
+                ${signals ? `<div style="border-top:1px solid var(--border-color);margin-top:4px;padding-top:4px;font-size:10px;color:var(--text-secondary);">${signals}</div>` : ''}`;
+            // Position tooltip near bar
+            const rect = el.getBoundingClientRect();
+            const barRect = bar.getBoundingClientRect();
+            let left = barRect.left - rect.left + barRect.width + 8;
+            if (left + 200 > rect.width) left = barRect.left - rect.left - 200;
+            tooltip.style.left = Math.max(0, left) + 'px';
+            tooltip.style.top = Math.max(0, d.y - 20) + 'px';
+            tooltip.style.display = 'block';
+        });
+        bar.addEventListener('mouseleave', () => {
+            bar.setAttribute('opacity', '0.85');
+            bar.removeAttribute('stroke');
+            bar.removeAttribute('stroke-width');
+            tooltip.style.display = 'none';
+        });
+    });
+
+    // TACO milestone hover
+    svg.querySelectorAll('.taco-milestone').forEach(g => {
+        g.addEventListener('mouseenter', (e) => {
+            const idx = parseInt(g.getAttribute('data-idx'));
+            const d = barData[idx];
+            const dateStr = d && d.created_at ? new Date(d.created_at).toISOString().slice(0, 10) : '';
+            // Find matching backtrack from original backtracks array
+            const bt = (backtracks || []).find(b => b.backtrack_date && new Date(b.backtrack_date).toISOString().slice(0, 10) === dateStr);
+            if (!bt) return;
+            const moodSwing = bt.mood_swing || 0;
+            const swingColor = moodSwing > 0 ? '#00c896' : '#ff4757';
+            tooltip.innerHTML = `
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <span style="font-size:16px;">&#127790;</span>
+                    <span style="font-weight:700;color:#ffc837;text-transform:uppercase;">TACO — Policy Reversal</span>
+                </div>
+                <div style="font-weight:600;color:var(--text-bright);margin-bottom:4px;">${bt.policy_area.replace(/_/g, ' ')}</div>
+                <div style="font-size:10px;margin-bottom:2px;"><span style="color:#ff4757;">${bt.initial_stance || '?'}</span> <span style="color:var(--text-secondary);">→</span> <span style="color:#00c896;">${bt.backtrack_stance || '?'}</span></div>
+                <div style="display:flex;gap:10px;margin-top:6px;font-size:10px;">
+                    <span style="color:${swingColor};font-weight:700;">Swing: ${moodSwing > 0 ? '+' : ''}${moodSwing}</span>
+                    <span style="color:var(--text-secondary);">${bt.days_to_reversal || '?'} days</span>
+                    <span style="color:var(--text-secondary);">Conf: ${bt.confidence ? (bt.confidence * 100).toFixed(0) + '%' : '?'}</span>
+                </div>`;
+            const rect = el.getBoundingClientRect();
+            const gRect = g.getBoundingClientRect();
+            let left = gRect.left - rect.left + gRect.width/2 + 8;
+            if (left + 220 > rect.width) left = gRect.left - rect.left - 220;
+            tooltip.style.left = Math.max(0, left) + 'px';
+            tooltip.style.top = '10px';
+            tooltip.style.display = 'block';
+        });
+        g.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
+    });
 }
 
 function renderTrumpHistoryTable(history) {
@@ -681,6 +1364,193 @@ function renderTrumpHistoryTable(history) {
         <tbody>${rows}</tbody>
     </table>`;
 }
+
+
+// ─── Backtrack Tracker Functions ─────────────────────────────
+
+async function loadBacktrackPrediction(force) {
+    const el = document.getElementById('trump-backtrack-prediction');
+    if (!el) return;
+
+    if (force) {
+        el.querySelector('div:last-child').innerHTML = '<div style="text-align:center;padding:20px 0;"><div style="font-size:10px;color:var(--text-secondary);">Generating prediction...</div></div>';
+    }
+
+    try {
+        const resp = await fetch('/api/trump/backtracks/predict' + (force ? '?force=1' : ''));
+        if (!resp.ok) return;
+        const p = await resp.json();
+        renderBacktrackPrediction(p);
+    } catch (e) {
+        console.warn('Backtrack prediction failed:', e);
+    }
+}
+
+function renderBacktrackPrediction(p) {
+    const el = document.getElementById('trump-backtrack-prediction');
+    if (!el || p.error) {
+        if (el && p.error) {
+            el.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);">Backtrack Predictor</div>
+                    <button onclick="loadBacktrackPrediction(true)" class="btn-analyze" style="padding:4px 12px;font-size:10px;">Predict</button>
+                </div>
+                <div style="text-align:center;padding:20px 0;">
+                    <div style="font-size:10px;color:var(--text-secondary);">${p.error}</div>
+                </div>`;
+        }
+        return;
+    }
+
+    const policies = (p.active_policies || []).slice(0, 5);
+    const policyRows = policies.map(pol => {
+        const prob = (pol.backtrack_probability * 100).toFixed(0);
+        const barColor = prob >= 70 ? '#00c896' : prob >= 40 ? '#ffc837' : '#ff4757';
+        const impDir = pol.market_impact_if_reversed?.direction || 'neutral';
+        const impColor = impDir === 'bullish' ? '#00c896' : impDir === 'bearish' ? '#ff4757' : '#ffc837';
+        return `
+            <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-color);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                    <span style="font-size:12px;font-weight:700;color:var(--text-bright);">${pol.policy || pol.policy_area || '?'}</span>
+                    <span style="font-size:11px;font-weight:700;color:${barColor};">${prob}%</span>
+                </div>
+                <div style="background:#0d1117;border-radius:4px;height:6px;margin-bottom:6px;">
+                    <div style="background:${barColor};height:100%;border-radius:4px;width:${prob}%;transition:width 0.5s;"></div>
+                </div>
+                <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">${pol.current_stance || ''}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <span style="padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;background:${impColor}22;color:${impColor};border:1px solid ${impColor}44;">${impDir}</span>
+                    <span style="padding:1px 6px;border-radius:8px;font-size:9px;background:var(--bg-secondary);color:var(--text-secondary);">${pol.estimated_timeframe || pol.estimated_days + 'd'}</span>
+                </div>
+                ${pol.reasoning ? `<div style="font-size:10px;color:var(--text-secondary);margin-top:4px;font-style:italic;">${pol.reasoning}</div>` : ''}
+            </div>`;
+    }).join('');
+
+    const conf = p.confidence ? (p.confidence * 100).toFixed(0) : '?';
+    const nextRev = p.next_likely_reversal || '?';
+    const staleTag = p.stale ? ' <span style="color:#ff8c42;font-size:9px;">(stale)</span>' : '';
+    const cachedTag = p.cached ? ' <span style="color:var(--text-secondary);font-size:9px;">(cached)</span>' : '';
+
+    el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);">Backtrack Predictor${staleTag}${cachedTag}</div>
+            <button onclick="loadBacktrackPrediction(true)" class="btn-analyze" style="padding:4px 12px;font-size:10px;">Predict</button>
+        </div>
+        ${p.overall_insight ? `<div style="font-size:11px;color:var(--text-bright);margin-bottom:12px;line-height:1.4;">${p.overall_insight}</div>` : ''}
+        <div style="display:flex;gap:12px;margin-bottom:12px;">
+            <div style="text-align:center;">
+                <div style="font-size:18px;font-weight:800;color:var(--accent-blue);">${conf}%</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Confidence</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="font-size:12px;font-weight:700;color:var(--text-bright);padding:2px 8px;background:var(--bg-secondary);border-radius:6px;">${nextRev.replace('_', ' ')}</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;margin-top:2px;">Next Reversal</div>
+            </div>
+        </div>
+        ${policyRows || '<div style="font-size:10px;color:var(--text-secondary);">No active policies detected</div>'}`;
+}
+
+function renderBacktrackStats(data) {
+    const el = document.getElementById('trump-backtrack-stats');
+    if (!el) return;
+
+    const stats = data.stats || {};
+    const total = stats.total || 0;
+    const avgDays = stats.avg_days || 0;
+    const medDays = stats.median_days || 0;
+    const avgSwing = stats.avg_mood_swing || 0;
+    const topAreas = (stats.top_areas || []).slice(0, 5);
+
+    const areaBadges = topAreas.map(a => {
+        const colors = {
+            'china_tariffs': '#ff4757', 'general_tariffs': '#ff8c42', 'eu_tariffs': '#ffc837',
+            'trade_deals': '#00c896', 'iran_conflict': '#ff4757', 'crypto_policy': '#4f8aff',
+            'mexico_tariffs': '#ff8c42', 'canada_tariffs': '#ffc837', 'tax_policy': '#00c896', 'fed_policy': '#8bc34a',
+        };
+        const c = colors[a.area] || '#636b7e';
+        return `<span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${c}22;color:${c};border:1px solid ${c}44;">${a.area.replace('_', ' ')} (${a.count})</span>`;
+    }).join(' ');
+
+    el.innerHTML = `
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:12px;">Reversal Stats</div>
+        ${total === 0 ? '<div style="text-align:center;padding:15px 0;font-size:10px;color:var(--text-secondary);">No backtracks detected yet. Need more mood history data.</div>' : `
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;">
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent-blue);">${total}</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Reversals</div>
+            </div>
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent-orange);">${avgDays}d</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Avg Days</div>
+            </div>
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:var(--text-bright);">${medDays}d</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Median Days</div>
+            </div>
+            <div style="text-align:center;padding:8px;background:var(--bg-secondary);border-radius:8px;">
+                <div style="font-size:22px;font-weight:800;color:${avgSwing >= 0 ? '#00c896' : '#ff4757'};">${avgSwing > 0 ? '+' : ''}${avgSwing}</div>
+                <div style="font-size:9px;color:var(--text-secondary);text-transform:uppercase;">Avg Swing</div>
+            </div>
+        </div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;margin-bottom:6px;">Most Reversed</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">${areaBadges || '<span style="font-size:10px;color:var(--text-secondary);">N/A</span>'}</div>
+        `}`;
+}
+
+function renderBacktrackTimeline(backtracks) {
+    const el = document.getElementById('trump-backtrack-timeline');
+    if (!el) return;
+
+    // Filter out the __prediction__ meta-row
+    const items = (backtracks || []).filter(bt => bt.policy_area !== '__prediction__');
+
+    if (!items.length) {
+        el.innerHTML = '<div style="text-align:center;padding:15px 0;font-size:10px;color:var(--text-secondary);">No policy reversals detected yet. As mood data accumulates, backtracks will appear here.</div>';
+        return;
+    }
+
+    const colors = {
+        'china_tariffs': '#ff4757', 'general_tariffs': '#ff8c42', 'eu_tariffs': '#ffc837',
+        'trade_deals': '#00c896', 'iran_conflict': '#ff4757', 'crypto_policy': '#4f8aff',
+        'mexico_tariffs': '#ff8c42', 'canada_tariffs': '#ffc837', 'tax_policy': '#00c896', 'fed_policy': '#8bc34a',
+    };
+
+    const rows = items.slice(0, 20).map(bt => {
+        const c = colors[bt.policy_area] || '#636b7e';
+        const swing = bt.mood_swing || 0;
+        const swingColor = swing > 0 ? '#00c896' : '#ff4757';
+        const impact = typeof bt.market_impact === 'object' ? bt.market_impact : {};
+        const impDir = impact.direction || (swing > 0 ? 'bullish' : 'bearish');
+        const impSev = impact.severity || 'medium';
+        const confPct = bt.confidence ? (bt.confidence * 100).toFixed(0) + '%' : '?';
+
+        const initDate = bt.initial_date ? new Date(bt.initial_date).toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '?';
+        const btDate = bt.backtrack_date ? new Date(bt.backtrack_date).toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '?';
+
+        return `
+            <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);">
+                <div style="min-width:3px;background:${c};border-radius:2px;"></div>
+                <div style="flex:1;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:${c}22;color:${c};border:1px solid ${c}44;">${bt.policy_area.replace(/_/g, ' ')}</span>
+                        <span style="font-size:10px;color:var(--text-secondary);">${bt.days_to_reversal || '?'}d | conf: ${confPct}</span>
+                    </div>
+                    <div style="font-size:11px;margin-bottom:4px;">
+                        <span style="color:#ff4757;">${initDate}: ${bt.initial_stance || '?'}</span>
+                        <span style="color:var(--text-secondary);margin:0 6px;">&#8594;</span>
+                        <span style="color:#00c896;">${btDate}: ${bt.backtrack_stance || '?'}</span>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:${swingColor}22;color:${swingColor};">swing: ${swing > 0 ? '+' : ''}${swing}</span>
+                        <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:var(--bg-secondary);color:var(--text-secondary);">${impDir} ${impSev}</span>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+
+    el.innerHTML = rows;
+}
+
 
 function applyUserRole() {
     if (!currentUser) return;
@@ -1005,7 +1875,10 @@ function switchTab(tab, skipHash) {
     const ipoContent = document.getElementById('ipo-content');
     const predictionsContent = document.getElementById('predictions-content');
     const congressContent = document.getElementById('congress-content');
+    const smartMoneyContent = document.getElementById('smart-money-content');
     const trumpContent = document.getElementById('trump-content');
+    const watchdogContent = document.getElementById('watchdog-content');
+    const claudeBotContent = document.getElementById('claude-bot-content');
 
     mainContent.style.display = 'none';
     if (qullamaggieContent) qullamaggieContent.style.display = 'none';
@@ -1017,7 +1890,10 @@ function switchTab(tab, skipHash) {
     if (ipoContent) ipoContent.style.display = 'none';
     if (predictionsContent) predictionsContent.style.display = 'none';
     if (congressContent) congressContent.style.display = 'none';
+    if (smartMoneyContent) smartMoneyContent.style.display = 'none';
     if (trumpContent) trumpContent.style.display = 'none';
+    if (watchdogContent) watchdogContent.style.display = 'none';
+    if (claudeBotContent) claudeBotContent.style.display = 'none';
     if (autotradingContent) autotradingContent.style.display = 'none';
     if (stocktradingContent) stocktradingContent.style.display = 'none';
     if (adminContent) adminContent.style.display = 'none';
@@ -1037,6 +1913,16 @@ function switchTab(tab, skipHash) {
         clearInterval(window._stockBotRefreshInterval);
         window._stockBotRefreshInterval = null;
     }
+    // Stop watchdog auto-refresh when leaving watchdog tab
+    if (window._watchdogRefreshInterval) {
+        clearInterval(window._watchdogRefreshInterval);
+        window._watchdogRefreshInterval = null;
+    }
+    // Stop claude bot auto-refresh when leaving claude-bot tab
+    if (window._claudeBotRefreshInterval) {
+        clearInterval(window._claudeBotRefreshInterval);
+        window._claudeBotRefreshInterval = null;
+    }
 
     if (tab === 'qullamaggie') {
         qullamaggieContent.style.display = 'flex';
@@ -1044,6 +1930,7 @@ function switchTab(tab, skipHash) {
         trackerContent.style.display = 'grid';
         loadJournal();
         loadGoals();
+        loadTrackerBotTrades();
     } else if (tab === 'screener') {
         screenerContent.style.display = 'flex';
     } else if (tab === 'ipos') {
@@ -1053,6 +1940,19 @@ function switchTab(tab, skipHash) {
         loadPredictionMarkets(false);
     } else if (tab === 'congress') {
         congressContent.style.display = 'block';
+    } else if (tab === 'smart-money') {
+        smartMoneyContent.style.display = 'block';
+        if (typeof loadSmartMoney === 'function') loadSmartMoney();
+    } else if (tab === 'watchdog') {
+        watchdogContent.style.display = 'block';
+        loadWatchdogDashboard();
+        window._watchdogRefreshInterval = setInterval(loadWatchdogDashboard, 60000);
+    } else if (tab === 'claude-bot') {
+        if (claudeBotContent) claudeBotContent.style.display = 'block';
+        if (typeof loadClaudeBotDashboard === 'function') {
+            loadClaudeBotDashboard();
+            window._claudeBotRefreshInterval = setInterval(loadClaudeBotDashboard, 30000);
+        }
     } else if (tab === 'trump') {
         trumpContent.style.display = 'block';
         loadTrumpTab();
@@ -1102,6 +2002,8 @@ function switchTab(tab, skipHash) {
         loadAdminUsers();
         loadAdminInvites();
         loadAdminConfig();
+        loadAdminBotDefaults();
+        if (typeof loadAdminLlmOverrides === 'function') loadAdminLlmOverrides();
     } else {
         mainContent.style.display = 'grid';
     }
@@ -1207,6 +2109,58 @@ const GUIDES = {
         sections: [
             { heading: 'What It Does', body: 'A curated library of financial analysis skills organized by domain — Investment Banking, Equity Research, Private Equity, Wealth Management. Each skill is a specialized AI workflow.' },
             { heading: 'Domains', body: '<ul><li><strong>Financial Analysis</strong> — Comps, DCF, 3-statement models, LBO, competitive analysis</li><li><strong>Investment Banking</strong> — Pitch decks, CIMs, merger models, buyer lists, deal tracking</li><li><strong>Equity Research</strong> — Earnings updates, initiating coverage, sector reports, screens</li><li><strong>Private Equity</strong> — IC memos, due diligence, value creation plans, returns analysis</li><li><strong>Wealth Management</strong> — Financial plans, rebalancing, tax-loss harvesting, client reports</li></ul>' },
+        ],
+    },
+    trump: {
+        title: 'Trump Market Indicator — User Guide',
+        sections: [
+            { heading: 'What It Does', body: 'Tracks presidential rhetoric in real-time from Truth Social, GDELT news, and White House briefings. Calculates a mood score (-100 to +100) and predicts market impact using ML models.' },
+            { heading: 'Current Mood Card', body: '<ul><li><strong>Mood Score (-100 to +100)</strong> — Aggregate sentiment from all sources. Positive = bullish rhetoric (deals, tax cuts). Negative = bearish (tariffs, conflict).</li><li><strong>Label</strong> — BULLISH (>30), LEAN BULL (10-30), NEUTRAL (-10 to 10), LEAN BEAR (-30 to -10), BEARISH (<-30)</li><li><strong>Pattern</strong> — 3-day trend: IMPROVING (mood rising), STABLE, DETERIORATING (mood falling). Acceleration shows rate of change.</li><li><strong>Trade Signals</strong> — AI-derived BUY/AVOID sectors based on which policies are being discussed (tariffs → avoid manufacturing, tax cuts → buy financials).</li></ul>' },
+            { heading: 'Mood Timeline', body: 'Bar chart showing mood history. <strong>Green bars</strong> = bullish days, <strong>red bars</strong> = bearish days. <strong>Hover</strong> over any bar to see the exact date, mood score, label, trend, and top detected signals.' },
+            { heading: 'TACO Milestones (🌮)', body: 'Taco emojis on the timeline mark <strong>policy reversals</strong> — moments when Trump reversed a previous stance. Hover to see: what the original stance was, what it changed to, the mood swing (how many points the mood moved), and confidence level. Bigger swings = bigger market impact.' },
+            { heading: 'Mood → Market Forecaster (ML)', body: 'Predicts returns for SPY, QQQ, BTC, ETH across 1-day, 5-day, and 21-day horizons.<ul><li><strong>Erratic Gauge</strong> — Persistence Score (70%+ = stable mood), Flip Count (sign reversals in 14 days), Mood Volatility (std dev), Mean Reversion Z-score (extreme = snap-back due). High erratic scores = lower forecast confidence.</li><li><strong>Forecast Matrix</strong> — Each cell shows predicted return % with two scenarios: PERSIST (mood stays, green bar) vs. FLIP (mood reverses, red bar). The bar widths show probability of each.</li><li><strong>Reversal Risk</strong> — LOW (<20%) = trust the forecast. MEDIUM (20-40%) = hedge. HIGH (>40%) = the FLIP scenario is likely.</li><li><strong>How to use</strong>: When persistence is high and reversal risk is low, trust the direction. When erratic metrics spike, expect wider uncertainty and weight the flip scenario.</li></ul>' },
+            { heading: 'Mood ↔ Market Correlation (Lead/Lag)', body: 'Heatmap showing how many days Trump rhetoric <strong>leads</strong> asset price moves.<ul><li><strong>Columns (t-0 to t-7)</strong> — t-0 = same-day effect, t-1 = yesterday\'s mood vs today\'s price, t-2 = 2 days ago vs today, etc.</li><li><strong>Colors</strong> — Green (positive) = bullish mood led to price going UP. Red (negative) = bearish mood led to price going DOWN. Darker = stronger correlation.</li><li><strong>Best Lag row</strong> — The key takeaway. Example: "SPY: lag 2d, r=+0.35" means Trump\'s rhetoric from 2 days ago is the strongest predictor of SPY today. You have a 2-day window to position.</li><li><strong>How to use</strong>: If BTC has best lag at t-0 with r=+0.28, crypto reacts same-day — no lead time. If SPY is at t-2, you have 2 days to position after a mood shift. Correlations beyond t-3 are usually weak — rhetoric impact fades after ~3 days.</li></ul>' },
+            { heading: 'Policy Reversal Timeline', body: 'Detailed list of detected policy reversals (TACOs). Shows: policy area, original stance, new stance, days to reversal, mood swing, market impact direction (bullish/bearish), and confidence. Useful for understanding Trump\'s reversal patterns — historically he reverses tariff threats within 5-14 days.' },
+        ],
+    },
+    watchdog: {
+        title: 'ThunderBot — User Guide',
+        sections: [
+            { heading: 'What It Does', body: 'Combines market regime analysis with swing trade signals and automated paper trading. Monitors SPY, QQQ, and your custom watchlist using a 3-axis regime score.' },
+            { heading: 'Market Regime', body: '<ul><li><strong>3 Axes</strong>: Market Structure (45%), Sentiment (25%), Technical (30%)</li><li><strong>RISK-ON</strong> (green, 70+) — Full trading, all signals active</li><li><strong>NEUTRAL</strong> (yellow, 50-70) — Trade with caution</li><li><strong>RISK-OFF</strong> (orange, 30-50) — Reduced confidence on BUY signals</li><li><strong>DANGER</strong> (red, <30) — No new trades, BUY → HEDGE override</li></ul>' },
+            { heading: 'Swing Signals', body: '5 strategies: <strong>VCP</strong> (volatility contraction), <strong>HTF</strong> (high tight flag), <strong>Breakout</strong> (20-day high + volume), <strong>Earnings Gap</strong> (5%+ gap holding), <strong>Trend Pullback</strong> (EMA20 bounce in uptrend). Signals are color-coded: BUY (green), HEDGE (orange), WATCH (gray), SELL/AVOID (red).' },
+            { heading: 'Screener Integration', body: 'Watchdog now automatically pulls high-confidence candidates from the Screener (gainers, AI, midcap, largecap) and runs them through an LLM vet + swing signal analysis. These appear with a [Screener: ...] tag in their reasoning.' },
+            { heading: 'Options Flow — Calls vs Puts', body: '<ul><li><strong>Real-time tracker</strong> for SPY and QQQ options. Fetches call/put volumes every 30 seconds.</li><li><strong>P/C Ratio chart</strong> — Line chart with BEARISH zone (>1.2, red shading) and BULLISH zone (<0.7, green shading). Blue line = SPY, Gold line = QQQ.</li><li><strong>Shift notifications</strong> — Alerts when the P/C ratio crosses thresholds (puts overtaking calls or vice versa). Browser notifications if permitted.</li><li><strong>How to use</strong>: P/C ratio >1.2 = bearish options flow (more puts), signals market expects downside. P/C ratio <0.7 = bullish (more calls). Watch for sudden ratio surges as they precede price moves.</li></ul>' },
+            { heading: 'Auto-Trader', body: 'Paper trading via Alpaca. Buy window: 9:30-10:30 AM CST only. Exit rules: 4-7% profit take, stop-loss, 14-day max hold. Regime gates prevent trading in DANGER mode. All trades are backtested against recent price history before execution.' },
+            { heading: 'Pre-Trade Backtest', body: 'Before every trade, the bot simulates the signal at each of the last 5 price bars with the same SL/TP levels. If the backtest shows the signal would have lost money recently (win rate <30% AND negative avg P&L), the trade is blocked. This prevents repeating recent losing patterns.' },
+        ],
+    },
+    congress: {
+        title: 'Congress Trades — User Guide',
+        sections: [
+            { heading: 'What It Does', body: 'Tracks US Congress member stock trades from official STOCK Act disclosures. House data comes from official PTR filings (PDFs); Senate data from news aggregation and QuiverQuant API.' },
+            { heading: 'How to Use', body: '<ol><li>Filter by Chamber (House/Senate), member name, state, ticker, or time period</li><li>Click <strong>Search</strong> to load data (first scan takes 15-30s for PDF parsing)</li></ol>' },
+            { heading: 'Reading the Data', body: '<ul><li><strong>Hot Tickers</strong> — Most-traded securities by politicians. Bar chart shows buy/sell split.</li><li><strong>Top Buys/Sells</strong> — Largest trades by dollar value (e.g., $1M+ purchases).</li><li><strong>Stats</strong> — House vs Senate trade counts, unique members, top traders by volume.</li><li><strong>Trade Table</strong> — Full list with date, name, ticker, type (Purchase/Sale), amount range, state, chamber, and PDF link to the original filing.</li></ul>' },
+            { heading: 'Tips', body: 'Congressional trades are reported 30-45 days after execution. Track which tickers multiple members are buying — convergence = strong signal. Nancy Pelosi\'s trades historically correlate with 30-day returns.' },
+        ],
+    },
+    'smart-money': {
+        title: 'Smart Money Tracker — User Guide',
+        sections: [
+            { heading: 'What It Does', body: 'Tracks the top 20 hedge funds and 20 most notable investors using SEC 13F filings (quarterly institutional holdings reports). Shows where the "smart money" is moving capital — new positions, increased stakes, and sells.' },
+            { heading: 'Data Sources', body: '<ul><li><strong>SEC EDGAR 13F-HR</strong> — Quarterly filings required for all institutions managing $100M+. Updated within 45 days of quarter-end.</li><li><strong>Holdings parsed</strong> — Company name, shares, value (in thousands), put/call type</li><li><strong>Change detection</strong> — Compares current filing to previous filing to detect NEW, INCREASED, REDUCED, or HELD positions</li><li><strong>Daily refresh</strong> — The system checks for new filings every 24 hours</li></ul>' },
+            { heading: 'Convergence Signals', body: 'The most powerful feature. When <strong>2+ funds are building positions in the same ticker</strong>, it appears as a convergence signal. ACCUMULATING (green) = multiple funds buying. DISTRIBUTING (red) = multiple funds selling. MIXED = split. Higher fund count = stronger signal.' },
+            { heading: 'Hot Tickers', body: 'Tickers held across the most funds, with buy/sell breakdown. A ticker held by 10+ funds with mostly buys = strong institutional conviction.' },
+            { heading: 'Fund List', body: 'Click any fund to drill into their full portfolio: every holding with ticker, company, value, shares, % of portfolio, action (NEW/INCREASED/REDUCED/HELD), and % change from prior filing.' },
+            { heading: 'Top 20 Investors', body: 'Notable traders linked to their fund entities. Click to view their holdings. Includes: Warren Buffett, Ray Dalio, Ken Griffin, Jim Simons, Steve Cohen, Bill Ackman, David Tepper, Carl Icahn, George Soros, Seth Klarman, Dan Loeb, David Einhorn, Chase Coleman, Philippe Laffont, Andreas Halvorsen, Israel Englander, Paul Singer, Nancy Pelosi, Michael Burry, Cathie Wood.' },
+            { heading: 'Tips', body: '<ul><li>13F filings are reported quarterly with a 45-day lag — these show where smart money <strong>was</strong>, not where it is now. Use as directional bias, not timing.</li><li>Convergence signals across 3+ funds = high conviction. These tend to outperform.</li><li>Watch for NEW positions — these are fresh ideas, not legacy holdings.</li><li>Reduced positions with high % change (>50% sold) = strong exit signal.</li><li>Compare with Congress trades for double-confirmation (politician + institutional buying).</li></ul>' },
+        ],
+    },
+    predictions: {
+        title: 'Markets & Predictions — User Guide',
+        sections: [
+            { heading: 'What It Does', body: 'Aggregated market predictions and price targets. Shows consensus forecasts from multiple models and analysts.' },
+            { heading: 'How to Use', body: 'Browse prediction markets for various assets. Check the confidence level and supporting rationale. Higher confidence with multiple agreeing sources = stronger signal.' },
         ],
     },
     screener_default: {

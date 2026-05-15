@@ -1,0 +1,1248 @@
+<mxfile host="app.diagrams.net" modified="2026-04-29T20:00:00.000Z" agent="claude-code" version="24.0.0">
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 1 — System Architecture (high-level)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="arch-overview" name="1. System Architecture">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Title -->
+        <mxCell id="title-1" value="AI Stock Analyst — System Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- ════ FRONTEND (top band) ════ -->
+        <mxCell id="frontend-band" value="FRONTEND  (vanilla JS, no bundler)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="1420" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-tradingview" value="TradingView&#10;Lightweight Charts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="160" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-analysis" value="Analysis Tab&#10;(SPA, Alpine-style)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="240" y="100" width="160" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-screener" value="Screener Tab&#10;Lowcap/Midcap/Largecap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="420" y="100" width="160" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-bots" value="Bot Tabs&#10;Crypto · Stock · Claude · Watchdog" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="600" y="100" width="200" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-tracker" value="Tracker Tab&#10;Bot Trades + Journal + Goals" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="820" y="100" width="180" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-admin" value="Admin Tab&#10;Users · Defaults · Tiers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1020" y="100" width="160" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-options" value="Options Flow&#10;(SSE stream)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1200" y="100" width="140" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="fe-settings" value="Settings Modal&#10;(per-user keys)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1360" y="100" width="100" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- ════ NGINX (between frontend and backend) ════ -->
+        <mxCell id="nginx" value="nginx (TLS, reverse proxy, /static)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="190" width="1420" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- ════ BACKEND (Flask + gunicorn) ════ -->
+        <mxCell id="backend-band" value="BACKEND  (Flask 3.x · gunicorn workers=1 threads=8 · NO --preload)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="240" width="1420" height="270" as="geometry"/>
+        </mxCell>
+
+        <!-- Auth + decorators -->
+        <mxCell id="be-auth" value="auth.py&#10;Flask-Login · Google OAuth · TOTP&#10;@login_required @admin_required @trader_required" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="270" width="320" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-rl" value="rate_limiter.py&#10;LLM quotas + bot_access gate&#10;invite-only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="400" y="270" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-db" value="db.py · crypto_utils.py&#10;PostgreSQL (prod) / SQLite (dev)&#10;Fernet for user_api_keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="640" y="270" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-billing" value="billing_bp · subscriptions.py&#10;Stripe (free / starter / pro)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="900" y="270" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-status" value="status_checker · healthz&#10;self-healing on hang&#10;auto bot restart" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1140" y="270" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Feature blueprints -->
+        <mxCell id="be-analysis" value="features/analysis&#10;analysis_engine.py&#10;ai_validator.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="350" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-screener" value="features/screener&#10;screener.py&#10;multi-cat scanner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="240" y="350" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-tracker" value="features/tracker&#10;Bot Trades + Journal&#10;source-filtered" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="420" y="350" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-watchdog" value="features/watchdog&#10;engine.py · regime · signals&#10;options_flow.py (SSE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="600" y="350" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-admin" value="features/admin&#10;Users · Tiers · Bot defaults&#10;@admin_required" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="810" y="350" width="190" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-user" value="features/user&#10;/api/me · /api/settings&#10;encrypted broker keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1010" y="350" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="be-misc" value="ipo · status · congress&#10;smart_money · backtest&#10;trump_mood · skills" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1200" y="350" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Background: bots -->
+        <mxCell id="bots-band" value="BACKGROUND THREADS  (auto-restart on container start via _auto_start_bots)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="430" width="1420" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="bot-crypto" value="Crypto Bot&#10;crypto_bot/bot_engine.py&#10;BloFin paper (USDT pairs)&#10;9 strategies + self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="455" width="240" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="bot-stock" value="Stock Bot&#10;stock_bot/stock_engine.py&#10;Alpaca / Webull paper" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="320" y="455" width="240" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="bot-claude" value="Claude Bot&#10;claude_bot/bot_engine.py&#10;Stocks · paper or LIVE (cb_mode)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="580" y="455" width="240" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="bot-watchdog" value="Watchdog Bot&#10;features/watchdog/engine.py&#10;Day-trader · 9:30-11 ET · EOD close 3:55 PM ET" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="840" y="455" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="bot-flow" value="Options Flow Scanner&#10;watchdog/options_flow.py&#10;global · SSE broadcast" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1140" y="455" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ════ DATA STORES ════ -->
+        <mxCell id="data-band" value="DATA STORES" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="535" width="700" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="data-pg" value="PostgreSQL 16&#10;all tables (users, bot_*, screener_results,&#10;user_api_keys, journal_entries, …)&#10;~30 tables, ON DELETE CASCADE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d79b00;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="565" width="290" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="data-cache" value="In-memory caches&#10;_cache (engine), _flow_cache,&#10;screener_cache, signal cache TTL=30m" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d79b00;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="370" y="565" width="350" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- ════ EXTERNAL APIS ════ -->
+        <mxCell id="ext-band" value="EXTERNAL APIS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="760" y="535" width="700" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext-yf" value="yfinance&#10;OHLCV · fast_info · options chain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="780" y="565" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext-or" value="OpenRouter&#10;LLM gateway (8+ models)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="990" y="565" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext-brokers" value="Alpaca · Webull · BloFin&#10;paper / live (per-user)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1200" y="565" width="240" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext-news" value="GDELT 2.0 · Reddit JSON · Nitter RSS&#10;news + social sentiment (24h window)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="780" y="615" width="320" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext-stripe" value="Stripe · Google OAuth&#10;billing + auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1110" y="615" width="200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ext-trump" value="trump_forecaster.py&#10;Truth Social mood RSS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1320" y="615" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="Color key:&#10;blue = frontend · green = backend · red = bot threads · orange = data · purple = external" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="680" width="700" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Key arrows: frontend → backend, backend → DB, backend → external -->
+        <mxCell id="e1" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#999;dashed=1" edge="1" parent="1" source="frontend-band" target="nginx">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#999;dashed=1" edge="1" parent="1" source="nginx" target="backend-band">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="endArrow=classic;html=1;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#999" edge="1" parent="1" source="backend-band" target="data-pg">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" style="endArrow=classic;html=1;exitX=0.7;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#999" edge="1" parent="1" source="backend-band" target="ext-band">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 2 — LLM Models Map (which model → which feature)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="llm-pipeline" name="2. LLM Pipeline">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="900">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="t-2" value="LLM Pipeline — Where Each Model Runs" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-2b" value="All requests go through OpenRouter (single API key) — env vars override defaults. Bots also hit Ollama locally for sentiment as a fallback." style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1420" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- OpenRouter hub -->
+        <mxCell id="openrouter" value="OpenRouter API&#10;(single key, model name passed per call)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="600" y="380" width="280" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Models — left column (Anthropic/Claude) -->
+        <mxCell id="m-sonnet" value="claude-sonnet-4-6&#10;LLM_RESEARCH (default)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="120" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-opus" value="claude-opus-4-6&#10;LLM_SKILL_EARNINGS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="190" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Models — Google -->
+        <mxCell id="m-gem-pro" value="gemini-2.5-pro-preview&#10;LLM_PATTERN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="270" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-gem-flash" value="gemini-2.5-flash&#10;LLM_RESEARCH_FAST · LLM_SCREENER · LLM_BOT_SENTIMENT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="340" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Models — DeepSeek -->
+        <mxCell id="m-deepseek" value="deepseek-chat-v3-0324&#10;LLM_PREDICTION · LLM_BOT_RISK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="430" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Models — Other -->
+        <mxCell id="m-nemotron" value="nemotron-3-super-120b&#10;LLM_SKILL (default)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="100" y="500" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="m-supervisor" value="LLM_SUPERVISOR (optional)&#10;empty by default — disables&#10;cross-model arbitration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#999;fontSize=11;dashed=1" vertex="1" parent="1">
+          <mxGeometry x="100" y="570" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Local Ollama -->
+        <mxCell id="m-ollama" value="Ollama (LOCAL)&#10;llama3.1:8b&#10;sentiment fallback when&#10;OpenRouter timeouts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="100" y="660" width="220" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Features — right column -->
+        <mxCell id="f-analyze" value="Analyze Ticker (analysis_engine.py)&#10;3 models in parallel:&#10;Research → Pattern → Prediction&#10;+ optional Supervisor merge" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="100" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="f-screener" value="Screener (screener.py)&#10;Vets each candidate&#10;Lowcap / Midcap / Largecap / ETF / Crypto / AI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="200" width="320" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f-cb" value="Claude Bot (claude_bot/bot_engine.py)&#10;_llm_validate() · approves entries&#10;OPENROUTER_MODEL_GATING → RESEARCH" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="290" width="320" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f-cv" value="Crypto/Stock Validators&#10;sentiment + risk in parallel&#10;Ollama (local) + OpenRouter consensus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="380" width="320" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f-watchdog" value="Watchdog (_llm_vet_watchdog_candidate)&#10;OPENROUTER_MODEL_RESEARCH&#10;parallel ThreadPoolExecutor (5 workers)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="470" width="320" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f-news" value="News Sentiment Tagging&#10;(client-side regex; no LLM)&#10;Bullish / Bearish / Neutral classifier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;dashed=1" vertex="1" parent="1">
+          <mxGeometry x="1080" y="560" width="320" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f-skills" value="Skills Hub (financial-analysis · IB · ER · PE)&#10;DCF / LBO / Comps / Earnings / Pitch decks&#10;LLM_SKILL routes per skill" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="650" width="320" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges: each model → openrouter -->
+        <mxCell id="le1" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;strokeColor=#9673a6" edge="1" parent="1" source="m-sonnet" target="openrouter"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="le2" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;strokeColor=#9673a6" edge="1" parent="1" source="m-opus" target="openrouter"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="le3" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6" edge="1" parent="1" source="m-gem-pro" target="openrouter"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="le4" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.6;entryDx=0;entryDy=0;strokeColor=#9673a6" edge="1" parent="1" source="m-gem-flash" target="openrouter"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="le5" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;strokeColor=#9673a6" edge="1" parent="1" source="m-deepseek" target="openrouter"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="le6" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.8;entryDx=0;entryDy=0;strokeColor=#9673a6" edge="1" parent="1" source="m-nemotron" target="openrouter"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- Edges: openrouter → features -->
+        <mxCell id="re1" style="endArrow=classic;html=1;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="openrouter" target="f-analyze"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re2" style="endArrow=classic;html=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="openrouter" target="f-screener"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re3" style="endArrow=classic;html=1;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="openrouter" target="f-cb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re4" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="openrouter" target="f-cv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re5" style="endArrow=classic;html=1;exitX=1;exitY=0.6;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="openrouter" target="f-watchdog"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re7" style="endArrow=classic;html=1;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="openrouter" target="f-skills"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- Ollama → CV (local fallback) -->
+        <mxCell id="re6" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;strokeColor=#9673a6;dashed=1" edge="1" parent="1" source="m-ollama" target="f-cv"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 3 — Logical Data Model
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="logical-model" name="3. Logical Data Model">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="900">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="t-3" value="Logical Data Model — Entity Relationships" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- USER -->
+        <mxCell id="ent-user" value="User&#10;(identity, auth, session)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;spacingTop=8" vertex="1" parent="1">
+          <mxGeometry x="640" y="80" width="220" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- direct user-owned -->
+        <mxCell id="ent-roles" value="UserRole&#10;admin / trader / user" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="80" y="200" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-keys" value="UserApiKey&#10;encrypted broker / LLM keys&#10;(provider, key_name, fernet)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="80" y="280" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-sub" value="Subscription&#10;tier (free/starter/pro)&#10;bot_access (csv list)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="80" y="370" width="200" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- bot config / behavior -->
+        <mxCell id="ent-cfg" value="BotConfig&#10;(user_id, key, value)&#10;user_id=0 → global default" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="340" y="200" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-trade" value="BotTrade&#10;asset_type ∈ {crypto, stock, claude, watchdog}&#10;side, size, entry, exit, pnl, status&#10;strategy, signal_reason" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="340" y="300" width="280" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-pnl" value="BotDailyPnL&#10;rolled-up daily totals" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="340" y="420" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-log" value="BotLog&#10;level, message, source" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="340" y="500" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-reentry" value="BotReentryWatch&#10;recently-closed tickers&#10;eligible for re-entry" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="340" y="580" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- analysis / journal -->
+        <mxCell id="ent-search" value="Search&#10;cached analysis (3-day TTL)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="660" y="200" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-journal" value="JournalEntry&#10;manual notes only&#10;(bots no longer auto-write)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="660" y="280" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-goal" value="WeeklyGoal&#10;target vs actual" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="660" y="370" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-acct" value="AccountConfig&#10;balance, ramp targets" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="660" y="430" width="220" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-llmusg" value="LLMUsageLog&#10;per-call quota tracking" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="660" y="490" width="220" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- shared / system -->
+        <mxCell id="ent-screener" value="ScreenerResult&#10;(scan_date, category, ticker,&#10;verdict, confidence)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="200" width="240" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-oversold" value="OversoldDaily&#10;persistent oversold tracker" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="300" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-trump" value="TrumpMood / Predictions / Backtracks&#10;(non-user-scoped)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="380" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-whale" value="Whale entities/holdings/activity&#10;Smart Money tracker" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="460" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-svc" value="ServiceCheck / Incident&#10;background health monitor" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="540" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-watchdog" value="WatchdogSnapshot · Signals · PaperTrades&#10;regime + signal history" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="620" width="240" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Skill jobs -->
+        <mxCell id="ent-skill" value="SkillJob&#10;async LLM-driven skills&#10;(IB / ER / PE / WM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="1240" y="200" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-support" value="SupportRequest&#10;in-app help tickets" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="1240" y="290" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-trial" value="TrialFingerprint&#10;abuse prevention" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="1240" y="370" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ent-invite" value="Invite&#10;email-based invite-only" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="1240" y="440" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Relationships from User (1:N) -->
+        <mxCell id="re-1" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;startSize=8;endSize=8;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-roles"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-2" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-keys"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-3" value="1:1" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-sub"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-4" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-cfg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-5" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#b85450;strokeWidth=2" edge="1" parent="1" source="ent-user" target="ent-trade"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-6" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-pnl"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-7" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-log"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-8" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-reentry"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-9" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-search"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-10" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-journal"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-11" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-goal"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-12" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-acct"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-13" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-llmusg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-14" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-skill"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="re-15" value="1:N" style="endArrow=classic;html=1;startArrow=classicThin;strokeColor=#666" edge="1" parent="1" source="ent-user" target="ent-support"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="legend-3" value="bold red = primary trade history table — feeds Tracker UI, Bot dashboard, daily P&amp;L roll-up.&#10;All user-scoped FKs ON DELETE CASCADE.&#10;Yellow tables are non-user (system / shared market data)." style="text;html=1;strokeColor=none;fillColor=none;align=left;whiteSpace=wrap;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="80" y="720" width="1000" height="60" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 4 — Physical Data Model (key tables, columns, FKs)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="physical-model" name="4. Physical Data Model">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="900">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="t-4" value="Physical Data Model — Key Tables (Postgres + SQLite parity)" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- users -->
+        <mxCell id="tab-users" value="users" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="320" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-users-cols" value="PK  id (SERIAL / INTEGER)&#10;UQ  email TEXT NOT NULL&#10;       name TEXT&#10;       google_id TEXT&#10;       picture_url TEXT&#10;       password_hash TEXT&#10;       totp_secret TEXT (encrypted)&#10;       is_locked BOOLEAN DEFAULT false&#10;       created_at TIMESTAMP&#10;       last_login TIMESTAMP&#10;&#10;Sentinel: id=0 = global bot defaults" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="50" y="110" width="300" height="180" as="geometry"/>
+        </mxCell>
+
+        <!-- bot_trades (the core) -->
+        <mxCell id="tab-trades" value="bot_trades  ⟵  PRIMARY TRADE LEDGER" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="400" y="80" width="380" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-trades-cols" value="PK   id  SERIAL&#10;FK   user_id → users(id) ON DELETE CASCADE&#10;        coin TEXT  (ticker for stocks)&#10;        side TEXT  (buy / sell / long / short)&#10;        size REAL&#10;        entry_price REAL&#10;        exit_price REAL  (NULL when open)&#10;        pnl REAL · pnl_pct REAL · fee REAL&#10;        status TEXT  (open / closed / killed)&#10;        signal_reason TEXT · validation_result TEXT(json)&#10;        stop_loss REAL · take_profit REAL&#10;        opened_at TIMESTAMP · closed_at TIMESTAMP&#10;        blofin_order_id TEXT · strategy TEXT&#10;        asset_type TEXT  ⟵  crypto / stock / claude / watchdog&#10;        direction_bias TEXT · regime_at_entry TEXT&#10;&#10;IDX  (user_id, status, asset_type)&#10;IDX  (user_id, closed_at) WHERE status='closed'" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="410" y="110" width="360" height="240" as="geometry"/>
+        </mxCell>
+
+        <!-- bot_config -->
+        <mxCell id="tab-cfg" value="bot_config  (per-user knobs · user_id=0 = global)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="820" y="80" width="320" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-cfg-cols" value="PK   (user_id, key)&#10;FK   user_id → users(id) ON DELETE CASCADE&#10;        key   TEXT     e.g. cb_mode, cb_broker,&#10;                       cb_take_profit_pct, wd_enabled&#10;        value TEXT     stringly typed&#10;&#10;Resolver: ORDER BY CASE WHEN user_id = 0&#10;          THEN 1 ELSE 0 END LIMIT 1&#10;          → user value wins, falls back to&#10;            global (sentinel id=0), then code default" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="830" y="110" width="300" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- user_api_keys -->
+        <mxCell id="tab-keys" value="user_api_keys  (encrypted broker / LLM creds)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1180" y="80" width="280" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-keys-cols" value="PK   id&#10;UQ   (user_id, provider, key_name)&#10;FK   user_id → users(id) CASCADE&#10;        provider  TEXT (alpaca|webull|blofin|openrouter)&#10;        key_name  TEXT (api_key|secret_key|app_key|...)&#10;        encrypted_value TEXT (Fernet)&#10;        updated_at TIMESTAMP&#10;&#10;Read via: shared.helpers.get_user_api_keys()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="1190" y="110" width="260" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- screener_results -->
+        <mxCell id="tab-screener" value="screener_results  (multi-day scan history)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="320" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-screener-cols" value="PK   id  SERIAL&#10;        category   TEXT  (lowcap|midcap|largecap|...)&#10;        scan_date  TEXT  (YYYY-MM-DD)&#10;        ticker     TEXT&#10;        verdict    TEXT&#10;        confidence REAL  0-100&#10;        summary    TEXT&#10;        sector     TEXT · name TEXT&#10;        market_cap NUMERIC · price REAL&#10;        data_json  TEXT&#10;&#10;Watchdog reads ≥2 daily appearances&#10;→ tags as &quot;PERSISTENT-Nd&quot;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="50" y="350" width="300" height="160" as="geometry"/>
+        </mxCell>
+
+        <!-- bot_log -->
+        <mxCell id="tab-log" value="bot_log  (per-bot activity stream)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="400" y="380" width="380" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-log-cols" value="PK   id&#10;FK   user_id → users(id) CASCADE&#10;        level    TEXT  (info|warn|error)&#10;        message  TEXT  (max 500)&#10;        details  TEXT  (json)&#10;        source   TEXT  (crypto|stock|claude|watchdog|options_flow)&#10;        created_at TIMESTAMP&#10;&#10;Cleaned to last 7 days on _startup_cleanup" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="410" y="410" width="360" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- journal_entries -->
+        <mxCell id="tab-journal" value="journal_entries  (manual notes only)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="820" y="280" width="320" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-journal-cols" value="PK   id&#10;FK   user_id → users(id) CASCADE&#10;        ticker TEXT&#10;        action TEXT (BUY|SELL)&#10;        entry_price REAL · exit_price REAL&#10;        shares REAL · pnl REAL · notes TEXT&#10;        created_at TIMESTAMP&#10;&#10;/api/journal filters out notes LIKE &apos;[%Bot]%&apos;&#10;to hide legacy bot-auto-logged rows&#10;(bots no longer write here as of Apr 2026)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="830" y="310" width="300" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- bot_daily_pnl -->
+        <mxCell id="tab-pnl" value="bot_daily_pnl  (rolled-up daily totals)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1180" y="280" width="280" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-pnl-cols" value="UQ   (user_id, date)&#10;FK   user_id → users(id) CASCADE&#10;        date            DATE&#10;        total_pnl       REAL&#10;        trade_count     INT&#10;        win_count       INT&#10;        loss_count      INT&#10;&#10;Updated by bot engines after each close.&#10;Powers /api/bot/dashboard period summaries." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="1190" y="310" width="260" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- searches -->
+        <mxCell id="tab-search" value="searches" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="540" width="320" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-search-cols" value="PK   id&#10;FK   user_id → users(id) CASCADE&#10;        ticker TEXT&#10;        period TEXT · interval_val TEXT&#10;        result_json TEXT  (analysis cache)&#10;        created_at TIMESTAMP · expires_at TIMESTAMP&#10;&#10;3-day TTL · powers analysis history sidebar" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="50" y="570" width="300" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- llm_usage_log -->
+        <mxCell id="tab-llmlog" value="llm_usage_log" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="400" y="560" width="380" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-llmlog-cols" value="PK   id&#10;FK   user_id → users(id) CASCADE&#10;        call_source TEXT (analyze|validate|predict|...)&#10;        call_count  INT&#10;        model       TEXT · tokens INT · cost_usd NUMERIC&#10;        created_at  TIMESTAMP&#10;&#10;Cleaned to last 30 days at _startup_cleanup&#10;Per-tier rate limits read this for quota gates" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="410" y="590" width="360" height="130" as="geometry"/>
+        </mxCell>
+
+        <!-- watchdog snapshots -->
+        <mxCell id="tab-wd" value="watchdog_snapshots / signals / paper_trades" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="820" y="500" width="320" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-wd-cols" value="snapshots:  composite regime score by minute&#10;signals:    BUY/HEDGE/SELL/WATCH/AVOID rows&#10;            ticker, signal, confidence, reasoning&#10;paper_trades: legacy table (replaced by&#10;            bot_trades with asset_type=&apos;watchdog&apos;)&#10;&#10;Note: actual day-trader trades go into&#10;      bot_trades — these are scan history." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="830" y="530" width="300" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- non-user system tables -->
+        <mxCell id="tab-sys" value="System tables  (no user FK — global)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1180" y="500" width="280" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="tab-sys-cols" value="invites          PK email · role · bot_access&#10;service_checks   service_name · status · checked_at&#10;service_incidents started_at · resolved_at&#10;trump_mood_history    daily mood rows&#10;trump_market_predictions&#10;trump_backtracks · trump_forecast_weights&#10;whale_entities · whale_holdings · whale_activity&#10;trial_fingerprints      anti-abuse&#10;oversold_daily          persistent oversold cache&#10;backtest_runs           strategy backtest results" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="1190" y="530" width="260" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- FK arrows -->
+        <mxCell id="fk-1" style="endArrow=open;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;strokeColor=#b85450;strokeWidth=2" edge="1" parent="1" source="tab-users" target="tab-trades">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="fk-2" style="endArrow=open;html=1;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#b85450" edge="1" parent="1" source="tab-users" target="tab-cfg">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="fk-3" style="endArrow=open;html=1;exitX=0.7;exitY=1;exitDx=0;exitDy=0;entryX=0.7;entryY=0;entryDx=0;entryDy=0;strokeColor=#82b366" edge="1" parent="1" source="tab-users" target="tab-search">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="legend-4" value="Color key:  blue = identity · red = bot trade core · green = analysis/journal · yellow = market data · purple = system" style="text;html=1;strokeColor=none;fillColor=none;align=left;whiteSpace=wrap;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="730" width="1400" height="20" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 5 — Bot Trade Flow (one cycle, end-to-end)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="trade-flow" name="5. Bot Trade Flow">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="900">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="t-5" value="Bot Scan-to-Execution Flow (per bot, per cycle)" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Steps -->
+        <mxCell id="s-trigger" value="1. Trigger&#10;Auto-trader thread sleeps&#10;cb_scan_interval (default 300s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-precheck" value="2. Pre-flight checks&#10;• kill_switch on?&#10;• daily_loss_limit breached?&#10;• inside buy window? (Watchdog 9:30-11 ET)&#10;• regime DANGER → skip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="320" y="100" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-universe" value="3. Build candidate universe&#10;• static watchlist (bot_config.wd_watchlist)&#10;• screener candidates (≥2 days persist)&#10;• large-cap qullamaggie (score ≥ 7)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="620" y="100" width="280" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-data" value="4. Fetch market data&#10;yfinance batch download (period=1y)&#10;skip tickers missing from batch (delisted)&#10;regime score cached 30m" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="940" y="100" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-signal" value="5. Signal generation&#10;_detect_swing_setup() per ticker&#10;Volume + RSI + MACD + ATR&#10;Strategies: VCP / HTF / Breakout / RSI Reversal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="1240" y="100" width="220" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Row 2 -->
+        <mxCell id="s-llm" value="6. LLM vetting&#10;_llm_vet_watchdog_candidate() (parallel via ThreadPoolExecutor)&#10;Uses LLM_RESEARCH model · regime + setup + screener data → approve/skip&#10;Cached so retries hit warm decision" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="60" y="220" width="500" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-blacklist" value="7. Self-learning gate&#10;Strategy in blacklisted_strategies?&#10;(perm: ema_trend; auto: n≥10 + WR&lt;25% + net&lt;0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="600" y="220" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-risk" value="8. Risk gates&#10;max_positions · max_position_pct · already_holding?&#10;has_pdt? (stocks) · market_hours? · price plausible?&#10;sanity guardrail: |mark/entry-1| &gt; 1.0 → reject" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="960" y="220" width="500" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Row 3 - execution -->
+        <mxCell id="s-broker" value="9. Resolve broker&#10;_get_broker(user_id) → reads cb_broker, cb_mode&#10;Loads encrypted user_api_keys for that provider&#10;Falls back to env vars if user keys missing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="60" y="340" width="380" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-size" value="10. Position sizing&#10;equity × max_position_pct × size_factor&#10;shares = max(1, target_usd / price)&#10;(int rounding — fractional not yet supported)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="480" y="340" width="380" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-place" value="11. Place order&#10;BloFin client (crypto) / Alpaca / Webull (stocks)&#10;paper=True default · paper=False if cb_mode=&apos;live&apos;&#10;Returns order_id or PAPER-LOCAL fallback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="900" y="340" width="380" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s-write" value="12. Persist&#10;INSERT bot_trades&#10;UPDATE bot_daily_pnl&#10;_log() → bot_log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" vertex="1" parent="1">
+          <mxGeometry x="1320" y="340" width="140" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Row 4 - exits (separate path running every cycle) -->
+        <mxCell id="exits-band" value="EXIT CHECK (runs every cycle alongside entries)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="60" y="460" width="1400" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="x-1" value="EOD force-close&#10;15:55 ET weekday&#10;(Watchdog only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="80" y="495" width="180" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="x-2" value="Stop-loss / TP&#10;cb_hard_stop_pct, cb_take_profit_pct&#10;trailing stop (50% retrace)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="280" y="495" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="x-3" value="48h hard hold cap&#10;regardless of P&amp;L&#10;(prevents capital lockup)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="520" y="495" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="x-4" value="RSI overbought lock-in&#10;RSI &gt; 60 + profit &gt; 0.5%" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="740" y="495" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="x-5" value="Implausible-price guard&#10;|mark/entry−1| &gt; 1.0&#10;reject close, retry next cycle" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="960" y="495" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="x-6" value="Manual close button&#10;(per-trade UI control)&#10;sanity guard same as auto" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1200" y="495" width="240" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Row 5 - tracker / dashboard -->
+        <mxCell id="dash-band" value="POST-TRADE: surfaced to user" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="60" y="610" width="1400" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="d-1" value="Tracker tab&#10;/api/tracker/bot-trades&#10;source filter (crypto/stock/claude/watchdog)&#10;overall scopes to filter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="80" y="640" width="280" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d-2" value="Bot dashboard&#10;/api/bot/dashboard?asset=...&#10;period summaries · streaks · daily goal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="380" y="640" width="280" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d-3" value="Open trades panel&#10;Close button + live unrealized P&amp;L&#10;(yfinance fast_info batched)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="680" y="640" width="280" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d-4" value="bot_log → activity feed&#10;Admin export CSV&#10;(admin-only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="980" y="640" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d-5" value="Self-learning loop&#10;reads last 14d closed trades&#10;updates blacklist + position scale" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1240" y="640" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- arrows linking the rows -->
+        <mxCell id="ax-1" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-trigger" target="s-precheck"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-2" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-precheck" target="s-universe"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-3" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-universe" target="s-data"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-4" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-data" target="s-signal"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-5" style="endArrow=classic;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#666" edge="1" parent="1" source="s-signal" target="s-llm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-6" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-llm" target="s-blacklist"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-7" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-blacklist" target="s-risk"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-8" style="endArrow=classic;html=1;exitX=0.3;exitY=1;entryX=0.5;entryY=0;strokeColor=#666" edge="1" parent="1" source="s-risk" target="s-broker"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-9" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-broker" target="s-size"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-10" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-size" target="s-place"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ax-11" style="endArrow=classic;html=1;strokeColor=#666" edge="1" parent="1" source="s-place" target="s-write"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="footer-5" value="Color key: blue = pre-flight · yellow = LLM/learning gates · green = execution · red = exit checks · purple = user-facing surfaces" style="text;html=1;strokeColor=none;fillColor=none;align=left;whiteSpace=wrap;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="60" y="730" width="1400" height="20" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 6 — Crypto Bot Detailed Flow
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="crypto-bot" name="6. Crypto Bot — Detailed">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="1100">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="cb-title" value="Crypto Bot — Scalp + Swing on BloFin (paper)" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-sub" value="crypto_bot/bot_engine.py · trade_mode = scalp | swing | hybrid · scan_interval default 300s" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1420" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- Inputs -->
+        <mxCell id="cb-inputs" value="INPUTS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="380" height="320" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-i1" value="selected_coins (bot_config)&#10;BTC-USDT · ETH-USDT · SOL · DOGE&#10;AVAX · DOT · LINK · ATOM · SUI · LTC&#10;(MATIC removed Apr 2026, delisted)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="340" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-i2" value="yfinance OHLCV&#10;daily for swing (period=3mo)&#10;hourly for scalp&#10;dropna() before calculate_indicators" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="190" width="340" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-i3" value="market_sensor (regime check)&#10;BTC trend / ETH dominance / VIX&#10;Returns: BULLISH / NEUTRAL / CAUTION / DANGER" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="260" width="340" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-i4" value="_get_adaptive_params()&#10;14-day rolling stats per strategy&#10;blacklisted_strategies / hot_strategies&#10;cautious_coins / position_scale / min_confidence" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="330" width="340" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Strategies -->
+        <mxCell id="cb-strats" value="9 SIGNAL STRATEGIES (in _generate_signal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="440" y="90" width="600" height="540" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s1" value="1. macd_cross&#10;MACD bullish/bearish crossover + RSI confirm + price/EMA20" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="120" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s2" value="2. ema_trend (PERMANENTLY BLACKLISTED — 9.8% WR over 51 trades)&#10;SMA8/EMA20 crossover + RSI + MACD" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;dashed=1" vertex="1" parent="1">
+          <mxGeometry x="460" y="170" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s3" value="3. rsi_reversion&#10;RSI overbought (&gt;70) + MACD turn down + below SMA8 → SELL&#10;RSI oversold (&lt;30) + MACD turn up + above SMA8 → BUY" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="220" width="560" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s4" value="4. momentum&#10;Price &gt; SMA50 + volume surge (rel_vol &gt; 1.5x) + RSI in 50-70 zone" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="285" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s5" value="5. bb_reversion (Bollinger Bands mean reversion)&#10;Price touches BB lower + RSI&lt;35 + MACD turning up → BUY (or symmetric SELL)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="335" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s6" value="6. grid_reversion&#10;Price 4x ATR below/above SMA50 in established trend (uptrend pullback / downtrend rally)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="385" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s7" value="7. trend_dca&#10;Pullback to EMA20 in uptrend (SMA50&gt;200) → BUY · rally to EMA20 in downtrend → SELL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="435" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s8" value="8. doji_reversal&#10;Doji candle pattern + RSI + price/EMA20 + prior candle direction confirms" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="485" width="560" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s9" value="9. pump_on_close (volume + body + close-position)&#10;Vol surge (&gt;2x) + large body + close in upper 25% + RSI + above SMA50 → BUY breakout&#10;Or: dump_on_close — symmetric SELL pattern" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="535" width="560" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-s10" value="Plus 4 SWING strategies on daily TF (when trade_mode=swing|hybrid):&#10;swing_vcp · swing_htf · swing_breakout · swing_trend (max 3 swing positions concurrent)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="460" y="600" width="560" height="42" as="geometry"/>
+        </mxCell>
+
+        <!-- Validators -->
+        <mxCell id="cb-val" value="VALIDATION" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1060" y="90" width="400" height="290" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-v1" value="crypto_validator.validate_setup()&#10;3 parallel calls (ThreadPoolExecutor):" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1080" y="120" width="360" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-v2" value="• Ollama (local) llama3.1:8b&#10;  Sentiment scoring · primary fallback" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="170" width="360" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-v3" value="• OpenRouter LLM_BOT_SENTIMENT (Gemini Flash)&#10;  TIMEOUT FALLBACK = 0.25 conf (was 0.5 — penalized Apr 2026)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="220" width="360" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-v4" value="• OpenRouter LLM_BOT_RISK (DeepSeek)&#10;  R/R · stop placement · downside" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="270" width="360" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-v5" value="Consensus: majority vote (2 of 3)&#10;PAPER-TRADE BIASED — defaults to APPROVE on ambiguity" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1080" y="320" width="360" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Risk gates -->
+        <mxCell id="cb-risk" value="RISK GATES (RiskManager.can_open_position)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1060" y="400" width="400" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-r-list" value="• kill_switch active? → reject&#10;• daily P&amp;L &lt;= -daily_loss_limit ($500)?&#10;  → activate kill_switch + reject&#10;• max_open_positions reached (default 6)?&#10;• already holding ticker?&#10;• confidence &lt; min_confidence (adaptive 0.40-0.55)?&#10;• regime = DANGER → reject all entries&#10;• regime = CAUTION → buy/sell only on top conf&#10;• cautious_coin (recent &gt;5 losses) → 70% size&#10;• strategy in blacklisted_strategies → reject" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1080" y="430" width="360" height="190" as="geometry"/>
+        </mxCell>
+
+        <!-- Position sizing -->
+        <mxCell id="cb-size" value="POSITION SIZING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="430" width="380" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-size-text" value="base_size_usd = equity × max_position_pct / 100&#10;× position_scale (adaptive 0.7-1.0, never &gt; 1)&#10;× cautious_coin_factor (0.7 if flagged)&#10;× hot_strategy_bonus (1.1 if flagged)&#10;&#10;contracts = base_size_usd / contract_size&#10;leverage = config (default 1x demo)&#10;&#10;Hot strategies get +10% size; cold get -30%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontFamily=Courier New" vertex="1" parent="1">
+          <mxGeometry x="60" y="460" width="340" height="160" as="geometry"/>
+        </mxCell>
+
+        <!-- Exit chain -->
+        <mxCell id="cb-exit" value="EXIT CHAIN (every cycle, before scanning new entries)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="650" width="1420" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-e1" value="Sanity guard&#10;|mark/entry-1| &gt; 1.0&#10;→ skip close&#10;(yfinance bad-tick protection)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="685" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-e2" value="Stop-loss / TP&#10;ATR-based stops · 4× ATR target&#10;Trailing stop: 50% retrace from TP if pnl &gt; 0.8%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="300" y="685" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-e3" value="48h hard cap&#10;regardless of P&amp;L&#10;(prevents capital lockup —&#10;was unbounded before Apr 2026)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="540" y="685" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-e4" value="Time exits (data-driven)&#10;≥8h underwater (&lt;-0.3%) → close&#10;≥16h flat (|pnl|&lt;0.5%) → close&#10;Swing: 14d max" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="780" y="685" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-e5" value="Manual close&#10;User clicks Close button&#10;(per-trade UI control)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1020" y="685" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-e6" value="On close → re-entry watchlist&#10;losers (&lt;-2%) → eligible_reentry=False&#10;winners → eligible if not knife&#10;3-day window for re-buy" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1260" y="685" width="180" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Self-learning -->
+        <mxCell id="cb-learn" value="SELF-LEARNING LOOP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="900" width="1420" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-l1" value="Strategy blacklist (auto)&#10;n ≥ 10 trades AND WR &lt; 25% AND net &lt; 0&#10;→ skip future signals from this strategy&#10;Permanent: ema_trend (audited Apr 2026)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="935" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-l2" value="Strategy hot list&#10;n ≥ 8 trades AND WR &gt; 55% AND net &gt; 0&#10;→ +10% position size · prioritize signals" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="400" y="935" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-l3" value="Cautious coins&#10;5+ losses, net negative&#10;→ position size × 0.7" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="740" y="935" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb-l4" value="Adaptive confidence threshold&#10;WR &lt; 35% → 0.55 (high bar)&#10;WR 35-50% → 0.45&#10;WR &gt; 50% → 0.40&#10;14-day rolling window" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1080" y="935" width="360" height="100" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 7 — Stock Bot Detailed Flow
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="stock-bot" name="7. Stock Bot — Detailed">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="1000">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="sb-title" value="Stock Bot — Alpaca / Webull (paper)" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-sub" value="stock_bot/stock_engine.py · stock_trade_mode = scalp | swing | hybrid · stock_scan_interval default 300s" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1420" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- Inputs -->
+        <mxCell id="sb-inputs" value="INPUTS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="380" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-i1" value="stock_selected_stocks (bot_config)&#10;User-curated · default AAPL/TSLA/&#10;NVDA/MSFT/GOOGL/AMD/SPY/QQQ&#10;+ stock_custom_tickers (DXYZ, SLV, GLD)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="340" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-i2" value="yfinance daily OHLCV&#10;period=1y · indicators: RSI/MACD/EMA/SMA/ATR/ADR%&#10;Volume + relative volume" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="195" width="340" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-i3" value="VIX regime gate (bull / bear)&#10;BULL + RSI&gt;70 → skip (too late)&#10;BEAR + low conf → skip&#10;Strong BUY (rel_vol&gt;2 + RSI 50-70) bypass" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="260" width="340" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-i4" value="stock_extended_hours flag&#10;PDT check (Pattern Day Trader)&#10;Market hours gate (9:30-16:00 ET)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="325" width="340" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Strategies -->
+        <mxCell id="sb-strats" value="SIGNAL STRATEGIES" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="440" y="90" width="600" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-st1" value="SCALP strategies (1d candles, hold &lt;14d)&#10;macd_cross · rsi_reversion · momentum · bb_reversion · grid · doji · pump-on-close&#10;(same family as crypto bot, applied to stocks)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="120" width="560" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-st2" value="SWING strategies (when stock_trade_mode=swing|hybrid)&#10;swing_vcp — volatility contraction near 52w high&#10;swing_htf — high tight flag (30%+ run, &lt;15% pullback)&#10;swing_breakout — &gt; 20-day high + 1.5× rel-vol&#10;swing_trend — pullback to rising 50 EMA in uptrend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="190" width="560" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-st3" value="Sizing override for swing trades&#10;25% of equity (vs base max_position_pct)&#10;Max 3 concurrent swing positions" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="280" width="560" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-st4" value="direction_bias = long_only by default for stock bot&#10;(crypto bot is direction_bias=both)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="460" y="335" width="560" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Validation -->
+        <mxCell id="sb-val" value="VALIDATION (stock_validator.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1060" y="90" width="400" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-v-text" value="2 OpenRouter validators in parallel (90s timeout each):&#10;• LLM_BOT_SENTIMENT (Gemini Flash)&#10;  Reads: news + social + recent price action&#10;  Returns {execute, confidence, reasoning}&#10;• LLM_BOT_RISK (DeepSeek)&#10;  Reads: setup details + R/R + downside&#10;&#10;Timeout fallback = 0.25 confidence (penalized)&#10;Consensus: majority vote (2 of 2 needed)&#10;PAPER-TRADE BIASED — approves on ambiguity" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1080" y="120" width="360" height="240" as="geometry"/>
+        </mxCell>
+
+        <!-- Broker -->
+        <mxCell id="sb-broker" value="BROKER LAYER (per-user keys via user_api_keys, encrypted)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="390" width="1420" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-b1" value="stock_broker config&#10;'alpaca' OR 'webull'&#10;(per-user override available)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="420" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-b2" value="AlpacaClient (paper-py SDK)&#10;ALPACA_API_KEY / ALPACA_SECRET_KEY&#10;Forces paper=True (CLAUDE.md rule)&#10;Stock bot does NOT honor cb_mode='live'" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="320" y="420" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-b3" value="WebullClient (sandbox SDK)&#10;WEBULL_APP_KEY / APP_SECRET / ACCOUNT_ID&#10;Sandbox-only · no live mode" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="660" y="420" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-b4" value="get_balance() returns:&#10;{total_equity, available, unrealized_pnl}&#10;equity drives sizing math (whole shares only)&#10;FRACTIONAL SHARES NOT YET WIRED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1000" y="420" width="440" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-b5" value="Position sizing&#10;target_usd = equity × stock_max_position_pct/100 × adaptive_scale&#10;shares = max(1, int(target_usd / price))&#10;⚠ Small accounts: 1 share of $400 stock requires &gt;$400 equity. With $50 equity, sizing returns 0 → trade blocked." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="510" width="1380" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Risk + exits -->
+        <mxCell id="sb-risk" value="RISK GATES (StockRiskManager.can_open_position)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="590" width="700" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-r-text" value="• stock_kill_switch active? → reject all&#10;• daily P&amp;L &lt; -stock_daily_loss_limit ($500)? → kill switch ON, reject&#10;• max_open_positions reached (default 8)?&#10;• stock_max_daily_trades reached?&#10;• PDT pattern: more than 3 day-trades in 5 days on cash &lt; $25K → reject&#10;• outside market hours (or stock_extended_hours not set)?&#10;• already holding ticker?&#10;• Sanity guard: |mark/entry-1| &gt; 1.0 (auto + manual close)&#10;• can_afford(price): shares &gt;= 1 (whole-share constraint)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="60" y="620" width="660" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="sb-exit" value="EXIT CHAIN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="760" y="590" width="700" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-x-text" value="0. Sanity guard (|mark/entry-1| &gt; 1.0) → skip close&#10;1. Stop-loss / hard_stop_pct (default 8%)&#10;2. Take-profit / take_profit_pct (default 25% for swing, 5% scalp)&#10;3. RSI overbought (RSI &gt; 60 + profit &gt; 0.5%) — lock-in&#10;4. Trailing stop: 50% retrace from TP if pnl &gt; 0.5%&#10;5. 48h hard hold cap (force-close regardless of P&amp;L)&#10;6. Swing: 14-day max hold&#10;7. Scalp: 24h stale exit if |pnl| &lt; 0.3%&#10;8. Market close gate: pending exits at 16:00 ET&#10;9. Manual close — Close button per trade" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="780" y="620" width="660" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- Self-learning -->
+        <mxCell id="sb-learn" value="SELF-LEARNING (same as crypto bot, scoped to asset_type='stock')" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="850" width="1420" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="sb-learn-text" value="Strategy blacklist (n≥10, WR&lt;25%, net&lt;0) · hot list (n≥8, WR&gt;55%, net&gt;0) · cautious tickers · adaptive confidence threshold&#10;14-day rolling window from bot_trades WHERE asset_type='stock'" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="880" width="1380" height="60" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 8 — Claude Bot Detailed Flow
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="claude-bot" name="8. Claude Bot — Detailed">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="1100">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="cb2-title" value="Claude Bot — Scalp + Rotate (screener-driven, paper or LIVE)" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-sub" value="claude_bot/bot_engine.py · cb_broker = alpaca | webull · cb_mode = paper | live · cb_scan_interval default 300s" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1420" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- Candidate sourcing -->
+        <mxCell id="cb2-cand" value="CANDIDATE SOURCING (_get_candidates, no static watchlist)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="700" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-c1" value="1. oversold_daily table (persistent oversold tracker)&#10;Multi-day rsi_avg below threshold&#10;AI confidence ≥ 65 (cb_min_confidence)&#10;entry_style = 'reversal'" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-c2" value="2. screener gainers (top 15)&#10;Recent momentum names · entry_style='momentum'&#10;Vetted by screener LLM before reaching bot" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="400" y="120" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-c3" value="3. Re-entry watchlist (bot_reentry_watch)&#10;Recently-closed winners eligible_reentry=True&#10;3-day window · re-entry size factor 0.5 · max 2 attempts" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="210" width="660" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-c4" value="No fixed watchlist — bot follows screener output dynamically.&#10;Universe is whatever the screener surfaces today." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="60" y="270" width="660" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- _evaluate logic -->
+        <mxCell id="cb2-eval" value="_evaluate(ticker, entry_style, composite_rsi)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="760" y="90" width="700" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-e1" value="Computes: RSI(14) · SMA20 · SMA50 · ATR14&#10;daily rsi (RSI on 1d candles) · composite RSI (multi-TF average)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="780" y="120" width="660" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-e2" value="REVERSAL gate (oversold candidates):&#10;• composite_rsi &lt; 40 (or daily RSI &lt; 35 if no composite)&#10;• daily RSI &lt; 40&#10;• Price within 8% above SMA20 (filters falling knives)&#10;→ BUY signal · entry_style='reversal'" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="780" y="170" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-e3" value="MOMENTUM gate (gainers):&#10;• RSI between 45 and 72 (not stretched)&#10;• Price &gt; SMA20&#10;• SMA20 &gt;= SMA50 × 0.99 (uptrend)&#10;→ BUY signal · entry_style='momentum'" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1120" y="170" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-e4" value="Both gates failed → SKIP (no signal)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="780" y="280" width="660" height="25" as="geometry"/>
+        </mxCell>
+
+        <!-- LLM gate -->
+        <mxCell id="cb2-llm" value="LLM VALIDATION GATE (_llm_validate)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="330" width="1420" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-l1" value="Model resolution order:&#10;OPENROUTER_MODEL_GATING&#10;  → OPENROUTER_MODEL_RESEARCH&#10;  → deepseek/deepseek-chat (fallback)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="360" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-l2" value="Prompt input:&#10;ticker · entry_style · price · indicators · screener context · fundamentals · recent news&#10;Asks: BUY / SKIP + confidence + reasoning&#10;Requires LLM confidence ≥ 60% to approve" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="400" y="360" width="380" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-l3" value="Fallback: rule-based logic if API unavailable&#10;Returns approval if rule gates passed (paper-trade biased)&#10;ML cache: per-ticker decision cached 5 min so retries are cheap" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="800" y="360" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-l4" value="On approve: signal becomes BUY&#10;On reject: row written to bot_log&#10;(level=info, source='claude_bot')&#10;NO journal_entries (cleaned Apr 2026)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1140" y="360" width="300" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-l5" value="Models — see Page 2 for the full LLM map" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="60" y="470" width="1380" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Risk gates -->
+        <mxCell id="cb2-risk" value="RISK GATES (_open_trade)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="530" width="700" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-r-text" value="1. cb_kill_switch active? → BLOCK&#10;2. Daily P&amp;L ≤ -cb_daily_loss_limit ($25 for $50 account)?&#10;     → activate kill switch, BLOCK&#10;3. _open_count(user_id) ≥ cb_max_positions (5)? → BLOCK&#10;4. _has_position(user_id, ticker)? → BLOCK (no double-stack)&#10;5. price ≤ 0? → BLOCK&#10;6. equity from broker.get_balance() = 0? → log warn, skip sizing&#10;7. shares = max(1, int(equity × cb_max_position_pct / 100 / price))&#10;     ≥ 1 share required (no fractional yet)&#10;&#10;Live mode (cb_mode='live') uses real Alpaca account&#10;same gates apply — kill switch is not bypassed" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="60" y="560" width="660" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- Exit chain -->
+        <mxCell id="cb2-exit" value="EXIT CHAIN (_check_exits)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="760" y="530" width="700" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-x-text" value="0. 48h hard hold cap (Apr 2026) — force close + log&#10;1. Hard stop ≤ -cb_hard_stop_pct (8%) — no re-entry&#10;2. Take-profit ≥ cb_take_profit_pct (5%) — eligible_reentry=True&#10;3. Scalp stop ≤ -cb_scalp_stop_pct (2%) — eligible re-entry&#10;4. RSI &gt; 60 AND pnl &gt; 0.5% — lock-in (eligible re-entry)&#10;5. Implausible price guard: |mark/entry-1| &gt; 1.0 → REJECT close&#10;     (PRTA $11.51 → $433.47 phantom blocked Apr 2026)&#10;6. Manual close from UI — same guard applies&#10;7. On close → may add to bot_reentry_watch for stabilization" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="780" y="560" width="660" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- Re-entry logic -->
+        <mxCell id="cb2-reentry" value="RE-ENTRY MECHANISM (the &quot;rotate&quot; in scalp+rotate)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="790" width="1420" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-rt1" value="On close, _add_reentry() writes to bot_reentry_watch:&#10;ticker · exit_price · exit_pnl_pct · exit_reason · status='watching'&#10;TTL: cb_reentry_window_days (default 3 days)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="820" width="440" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-rt2" value="_check_reentries(user_id, regime) every cycle:&#10;Stabilization rule:&#10;• last close ≥ exit_price × 0.99&#10;• AND last bar bullish (close &gt; open)&#10;→ re-open at cb_reentry_size_factor × normal size (default 0.5)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="520" y="820" width="440" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cb2-rt3" value="Caps:&#10;• cb_reentry_max_attempts (default 2 per ticker)&#10;• Watchlist expires after cb_reentry_window_days (3)&#10;• Hard-stop closes do NOT add to re-entry list&#10;Surfaced in UI: re-entry watchlist panel" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="980" y="820" width="460" height="100" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 9 — Watchdog Bot Detailed Flow
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="watchdog-bot" name="9. Watchdog — Detailed">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="1100">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="wd-title" value="Watchdog — Aggressive Day Trader (low/mid-cap focus)" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-sub" value="features/watchdog/engine.py · BUY 9:30-11:00 ET only · EOD force-close 3:55 PM ET · daily_goal $1000" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1420" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- Regime score (3 axes) -->
+        <mxCell id="wd-regime" value="REGIME SCORE — get_regime() composite (0-100)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="1420" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-r1" value="AXIS 1 — Market Structure (45% weight)&#10;_score_market_structure()&#10;• SPY 5d / 20d trend slope&#10;• QQQ trend confirmation&#10;• VIX level (calm vs spike)&#10;Output: 0-100" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="380" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-r2" value="AXIS 2 — Sentiment (25% weight)&#10;_score_sentiment()&#10;• Trump mood RSS (Truth Social tone)&#10;• Social/news sentiment proxy&#10;• News fetcher 24h headlines&#10;Output: 0-100" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="460" y="120" width="380" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-r3" value="AXIS 3 — Technical (30% weight)&#10;_score_technical(spy_df)&#10;• RSI(14) on SPY · MACD signal&#10;• 20/50/200 SMA alignment&#10;• ADR% / volatility&#10;Output: 0-100" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="860" y="120" width="380" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-r4" value="Composite&#10;= 0.45·M + 0.25·S + 0.30·T&#10;&#10;Bins:&#10;75-100 RISK-ON&#10;50-74  NEUTRAL&#10;25-49  RISK-OFF&#10;0-24   DANGER" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="1260" y="120" width="180" height="160" as="geometry"/>
+        </mxCell>
+
+        <!-- Universe -->
+        <mxCell id="wd-univ" value="UNIVERSE BUILD (Apr 2026 spec — low/mid-cap focused)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="310" width="1420" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-u1" value="1. wd_watchlist (user-config)&#10;Default: LOWCAP_TICKERS + MIDCAP_TICKERS (~180 tickers from screener.py)&#10;User can override per-user" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="340" width="440" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-u2" value="2. _get_screener_candidates() (screener categories)&#10;{lowcap, midcap, gainers, ai, oversold} × confidence ≥ 70&#10;LARGECAP REMOVED (Apr 2026) — use overlay instead" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="520" y="340" width="440" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-u3" value="3. Persistent picks _get_persistent_lowmidcap_picks(min_days=2)&#10;Tickers seen in ≥2 distinct scan_dates last 7 days&#10;Skip FALLING KNIFE / AVOID verdicts&#10;Confidence boost: +5/+10/+15 by days persistence" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="980" y="340" width="460" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-u4" value="4. Large-cap overlay _get_largecap_breakouts() (1h cache)&#10;Runs qullamaggie_scan(LARGECAP_TICKERS) → keeps tickers with score ≥ 7 (max 5)&#10;Only path for large-caps to reach the bot — no permissive admission" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="415" width="1380" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Signal generation -->
+        <mxCell id="wd-sig" value="SIGNAL DETECTION (_detect_swing_setup) — 5 patterns" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="510" width="1420" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-s1" value="0. RSI Reversal&#10;RSI &lt; 30 + within 6%&#10;of EMA20 (no falling&#10;knife) → +5% TP,&#10;-1.5×ATR SL" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="540" width="260" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-s2" value="1. VCP&#10;Volatility&#10;contraction&#10;Range tightening + volume&#10;declining&#10;Confidence 75&#10;TP: +3×ATR" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="340" y="540" width="220" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-s3" value="2. HTF (High Tight Flag)&#10;30%+ run from low&#10;Pullback &lt; 15% from high&#10;Tight consolidation&#10;Confidence 72&#10;TP: 3×ATR" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="580" y="540" width="220" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-s4" value="3. Breakout&#10;Price &gt; 20-day high&#10;Volume &gt; 1.5× avg&#10;Confidence 70&#10;SL: gap-fill or&#10;ATR-based" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="820" y="540" width="220" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-s5" value="4. Earnings Gap&#10;5%+ price gap&#10;Volume 2× avg&#10;Holding gap level&#10;Confidence 68&#10;Entry on retest" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1060" y="540" width="220" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-sx" value="Regime overlay&#10;DANGER → BUY→HEDGE,&#10;conf -30&#10;RISK-OFF → conf -15" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="1300" y="540" width="140" height="170" as="geometry"/>
+        </mxCell>
+
+        <!-- LLM vet -->
+        <mxCell id="wd-llm" value="LLM PRE-TRADE VETTING (_llm_vet_watchdog_candidate, parallel)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="750" width="1420" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-l-text" value="ThreadPoolExecutor(max_workers=5) — pending list of (cand, setup) pairs vetted in parallel&#10;Model: OPENROUTER_MODEL_RESEARCH (Claude Sonnet by default)&#10;Input: setup details + screener verdict + regime + recent news&#10;Returns approve/skip · cached so repeat scans don't re-cost · 30s pool timeout" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="780" width="1380" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Time + risk + exit -->
+        <mxCell id="wd-time" value="TIME GATES (US/Eastern)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="870" width="450" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-t-text" value="• Buy window: 9:30 AM – 11:00 AM ET&#10;  Outside → exits run, no new entries&#10;• EOD force-close: 3:55 PM ET (weekday)&#10;  All open positions close regardless of P&amp;L&#10;• 1-day stale exit (defense in depth)&#10;  Catches positions if bot was stopped over close&#10;&#10;Day-trader rule: NEVER hold overnight&#10;Updated Apr 2026 (was 9:30-10:30 CST + 14d swing)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="60" y="900" width="410" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wd-risk" value="RISK GATES" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="510" y="870" width="450" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-rk-text" value="• wd_kill_switch active? → block all&#10;• Daily P&amp;L &lt; -wd_daily_loss_limit ($1000)&#10;  → kill switch ON, block&#10;• wd_max_positions reached (default 3)?&#10;• wd_min_confidence (default 65) gate&#10;• max_position_pct (default 15%)&#10;• Max 2 new BUYs per cycle&#10;• Confidence floor adjusted by regime&#10;• Already-holding ticker → skip" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="530" y="900" width="410" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wd-exit" value="EXIT CHAIN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="980" y="870" width="480" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="wd-x-text" value="0. EOD 3:55 PM ET → force-close all (highest priority)&#10;1. Stop-loss (SL from setup)&#10;2. Quick-trade profit exit:&#10;   • ≥ 7% — hard cap (don't get greedy)&#10;   • ≥ 4% — solid quick profit&#10;3. RSI overbought (RSI &gt; 60 + pnl &gt; 0.5%) — lock in&#10;4. Take-profit (original TP level)&#10;5. 1-day stale exit (defense in depth)&#10;6. Sanity guard: |mark/entry-1| &gt; 1.0 → reject" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="1000" y="900" width="440" height="160" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PAGE 10 — Analyzer Breakout Prediction
+       ═══════════════════════════════════════════════════════════════════ -->
+  <diagram id="analyzer" name="10. Analyzer — Breakout Prediction">
+    <mxGraphModel dx="1422" dy="757" grid="1" gridSize="10" pageWidth="1500" pageHeight="1200">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="an-title" value="Analyzer — Breakout Prediction Pipeline" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1420" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-sub" value="analysis_engine.analyze_ticker() · POST /api/analyze · multi-LLM consensus via ai_validator.validate_setup()" style="text;html=1;strokeColor=none;fillColor=none;align=center;whiteSpace=wrap;fontSize=11;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="1420" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- INPUTS -->
+        <mxCell id="an-in" value="STAGE 1 — DATA INGESTION" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="1420" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-in1" value="OHLCV (yfinance)&#10;period=6mo · interval=1d/1h/4h&#10;180-260 bars typical" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-in2" value="Fundamentals (fetch_fundamentals)&#10;P/E · revenue growth · margins&#10;market cap · sector · industry&#10;total_cash · total_debt · current_ratio&#10;cash_to_debt · cash_runway_months · FCF" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="300" y="120" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-in3" value="News + Social (24h window)&#10;shared/news_fetcher.py:&#10;• yfinance press wire&#10;• GDELT 2.0&#10;• Reddit (5 subs)&#10;• X/Twitter (Nitter RSS, best-effort)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="600" y="120" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-in4" value="News sentiment classification&#10;Regex Bullish/Bearish/Neutral&#10;Active catalysts (high-signal bullish)&#10;earnings beat · guidance raise · upgrade · M&amp;A · FDA · contract win" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="900" y="120" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-in5" value="Market regime context&#10;market_sensor.check_market_health()&#10;BTC/ETH dominance · VIX · breadth" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1200" y="120" width="240" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- INDICATORS -->
+        <mxCell id="an-ind" value="STAGE 2 — TECHNICAL INDICATORS (calculate_indicators)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="290" width="1420" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i1" value="RSI(14)&#10;Wilder's smoothing&#10;30/70 standard zones" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="320" width="200" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i2" value="MACD (12, 26, 9)&#10;line · signal · histogram&#10;crossovers + divergence" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="280" y="320" width="200" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i3" value="EMA 9/21 · SMA 50/200&#10;trend alignment&#10;golden/death cross" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="500" y="320" width="200" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i4" value="ATR(14)&#10;ADR%&#10;volatility envelope" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="720" y="320" width="200" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i5" value="Bollinger Bands&#10;BB%, BB width&#10;squeeze + expansion" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="940" y="320" width="200" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i6" value="Volume + Vol MA(10)&#10;Relative volume&#10;dollar volume" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1160" y="320" width="280" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-i7" value="52-week high/low · distance from 52w high · % above SMA200 · 1-mo / 3-mo / 6-mo returns · candle patterns (doji, engulfing, hammer)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="385" width="1380" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- PATTERN -->
+        <mxCell id="an-pat" value="STAGE 3 — PATTERN DETECTION (swing-based)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="470" width="1420" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p1" value="3a. Swing point detection&#10;find_swing_highs / find_swing_lows&#10;Local extrema with N-bar lookback (default 5)&#10;Filters out micro-noise" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="500" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p2" value="3b. Trendline fitting (fit_trendline)&#10;Linear regression on last 2 swing points&#10;Returns: (slope, intercept, R²)&#10;Validation: no candle pierces between anchor points&#10;construct_validated_trendline()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="400" y="500" width="380" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p3" value="3c. Pattern classification&#10;• Sloped trendline + flat support → ascending triangle&#10;• Symmetrical converging → triangle / pennant&#10;• Higher highs + higher lows → uptrend channel&#10;• Tight range &lt; 5% → consolidation / VCP" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="800" y="500" width="320" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p4" value="3d. Confidence score&#10;0-100 from:&#10;• upper R² · lower R²&#10;• swing count (more = stronger)&#10;• consolidation tightness&#10;• volume profile" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1140" y="500" width="300" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p5" value="3e. Breakout level + price target + stop-loss&#10;breakout_level = upper trendline at current bar (or 20-day high if rangy)&#10;pattern_height = breakout_level - support_level&#10;price_target = breakout_level + pattern_height (1:1 measured-move)&#10;stop_loss = support_level - 1×ATR" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="60" y="595" width="700" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p6" value="3f. Risk/Reward&#10;R:R = (target - breakout) / (breakout - stop)&#10;≥ 2:1 = solid setup&#10;≥ 3:1 = grade A&#10;&lt; 1:1 = skip" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="780" y="595" width="320" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-p7" value="3g. detect_breakout_status()&#10;Multi-candle confirmation:&#10;• 3 closes above breakout&#10;• Volume ≥ 1.5× MA(10)&#10;• ADR% within normal range&#10;States: PENDING / BREAKOUT / FAILED / CONSOLIDATING" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1120" y="595" width="320" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- LLM CONSENSUS -->
+        <mxCell id="an-llm" value="STAGE 4 — MULTI-LLM CONSENSUS (ai_validator.validate_setup, parallel)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="730" width="1420" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-l1" value="Model A — Research&#10;LLM_RESEARCH (Claude Sonnet 4-6)&#10;or LLM_RESEARCH_FAST (Gemini Flash) in fast mode&#10;&#10;Input: company info · sector · regime ·&#10;fundamentals (cash/debt/FCF) · news 24h ·&#10;active catalysts ↑↓ tags&#10;&#10;Output: thesis · risks · catalysts · grade A-D" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="60" y="760" width="440" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-l2" value="Model B — Pattern&#10;LLM_PATTERN (Gemini 2.5 Pro)&#10;&#10;Input: detected pattern · trendline R² ·&#10;swing point counts · last 10 OHLCV bars ·&#10;volume profile · breakout status&#10;&#10;Output: pattern verdict · confidence ·&#10;target adjustment · invalidation level" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="520" y="760" width="440" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-l3" value="Model C — Prediction&#10;LLM_PREDICTION (DeepSeek)&#10;&#10;Input: full data summary + indicators +&#10;news + active catalysts · 12-mo macro view&#10;&#10;Output: 12-month price prediction ·&#10;catalysts · risks · expected volatility&#10;Optional fast_mode skips this stage" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9673a6;fontSize=10;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="980" y="760" width="460" height="240" as="geometry"/>
+        </mxCell>
+
+        <!-- OUTPUT -->
+        <mxCell id="an-out" value="STAGE 5 — OUTPUT (cached for 3 days in `searches` table, surfaced in UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4" vertex="1" parent="1">
+          <mxGeometry x="40" y="1030" width="1420" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-o1" value="Trade plan&#10;entry · target · stop · R:R&#10;position size · risk amount&#10;grade A-D" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="60" y="1060" width="240" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-o2" value="Pattern overlay&#10;trendlines · breakout level&#10;swing points · target zone&#10;rendered on TradingView chart" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="320" y="1060" width="240" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-o3" value="Liquidity tile&#10;cash · debt · cash-to-debt&#10;current ratio · FCF yield&#10;0-100 health score" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="580" y="1060" width="240" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-o4" value="News panel&#10;Bullish/Bearish/Neutral tabs&#10;refresh button (force=1)&#10;active catalysts highlighted" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="840" y="1060" width="240" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-o5" value="LLM verdicts&#10;3 cards: Research · Pattern · Prediction&#10;Grade · key thesis · risks&#10;Validate button → /api/validate" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1060" width="340" height="115" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows linking stages -->
+        <mxCell id="an-a1" style="endArrow=classic;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#999;strokeWidth=2" edge="1" parent="1" source="an-in" target="an-ind"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="an-a2" style="endArrow=classic;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#999;strokeWidth=2" edge="1" parent="1" source="an-ind" target="an-pat"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="an-a3" style="endArrow=classic;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#999;strokeWidth=2" edge="1" parent="1" source="an-pat" target="an-llm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="an-a4" style="endArrow=classic;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;strokeColor=#999;strokeWidth=2" edge="1" parent="1" source="an-llm" target="an-out"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>

@@ -26,8 +26,25 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # --preload removed Apr 2026 — master importing the app pre-fork was the
+    # source of the "listening but no worker" zombie state. With workers=1,
+    # --preload's memory-sharing benefit is nil. Each worker now imports
+    # independently post-fork; if a worker hangs during import, gunicorn
+    # kills it after `timeout` and respawns rather than the entire container
+    # being stuck.
     command: >
-      sh -c "python migrations.py && gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 --timeout 300 --preload app:app"
+      sh -c "python migrations.py && gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 8 --timeout 300 app:app"
+    healthcheck:
+      # Auto-recovers from the preload-zombie state (gunicorn listening but
+      # never forking workers). Docker doesn't auto-restart unhealthy
+      # containers natively — so the failing branch sends SIGTERM to PID 1
+      # (gunicorn master) which exits the container, then `restart: unless-stopped`
+      # picks up and starts a fresh container. Verified Apr 2026.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz', timeout=3)\" || kill -TERM 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
 
   nginx:
     image: nginx:alpine

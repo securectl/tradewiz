@@ -115,17 +115,23 @@ def is_market_open(extended_hours: bool = False) -> dict:
 
 
 class AlpacaClient:
-    """Wrapper around Alpaca SDK. Paper trading only."""
+    """Wrapper around Alpaca SDK. Supports paper and live trading modes."""
 
-    def __init__(self, api_key=None, secret_key=None):
-        """Initialize with per-user keys, falling back to env var defaults."""
-        self._api_key = api_key or ALPACA_API_KEY
-        self._secret_key = secret_key or ALPACA_SECRET_KEY
+    def __init__(self, api_key=None, secret_key=None, paper=True, use_env_fallback=False):
+        """Initialize with per-user keys. Only falls back to env vars when use_env_fallback=True.
+        paper=True (default) for paper trading, paper=False for live trading."""
+        if use_env_fallback:
+            self._api_key = api_key or ALPACA_API_KEY
+            self._secret_key = secret_key or ALPACA_SECRET_KEY
+        else:
+            self._api_key = api_key or ""
+            self._secret_key = secret_key or ""
+        self._paper_mode = paper
         self._client = None
         self._initialized = False
 
     def _ensure_client(self):
-        """Lazy-init the Alpaca trading client — paper only."""
+        """Lazy-init the Alpaca trading client."""
         if self._initialized:
             return
 
@@ -140,10 +146,11 @@ class AlpacaClient:
             self._client = TradingClient(
                 api_key=self._api_key,
                 secret_key=self._secret_key,
-                paper=True,  # SAFETY: Always paper trading
+                paper=self._paper_mode,
             )
             self._initialized = True
-            logger.info("Alpaca client initialized (paper trading)")
+            mode = "paper" if self._paper_mode else "LIVE"
+            logger.info(f"Alpaca client initialized ({mode} trading)")
         except ImportError:
             raise RuntimeError("alpaca-py package not installed. Run: pip install alpaca-py")
         except Exception as e:
@@ -798,15 +805,18 @@ class WebullClient:
         return balance.get("total_equity", 0.0)
 
 
-def get_broker_client(broker: str = "alpaca", **keys):
+def get_broker_client(broker: str = "alpaca", paper: bool = True, **keys):
     """Factory: return the correct broker client based on config.
 
     Args:
         broker: "alpaca" or "webull"
+        paper: True → paper trading; False → live trading. Caller must
+            explicitly pass paper=False to enable live (default is safe).
         **keys: Per-user API keys. For Alpaca: api_key, secret_key.
                 For Webull: app_key, app_secret, account_id.
     """
     if broker == "webull":
+        # Webull SDK is sandbox-only in this app — paper kwarg is ignored.
         return WebullClient(
             app_key=keys.get("app_key"),
             app_secret=keys.get("app_secret"),
@@ -815,4 +825,5 @@ def get_broker_client(broker: str = "alpaca", **keys):
     return AlpacaClient(
         api_key=keys.get("api_key"),
         secret_key=keys.get("secret_key"),
+        paper=paper,
     )

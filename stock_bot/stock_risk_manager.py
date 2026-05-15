@@ -21,7 +21,12 @@ P = "%s" if IS_POSTGRES else "?"
 
 
 def _get_config_val(user_id, key, default=None):
-    row = query_one(f"SELECT value FROM bot_config WHERE user_id = {P} AND key = {P}", (user_id, key))
+    # User-specific row wins; falls back to admin-set global row (user_id=0).
+    row = query_one(
+        f"SELECT value FROM bot_config WHERE user_id IN ({P}, 0) AND key = {P} "
+        f"ORDER BY CASE WHEN user_id = 0 THEN 1 ELSE 0 END LIMIT 1",
+        (user_id, key),
+    )
     return row["value"] if row else default
 
 
@@ -95,6 +100,15 @@ class StockRiskManager:
         )
         return row["cnt"] if row else 0
 
+    def get_open_positions_value(self) -> float:
+        """Sum of notional value (size * entry_price) of open stock-bot positions."""
+        row = query_one(
+            f"SELECT COALESCE(SUM(size * entry_price), 0) as val FROM bot_trades "
+            f"WHERE user_id = {P} AND status = 'open' AND asset_type = 'stock'",
+            (self.user_id,),
+        )
+        return float(row["val"]) if row else 0.0
+
     def has_open_position(self, symbol: str) -> bool:
         row = query_one(
             f"SELECT COUNT(*) as cnt FROM bot_trades WHERE user_id = {P} AND coin = {P} AND status = 'open' AND asset_type = 'stock'",
@@ -130,6 +144,16 @@ class StockRiskManager:
         max_size = balance * (max_pct / 100)
         if size_usd > max_size:
             return {"allowed": False, "reason": f"Position size ${size_usd:.2f} exceeds {max_pct}% limit (${max_size:.2f})"}
+
+        # Total exposure gate — cap aggregate funds deployed across all open
+        # positions. Default 60% leaves room for new entries + drawdown cushion.
+        max_exp_pct = float(_get_config_val(self.user_id, "stock_max_total_exposure_pct", "60"))
+        if balance > 0 and max_exp_pct > 0:
+            deployed = self.get_open_positions_value()
+            projected = deployed + size_usd
+            cap = balance * (max_exp_pct / 100)
+            if projected > cap:
+                return {"allowed": False, "reason": f"Total exposure ${projected:.0f} would exceed {max_exp_pct}% cap (${cap:.0f}) — already deployed ${deployed:.0f}"}
 
         max_open = int(_get_config_val(self.user_id, "stock_max_open_positions", "3" if is_swing else "8"))
         current_open = self.get_open_positions_count()

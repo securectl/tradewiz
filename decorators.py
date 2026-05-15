@@ -65,7 +65,8 @@ def bot_access_required(bot_type):
                 return jsonify({"error": "Authentication required"}), 401
             from rate_limiter import has_bot_access
             if not has_bot_access(current_user.id, bot_type=bot_type):
-                label = "Crypto Bot" if bot_type == "crypto" else "Stock Bot"
+                labels = {"crypto": "Crypto Bot", "stock": "Stock Bot", "watchdog": "Watchdog Trader"}
+                label = labels.get(bot_type, bot_type.title())
                 return jsonify({
                     "error": f"{label} is invite-only. Contact admin for access.",
                 }), 403

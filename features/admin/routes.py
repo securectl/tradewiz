@@ -148,7 +148,7 @@ def api_admin_invite():
     if tier != "pro":
         bot_access_list = []
     # Validate bot_access values
-    valid_bots = {"crypto", "stock"}
+    valid_bots = {"crypto", "stock", "watchdog"}
     bot_access_list = [b for b in bot_access_list if b in valid_bots]
     bot_access_str = ",".join(bot_access_list) if bot_access_list else "none"
 
@@ -184,7 +184,7 @@ def api_admin_invite_update(email):
         return jsonify({"error": "Invalid tier"}), 400
     if tier != "pro":
         bot_access_list = []
-    valid_bots = {"crypto", "stock"}
+    valid_bots = {"crypto", "stock", "watchdog"}
     bot_access_list = [b for b in bot_access_list if b in valid_bots]
     bot_access_str = ",".join(bot_access_list) if bot_access_list else "none"
     role = "trader" if tier == "pro" else "user"
@@ -241,7 +241,8 @@ def api_admin_resolve_ticket(ticket_id):
 @bp.route("/api/admin/users")
 @admin_required
 def api_admin_users():
-    rows = query("SELECT * FROM users ORDER BY created_at DESC")
+    # id=0 is the system sentinel for global bot_config rows — exclude it.
+    rows = query("SELECT * FROM users WHERE id != 0 ORDER BY created_at DESC")
     users = []
     for u in rows:
         roles = query(f"SELECT role FROM user_roles WHERE user_id = {P}", (u["id"],))
@@ -316,7 +317,7 @@ def api_admin_user_tier(user_id):
 
     # Build bot_access string
     if bot_access_list is not None:
-        valid_bots = {"crypto", "stock"}
+        valid_bots = {"crypto", "stock", "watchdog"}
         bot_access_list = [b for b in bot_access_list if b in valid_bots]
         bot_access_str = ",".join(bot_access_list) if bot_access_list else "none"
     else:
@@ -707,3 +708,189 @@ def _reload_module_globals(updated_keys: dict):
             skl.LLM_SKILL_EARNINGS = val
         elif key == "BOT_SENSOR_ENABLED":
             ms.BOT_SENSOR_ENABLED = val == "1"
+
+
+# ─── Global bot defaults (admin-set, user_id=0 sentinel) ─────
+
+@bp.route("/api/admin/bot-defaults", methods=["GET"])
+@admin_required
+def api_admin_bot_defaults_get():
+    """List all global bot defaults — rows in bot_config with user_id=0.
+
+    Per-user rows override these at read time via the helpers in each bot
+    engine (see _cfg / _get_config / _wd_config — all use
+    `WHERE user_id IN (X, 0) ORDER BY CASE WHEN user_id = 0 THEN 1 ELSE 0 END LIMIT 1`,
+    sign-agnostic so a user-scoped row always wins over the global row).
+    """
+    rows = query("SELECT key, value FROM bot_config WHERE user_id = 0 ORDER BY key")
+    return jsonify({"defaults": [{"key": r["key"], "value": r["value"]} for r in rows or []]})
+
+
+def _ensure_global_user():
+    """Bootstrap a sentinel user with id=0 so bot_config rows with user_id=0
+    satisfy the bot_config_user_id_fkey FK. Idempotent. Sentinel is excluded
+    from /api/admin/users so it never appears in the admin UI."""
+    try:
+        if IS_POSTGRES:
+            execute(
+                "INSERT INTO users (id, email, name) VALUES (0, 'system@global.local', 'Global Bot Defaults') "
+                "ON CONFLICT (id) DO NOTHING"
+            )
+        else:
+            execute(
+                "INSERT OR IGNORE INTO users (id, email, name) VALUES (0, 'system@global.local', 'Global Bot Defaults')"
+            )
+    except Exception as e:
+        logger.warning(f"_ensure_global_user failed: {e}")
+
+
+@bp.route("/api/admin/bot-defaults", methods=["POST"])
+@admin_required
+def api_admin_bot_defaults_set():
+    """Upsert a global default. Body: {"key": "cb_broker", "value": "alpaca"}."""
+    data = request.get_json() or {}
+    key = (data.get("key") or "").strip()
+    value = data.get("value")
+    if not key:
+        return jsonify({"error": "key is required"}), 400
+    if value is None:
+        return jsonify({"error": "value is required"}), 400
+    value = str(value)
+    _ensure_global_user()
+    if IS_POSTGRES:
+        execute(
+            f"INSERT INTO bot_config (user_id, key, value) VALUES (0, {P}, {P}) "
+            f"ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value",
+            (key, value),
+        )
+    else:
+        execute(
+            f"INSERT OR REPLACE INTO bot_config (user_id, key, value) VALUES (0, {P}, {P})",
+            (key, value),
+        )
+    logger.info(f"Admin {_uid()} set global default {key}={value}")
+    return jsonify({"ok": True, "key": key, "value": value})
+
+
+@bp.route("/api/admin/bot-defaults/<key>", methods=["DELETE"])
+@admin_required
+def api_admin_bot_defaults_delete(key):
+    """Clear a global default. Per-user values still apply unchanged."""
+    execute(f"DELETE FROM bot_config WHERE user_id = 0 AND key = {P}", (key,))
+    logger.info(f"Admin {_uid()} cleared global default {key}")
+    return jsonify({"ok": True, "key": key})
+
+
+# ─── Delete user (admin-only, with self-delete guard) ────────
+
+@bp.route("/api/admin/users/<int:user_id>/delete", methods=["DELETE"])
+@admin_required
+def api_admin_user_delete(user_id):
+    """Hard-delete a user. Cascades to bot_config, bot_trades, journal_entries,
+    user_roles, user_subscriptions, etc. via ON DELETE CASCADE FKs in
+    migrations.py (line ~68 onward).
+
+    Refuses to delete the requesting admin themselves to prevent lockout.
+    Refuses user_id=0 (the sentinel for global bot defaults).
+    """
+    actor = _uid()
+    if user_id == actor:
+        return jsonify({"error": "Cannot delete your own account from the admin panel"}), 400
+    if user_id == 0:
+        return jsonify({"error": "user_id 0 is reserved for global bot defaults"}), 400
+
+    target = query_one(f"SELECT id, email FROM users WHERE id = {P}", (user_id,))
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+
+    try:
+        execute(f"DELETE FROM users WHERE id = {P}", (user_id,))
+    except Exception as e:
+        logger.exception(f"Failed to delete user {user_id}")
+        return jsonify({"error": f"Delete failed: {e}"}), 500
+
+    logger.warning(f"Admin {actor} hard-deleted user {user_id} ({target.get('email')})")
+    return jsonify({"ok": True, "deleted_user_id": user_id, "email": target.get("email")})
+
+
+# ─── LLM model overrides + snapshot/revert ─────────────────────────────
+#
+# The admin UI uses these to swap in cheaper/free models, save snapshots
+# before risky changes, and one-click revert if results regress. Resolution
+# precedence at runtime: DB override → env var → hardcoded default
+# (see shared/llm_config.py).
+
+@bp.route("/api/admin/llm-models", methods=["GET"])
+@admin_required
+def api_admin_llm_models():
+    from shared.llm_config import get_all_models, list_snapshots
+    return jsonify({
+        "models": get_all_models(),
+        "snapshots": list_snapshots(limit=50),
+    })
+
+
+@bp.route("/api/admin/llm-models/set", methods=["POST"])
+@admin_required
+def api_admin_llm_models_set():
+    """Body: {"role": "research", "model": "deepseek/deepseek-chat-v3.1"}.
+    Empty model clears the override (falls back to env/default)."""
+    from shared.llm_config import set_override, KNOWN_ROLES
+    data = request.get_json(silent=True) or {}
+    role = data.get("role", "")
+    model = data.get("model", "")
+    if role not in KNOWN_ROLES:
+        return jsonify({"error": f"Unknown role. Valid: {sorted(KNOWN_ROLES)}"}), 400
+    try:
+        set_override(role, model)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+    logger.info(f"Admin {_uid()} set LLM override role={role} model={model or '(cleared)'}")
+    return jsonify({"ok": True, "role": role, "model": model})
+
+
+@bp.route("/api/admin/llm-models/snapshot", methods=["POST"])
+@admin_required
+def api_admin_llm_models_snapshot():
+    """Save current resolved models as a named snapshot. Body: {"label": "..."}"""
+    from shared.llm_config import save_snapshot
+    data = request.get_json(silent=True) or {}
+    label = data.get("label", "")
+    snap_id = save_snapshot(label)
+    logger.info(f"Admin {_uid()} saved LLM snapshot id={snap_id} label={label!r}")
+    return jsonify({"ok": True, "id": snap_id})
+
+
+@bp.route("/api/admin/llm-models/revert", methods=["POST"])
+@admin_required
+def api_admin_llm_models_revert():
+    """Revert all overrides to a saved snapshot. Body: {"snapshot_id": 42}"""
+    from shared.llm_config import revert_to_snapshot
+    data = request.get_json(silent=True) or {}
+    snap_id = data.get("snapshot_id")
+    if not snap_id:
+        return jsonify({"error": "snapshot_id required"}), 400
+    try:
+        revert_to_snapshot(snap_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    logger.warning(f"Admin {_uid()} reverted LLM models to snapshot {snap_id}")
+    return jsonify({"ok": True, "snapshot_id": snap_id})
+
+
+@bp.route("/api/admin/llm-models/clear", methods=["POST"])
+@admin_required
+def api_admin_llm_models_clear():
+    """Wipe ALL DB overrides — every role falls back to env/default."""
+    from shared.llm_config import clear_all_overrides
+    clear_all_overrides()
+    logger.warning(f"Admin {_uid()} cleared all LLM overrides — back to env/defaults")
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/admin/llm-models/snapshot/<int:snap_id>", methods=["DELETE"])
+@admin_required
+def api_admin_llm_models_snapshot_delete(snap_id):
+    from shared.llm_config import delete_snapshot
+    delete_snapshot(snap_id)
+    return jsonify({"ok": True, "deleted_id": snap_id})
