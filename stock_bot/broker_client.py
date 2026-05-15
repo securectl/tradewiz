@@ -805,15 +805,18 @@ class WebullClient:
         return balance.get("total_equity", 0.0)
 
 
-def get_broker_client(broker: str = "alpaca", **keys):
+def get_broker_client(broker: str = "alpaca", paper: bool = True, **keys):
     """Factory: return the correct broker client based on config.
 
     Args:
         broker: "alpaca" or "webull"
+        paper: True → paper trading; False → live trading. Caller must
+            explicitly pass paper=False to enable live (default is safe).
         **keys: Per-user API keys. For Alpaca: api_key, secret_key.
                 For Webull: app_key, app_secret, account_id.
     """
     if broker == "webull":
+        # Webull SDK is sandbox-only in this app — paper kwarg is ignored.
         return WebullClient(
             app_key=keys.get("app_key"),
             app_secret=keys.get("app_secret"),
@@ -822,4 +825,5 @@ def get_broker_client(broker: str = "alpaca", **keys):
     return AlpacaClient(
         api_key=keys.get("api_key"),
         secret_key=keys.get("secret_key"),
+        paper=paper,
     )

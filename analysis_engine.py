@@ -1724,6 +1724,19 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
     change = round(current_price - prev_close, 2)
     change_pct = round((change / prev_close) * 100, 2) if prev_close else 0
 
+    # Recent news headlines (last 24h) — fed into the LLM context for catalyst awareness.
+    # Cached upstream by news_fetcher; safe to call on every analyze.
+    recent_news_lines = []
+    active_catalysts_lines = []
+    if not is_crypto:
+        try:
+            from shared.news_fetcher import headlines_for_llm, active_catalysts
+            recent_news_lines = headlines_for_llm(ticker, hours=24, limit=8)
+            active_catalysts_lines = active_catalysts(ticker, hours=24, limit=5)
+        except Exception:
+            recent_news_lines = []
+            active_catalysts_lines = []
+
     return {
         "ticker": ticker.upper(),
         "info": info,
@@ -1743,6 +1756,8 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
             for cp in candle_patterns if cp["idx"] < len(dates)
         ],
         "fundamentals": fundamentals,
+        "recent_news": recent_news_lines,  # consumed by ai_validator._build_data_summary
+        "active_catalysts": active_catalysts_lines,  # high-signal bullish news for LLM
         "analysis_time": datetime.now().isoformat(),
         "period": period,
         "interval": interval,
@@ -1823,28 +1838,33 @@ def qullamaggie_scan(tickers: list = None) -> list:
                     above_52w_low_pct = (current_price - low_52w) / max(low_52w, 0.01) * 100
                     below_52w_high_pct = (high_52w - current_price) / max(high_52w, 0.01) * 100
 
-                    # At least 30% above 52w low, within 25% of 52w high
-                    if above_52w_low_pct < 30 or below_52w_high_pct > 25:
-                        continue
-
-                    # Period gains
+                    # Period gains (computed up front — both branches use them)
                     gain_1m = (current_price / float(close[max(0, n - 21)]) - 1) * 100 if n > 21 else 0
                     gain_3m = (current_price / float(close[max(0, n - 63)]) - 1) * 100 if n > 63 else 0
                     gain_6m = (current_price / float(close[0]) - 1) * 100
-
-                    # Relative strength: at least one must pass
-                    rs_pass = gain_1m >= 25 or gain_3m >= 50 or gain_6m >= 150
-                    if not rs_pass and not ma_aligned:
-                        continue
 
                     # ADR% (14-day average daily range as %)
                     daily_range_pct = ((high[-14:] - low[-14:]) / close[-14:]) * 100
                     adr_pct = float(np.mean(daily_range_pct))
 
-                    # Check for setups
-                    setup = _detect_qullamaggie_setup(df, close, high, low, volume, n, adr_pct)
+                    # Stage 2 first: catches beaten-down recovery names that the
+                    # standard >30%-above-52w-low filter would reject (INTC/SNDK/MU pattern).
+                    setup = _detect_stage2_breakout(close, high, low, volume, n)
+
                     if setup is None:
-                        continue
+                        # Standard momentum gates: must be above 30% from 52w low and within 25% of high
+                        if above_52w_low_pct < 30 or below_52w_high_pct > 25:
+                            continue
+
+                        # Relative strength: at least one must pass
+                        rs_pass = gain_1m >= 25 or gain_3m >= 50 or gain_6m >= 150
+                        if not rs_pass and not ma_aligned:
+                            continue
+
+                        # Check for HTF / VCP / EP setups
+                        setup = _detect_qullamaggie_setup(df, close, high, low, volume, n, adr_pct)
+                        if setup is None:
+                            continue
 
                     # Score the setup (1-10)
                     score = _score_qullamaggie_setup(
@@ -1869,7 +1889,14 @@ def qullamaggie_scan(tickers: list = None) -> list:
                         sector = "Unknown"
                         name = ticker
 
-                    results.append({
+                    if setup["type"] == "STAGE2":
+                        sell_plan = "Trail with 50d SMA, scale 1/3 at +20%, exit on close < 50d"
+                    elif setup["type"] == "EP":
+                        sell_plan = "Tight stop below gap day low, sell 50% +15%, trail rest"
+                    else:
+                        sell_plan = "Sell 50% after 3-5 days, trail rest with 10/20 SMA"
+
+                    row = {
                         "ticker": ticker,
                         "name": name,
                         "sector": sector,
@@ -1891,8 +1918,20 @@ def qullamaggie_scan(tickers: list = None) -> list:
                         "shares": shares,
                         "risk_amount": round(shares * risk_per_share, 2),
                         "position_value": round(shares * setup["entry_price"], 2),
-                        "sell_plan": "Sell 50% after 3-5 days, trail rest with 10/20 SMA",
-                    })
+                        "sell_plan": sell_plan,
+                    }
+                    if setup["type"] == "STAGE2":
+                        row.update({
+                            "above_52w_low_pct": setup.get("above_52w_low_pct"),
+                            "below_52w_high_pct": setup.get("below_52w_high_pct"),
+                            "sma_ratio": setup.get("sma_ratio"),
+                            "vol_expansion": setup.get("vol_expansion"),
+                            "rsi": setup.get("rsi"),
+                            "days_since_52w_low": setup.get("days_since_52w_low"),
+                            "base_high": setup.get("base_high"),
+                            "phase": setup.get("phase"),
+                        })
+                    results.append(row)
 
                 except Exception:
                     continue
@@ -1902,6 +1941,122 @@ def qullamaggie_scan(tickers: list = None) -> list:
     # Sort by score descending
     results.sort(key=lambda x: x["score"], reverse=True)
     return results
+
+
+def _detect_stage2_breakout(close, high, low, volume, n):
+    """Detect Stage 2 / Recovery Breakout — beaten-down stock at first leg up.
+
+    Catches the INTC / SNDK / MU pattern: stock has been crushed for months,
+    formed a base near the lows, SMA50 just turned up, volume expanding,
+    breaking above base resistance with RSI recovering from oversold.
+
+    Different gating from HTF/VCP/EP — requires the stock to be in the
+    LOWER 60% of its 52-week range (the opposite of momentum scanner).
+
+    Returns setup dict or None.
+    """
+    if n < 60:
+        return None
+
+    current_price = float(close[-1])
+    high_52w = float(np.max(high))
+    low_52w = float(np.min(low))
+    above_52w_low_pct = (current_price - low_52w) / max(low_52w, 0.01) * 100
+    below_52w_high_pct = (high_52w - current_price) / max(high_52w, 0.01) * 100
+
+    # Recovery zone gates: lower 75% of 52w range, off the absolute low
+    if below_52w_high_pct < 20:
+        return None  # already near highs — handled by HTF/VCP/EP
+    if above_52w_low_pct > 75:
+        return None  # past the inflection
+    if above_52w_low_pct < 3:
+        return None  # too close to low, no base yet
+
+    # Days since 52w low — base length proxy (need at least 15)
+    low_idx = int(np.argmin(low))
+    days_since_low = n - 1 - low_idx
+    if days_since_low < 15:
+        return None
+
+    # No new 52w low in the last 10 days — must have stopped bleeding
+    recent_low = float(np.min(low[-10:]))
+    if recent_low <= low_52w * 1.005:
+        return None
+
+    # SMA structure: price within reach of SMA50 (above, or within 5% below) AND SMA50 not in freefall
+    sma_50 = float(pd.Series(close).rolling(50).mean().iloc[-1])
+    sma_50_20d_ago = float(pd.Series(close).rolling(50).mean().iloc[-21]) if n > 71 else sma_50
+    sma_200 = float(pd.Series(close).rolling(min(200, n)).mean().iloc[-1])
+
+    sma50_not_falling = sma_50 >= sma_50_20d_ago * 0.99  # flat or rising
+    price_near_sma50 = current_price >= sma_50 * 0.95  # above or within 5%
+    if not (sma50_not_falling and price_near_sma50):
+        return None
+
+    # SMA50 not too far below SMA200 (within 15%)
+    sma_ratio = sma_50 / sma_200 if sma_200 > 0 else 0
+    if sma_ratio < 0.85:
+        return None
+
+    # Base detection: 30-day range pre-breakout, 4-35%
+    base_start = max(0, n - 45)
+    base_end = max(0, n - 5)
+    if base_end - base_start < 15:
+        return None
+    base_high = float(np.max(high[base_start:base_end]))
+    base_low = float(np.min(low[base_start:base_end]))
+    base_range_pct = (base_high - base_low) / max(base_low, 0.01) * 100
+    if not (3 <= base_range_pct <= 40):
+        return None
+
+    # Volume not collapsing: last 5d >= 0.7x prior 20d (1.2x+ is a bonus, scored later)
+    vol_recent = float(np.mean(volume[-5:]))
+    vol_prior = float(np.mean(volume[-25:-5])) if n >= 25 else vol_recent
+    vol_expansion = vol_recent / max(vol_prior, 1)
+    if vol_expansion < 0.7:
+        return None
+
+    # 1-month gain: -10 to +35% (allow basing names with chop, but not still falling hard)
+    gain_1m = (current_price / float(close[-21]) - 1) * 100 if n > 21 else 0
+    if gain_1m < -10 or gain_1m > 35:
+        return None
+
+    # RSI in recovery zone (35-72)
+    deltas = np.diff(close[-15:])
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+    avg_gain = float(np.mean(gains)) if len(gains) else 0
+    avg_loss = float(np.mean(losses)) if len(losses) else 0.001
+    rs = avg_gain / avg_loss if avg_loss > 0 else 100
+    rsi = 100 - 100 / (1 + rs)
+    if not (35 <= rsi <= 72):
+        return None
+
+    # Phase detection: "breakout" if breaking above base, "basing" if still consolidating
+    if current_price >= base_high * 0.98:
+        phase = "breakout"
+    elif current_price >= base_high * 0.92:
+        phase = "loaded"  # right at the launch pad
+    else:
+        phase = "basing"
+
+    return {
+        "type": "STAGE2",
+        "entry_price": current_price,
+        "stop_loss": float(np.min(low[-10:])),
+        "depth_pct": base_range_pct,
+        "consolidation_days": days_since_low,
+        "prior_move_pct": gain_1m,
+        # Stage 2 specific context
+        "above_52w_low_pct": round(above_52w_low_pct, 1),
+        "below_52w_high_pct": round(below_52w_high_pct, 1),
+        "sma_ratio": round(sma_ratio, 3),
+        "vol_expansion": round(vol_expansion, 2),
+        "rsi": round(rsi, 1),
+        "days_since_52w_low": days_since_low,
+        "base_high": round(base_high, 2),
+        "phase": phase,
+    }
 
 
 def _detect_qullamaggie_setup(df, close, high, low, volume, n, adr_pct):
@@ -2050,6 +2205,47 @@ def _score_qullamaggie_setup(setup, ma_aligned, gain_1m, gain_3m, gain_6m, adr_p
     elif setup["type"] == "VCP":
         if setup.get("depth_pct", 0) < 5:
             score += 0.5  # Very tight VCP
+    elif setup["type"] == "STAGE2":
+        # Stage 2 scoring: rebuild from scratch — momentum rules don't apply to recovery plays
+        score = 4.0
+        # Phase: breakout > loaded > basing
+        phase = setup.get("phase", "basing")
+        if phase == "breakout":
+            score += 2.0
+        elif phase == "loaded":
+            score += 1.2
+        else:
+            score += 0.4  # still useful as a watchlist
+        # Volume expansion
+        ve = setup.get("vol_expansion", 0)
+        if ve >= 1.8:
+            score += 1.5
+        elif ve >= 1.4:
+            score += 0.8
+        elif ve >= 1.1:
+            score += 0.4
+        # Earlier in the recovery = better
+        ab_low = setup.get("above_52w_low_pct", 100)
+        if ab_low <= 25:
+            score += 1.0
+        elif ab_low <= 50:
+            score += 0.5
+        # SMA structure: past golden cross = better
+        sr = setup.get("sma_ratio", 0)
+        if sr >= 1.0:
+            score += 0.8
+        elif sr >= 0.95:
+            score += 0.4
+        # RSI in the sweet spot
+        rsi = setup.get("rsi", 0)
+        if 50 <= rsi <= 65:
+            score += 0.5
+        # Tighter base
+        if setup.get("depth_pct", 100) <= 15:
+            score += 0.5
+        # Liquidity
+        if dollar_volume >= 20_000_000:
+            score += 0.5
 
     # Dollar volume (higher = better liquidity)
     if dollar_volume >= 20_000_000:

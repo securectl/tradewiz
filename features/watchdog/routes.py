@@ -18,10 +18,11 @@ P = "%s" if IS_POSTGRES else "?"
 @bot_access_required("watchdog")
 def api_watchdog_summary():
     """Market regime summary — composite score, axes, top signals."""
-    from features.watchdog.engine import get_regime, get_signals
+    from features.watchdog.engine import get_regime, get_signals, get_user_watchlist
 
     regime = get_regime()
-    signals_data = get_signals()
+    user_watchlist = get_user_watchlist(_uid())
+    signals_data = get_signals(user_watchlist)
     top_signals = [s for s in signals_data.get("signals", []) if s.get("signal") == "BUY"][:3]
 
     return jsonify({
@@ -53,13 +54,42 @@ def api_watchdog_summary():
 @login_required
 @bot_access_required("watchdog")
 def api_watchdog_signals():
-    """Full signal board for all watchlist tickers."""
-    from features.watchdog.engine import get_signals
+    """Full signal board for all watchlist tickers (legacy multi-strategy view).
+
+    ThunderBot's auto-trader no longer reads this; it uses /candidates instead.
+    Kept for the manual screener UI and backward compatibility.
+    """
+    from features.watchdog.engine import get_signals, get_user_watchlist
     watchlist = request.args.get("watchlist")
     if watchlist:
         watchlist = [t.strip().upper() for t in watchlist.split(",")]
+    else:
+        watchlist = get_user_watchlist(_uid())
     result = get_signals(watchlist)
     return jsonify(result)
+
+
+@bp.route("/api/watchdog/candidates")
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_candidates():
+    """ThunderBot Identified Candidates — top 5-6 RSI+Volume+BullFlag setups
+    refreshed every 15 min. Source of truth for the Signal Board UI and for
+    the auto-trader's execution path.
+
+    Non-blocking: returns cached/stale payload immediately and triggers an
+    async refresh if needed. The full yfinance scan can take 30-50s, which
+    would otherwise hang the UI (Loading ThunderBot... forever) since the
+    Promise.allSettled in watchdog.js waits for every request to settle.
+    """
+    from features.watchdog.engine import (
+        get_thunderbot_candidates_async, identify_thunderbot_candidates,
+    )
+    # ?refresh=1 still runs a synchronous full scan — useful for diagnostics
+    # and the bot's auto-trader thread which can afford the wait.
+    if request.args.get("refresh") == "1":
+        return jsonify(identify_thunderbot_candidates(_uid(), force_refresh=True))
+    return jsonify(get_thunderbot_candidates_async(_uid()))
 
 
 @bp.route("/api/watchdog/sentiment")
@@ -125,6 +155,7 @@ def api_watchdog_auto_config():
 
     allowed_keys = {
         "wd_mode", "wd_scan_interval", "wd_max_positions", "wd_max_position_pct",
+        "wd_max_total_exposure_pct",
         "wd_daily_loss_limit", "wd_min_confidence", "wd_watchlist", "wd_kill_switch",
     }
 
@@ -151,6 +182,97 @@ def api_watchdog_auto_kill():
     if active:
         stop_auto_trader()
     return jsonify({"ok": True, "kill_switch": active})
+
+
+# ─── Watchlist Management ───────────────────────────────────
+
+@bp.route("/api/watchdog/watchlist", methods=["GET"])
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_watchlist_get():
+    """Get user's custom watchlist."""
+    from features.watchdog.engine import get_user_watchlist
+    return jsonify({"watchlist": get_user_watchlist(_uid())})
+
+
+@bp.route("/api/watchdog/watchlist", methods=["POST"])
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_watchlist_set():
+    """Add/remove tickers from watchlist."""
+    from features.watchdog.engine import get_user_watchlist, set_user_watchlist
+    uid = _uid()
+    data = request.get_json() or {}
+    action = data.get("action")  # "add", "remove", "set"
+    tickers = data.get("tickers", [])
+
+    current = get_user_watchlist(uid)
+
+    if action == "add":
+        for t in tickers:
+            t = t.strip().upper()
+            if t and t not in current:
+                current.append(t)
+    elif action == "remove":
+        for t in tickers:
+            t = t.strip().upper()
+            if t in current:
+                current.remove(t)
+    elif action == "set":
+        current = [t.strip().upper() for t in tickers if t.strip()]
+    else:
+        return jsonify({"error": "action must be 'add', 'remove', or 'set'"}), 400
+
+    set_user_watchlist(uid, current)
+    return jsonify({"ok": True, "watchlist": current})
+
+
+# ─── Balance & P/L ──────────────────────────────────────────
+
+@bp.route("/api/watchdog/balance")
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_balance():
+    """Comprehensive balance and P&L data."""
+    from features.watchdog.engine import get_watchdog_balance
+    return jsonify(get_watchdog_balance(_uid()))
+
+
+# ─── Pattern Analysis ───────────────────────────────────────
+
+@bp.route("/api/watchdog/patterns/<ticker>")
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_patterns(ticker):
+    """Multi-timeframe pattern analysis for a ticker."""
+    from features.watchdog.engine import analyze_patterns
+    ticker = ticker.strip().upper()
+    return jsonify(analyze_patterns(ticker)), 200, {"Content-Type": "application/json"}
+
+
+# ─── Intraday Opportunities ────────────────────────────────
+
+@bp.route("/api/watchdog/opportunities")
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_opportunities():
+    """Detect intraday dip-recovery opportunities on watchlist."""
+    from features.watchdog.engine import detect_intraday_opportunities, get_user_watchlist
+    uid = _uid()
+    watchlist = get_user_watchlist(uid)
+    return jsonify(detect_intraday_opportunities(watchlist))
+
+
+# ─── LLM Daily Low Prediction ──────────────────────────────
+
+@bp.route("/api/watchdog/predict-low/<ticker>")
+@login_required
+@bot_access_required("watchdog")
+def api_watchdog_predict_low(ticker):
+    """LLM-powered daily low prediction based on volume, candles, pressure."""
+    from features.watchdog.engine import predict_daily_low
+    ticker = ticker.strip().upper()
+    return jsonify(predict_daily_low(ticker))
 
 
 @bp.route("/api/watchdog/paper-trades", methods=["GET"])
@@ -354,3 +476,93 @@ def _close_paper_trade(uid, data):
             "pnl_pct": round(pnl_pct, 2),
         },
     })
+
+
+# ─── Options Flow Tracker ───────────────────────────────────────
+
+@bp.route("/api/watchdog/options-flow")
+@login_required
+@bot_access_required("watchdog")
+def api_options_flow():
+    """Get current call vs put flow for SPY, QQQ. Auto-starts scanner."""
+    from features.watchdog.options_flow import get_current_flow, is_scanner_running, start_scanner
+    # Auto-start scanner on first access
+    if not is_scanner_running():
+        start_scanner()
+    flow = get_current_flow()
+    return jsonify({
+        "flow": flow,
+        "scanner_running": is_scanner_running(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@bp.route("/api/watchdog/options-flow/history/<symbol>")
+@login_required
+@bot_access_required("watchdog")
+def api_options_flow_history(symbol):
+    """Get historical flow data for a symbol."""
+    from features.watchdog.options_flow import get_flow_history
+    limit = request.args.get("limit", 50, type=int)
+    history = get_flow_history(symbol.upper(), limit=min(limit, 100))
+    return jsonify({"symbol": symbol.upper(), "history": history})
+
+
+@bp.route("/api/watchdog/options-flow/start", methods=["POST"])
+@login_required
+@bot_access_required("watchdog")
+def api_options_flow_start():
+    """Start the real-time options flow scanner."""
+    from features.watchdog.options_flow import start_scanner
+    result = start_scanner()
+    return jsonify(result)
+
+
+@bp.route("/api/watchdog/options-flow/stop", methods=["POST"])
+@login_required
+@bot_access_required("watchdog")
+def api_options_flow_stop():
+    """Stop the options flow scanner."""
+    from features.watchdog.options_flow import stop_scanner
+    result = stop_scanner()
+    return jsonify(result)
+
+
+@bp.route("/api/watchdog/options-flow/stream")
+@login_required
+@bot_access_required("watchdog")
+def api_options_flow_stream():
+    """SSE stream for real-time options flow updates and shift notifications."""
+    from features.watchdog.options_flow import subscribe_sse, unsubscribe_sse, get_current_flow, start_scanner
+    from flask import Response
+
+    # Auto-start scanner if not running
+    start_scanner()
+
+    q = subscribe_sse()
+
+    def event_stream():
+        try:
+            # Send initial snapshot
+            flow = get_current_flow()
+            yield f"event: snapshot\ndata: {json.dumps(flow, default=str)}\n\n"
+
+            while True:
+                try:
+                    event_type, data = q.get(timeout=30)
+                    yield f"event: {event_type}\ndata: {json.dumps(data, default=str)}\n\n"
+                except Exception:
+                    # Send keepalive
+                    yield ": keepalive\n\n"
+        finally:
+            unsubscribe_sse(q)
+
+    return Response(
+        event_stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

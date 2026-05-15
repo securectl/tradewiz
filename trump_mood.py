@@ -165,7 +165,7 @@ REVERSAL_PAIRS = [
     ("rate hike", "rate cut"),
 ]
 
-BACKTRACK_CACHE_TTL = 21600        # 6 hours
+BACKTRACK_CACHE_TTL = 3600         # 1 hour — keep backtracks fresh
 BACKTRACK_PREDICTION_TTL = 43200   # 12 hours
 
 # ─── Sector Signal Map ──────────────────────────────────────
@@ -554,6 +554,133 @@ def _score_text(text):
     return round(score, 1), signals
 
 
+def _derive_actionable_signal(mood, pattern, posts_analyzed, top_signals, trade_signals):
+    """Single-decision output for users: BUY / TRIM / SIDELINE / WAIT_QUIET.
+
+    Decisions are intentionally coarse — users shouldn't need to read the timeline
+    to know what to do. Returns headline + 2-3 short reasons.
+
+    Decision logic (priority order):
+      WAIT_QUIET — too few posts or signals; pent-up volatility risk
+      BUY        — bullish mood + improving trend + de-escalation signals
+      TRIM       — bearish mood + deteriorating trend + escalation signals
+      SIDELINE   — mixed / stable, no clear edge
+    """
+    day_scores = pattern.get("day_scores", []) if pattern else []
+    trend = pattern.get("trend", "stable") if pattern else "stable"
+    accel = pattern.get("acceleration", 0) if pattern else 0
+
+    n_signals = len(top_signals or [])
+    n_buy = len(trade_signals.get("buy", [])) if trade_signals else 0
+    n_avoid = len(trade_signals.get("avoid", [])) if trade_signals else 0
+
+    # ── WAIT_QUIET: not enough rhetoric to act on ──────────────────────
+    # Quiet days historically precede volatility — markets price in calm,
+    # then snap when the next post lands. Hold cash, don't anticipate direction.
+    is_quiet = (
+        posts_analyzed < 5
+        or (n_signals < 2 and abs(mood) < 5)
+        or (len(day_scores) >= 3 and max(day_scores) - min(day_scores) < 3 and n_signals < 3)
+    )
+    if is_quiet:
+        return {
+            "action": "WAIT_QUIET",
+            "label": "STAY SIDELINE — UNUSUAL QUIET",
+            "color": "#7e57c2",
+            "headline": "Trump unusually quiet — pent-up policy risk. Hold cash, don't anticipate direction.",
+            "confidence": 65,
+            "reasons": [
+                f"Only {posts_analyzed} statements over the last 3 days (normal: 15+)",
+                f"{n_signals} active policy signal{'s' if n_signals != 1 else ''} — below decision threshold",
+                "Markets often interpret silence as calm, then snap on the next post — both ways",
+            ],
+            "key_factors": [],
+            "next_watch": "Watch for the first major post or White House statement — direction will set tone.",
+        }
+
+    # ── BUY: bullish + improving + de-escalation dominant ─────────────
+    if mood >= 8 and trend == "improving" and n_buy >= n_avoid:
+        return {
+            "action": "BUY",
+            "label": "ADD RISK",
+            "color": "#00c896",
+            "headline": "Rhetoric improving with de-escalation signals — favor risk-on positions.",
+            "confidence": min(95, 60 + int(mood / 2) + (10 if accel > 2 else 0)),
+            "reasons": [
+                f"Mood +{mood:.0f}, trend {trend}, accel {accel:+.1f}",
+                f"{n_buy} beneficiary sector{'s' if n_buy != 1 else ''} flagged BUY",
+                "De-escalation language dominant in recent statements",
+            ],
+            "key_factors": [s.get("text", "") for s in top_signals[:3]],
+            "next_watch": "Watch for confirmation: tariff pause, trade-deal language, fed-friendly tone.",
+        }
+
+    # ── TRIM: bearish + deteriorating + escalation dominant ───────────
+    if mood <= -8 and trend == "deteriorating" and n_avoid >= n_buy:
+        return {
+            "action": "TRIM",
+            "label": "TRIM RISK",
+            "color": "#ff4757",
+            "headline": "Escalating rhetoric — reduce exposure to threatened sectors before further downside.",
+            "confidence": min(95, 60 + int(abs(mood) / 2) + (10 if accel < -2 else 0)),
+            "reasons": [
+                f"Mood {mood:.0f}, trend {trend}, accel {accel:+.1f}",
+                f"{n_avoid} sector{'s' if n_avoid != 1 else ''} flagged AVOID",
+                "Escalation language dominant — tariffs, threats, ultimatums",
+            ],
+            "key_factors": [s.get("text", "") for s in top_signals[:3]],
+            "next_watch": "Watch for tariff implementation dates, retaliation from trading partners.",
+        }
+
+    # ── Policy reversal — softer signals when mood lighter but trend strong ─
+    if mood >= 4 and trend == "improving" and accel >= 2:
+        return {
+            "action": "BUY",
+            "label": "LEAN LONG",
+            "color": "#26a69a",
+            "headline": "Tone softening — early signs of de-escalation. Lean into beneficiaries selectively.",
+            "confidence": 60,
+            "reasons": [
+                f"Mood +{mood:.0f}, accelerating +{accel:.1f}",
+                f"{n_buy} buy / {n_avoid} avoid sectors active",
+                "Pattern suggests reversal from prior bearish stance",
+            ],
+            "key_factors": [s.get("text", "") for s in top_signals[:3]],
+            "next_watch": "Wait for second day of confirmation before adding aggressively.",
+        }
+    if mood <= -4 and trend == "deteriorating" and accel <= -2:
+        return {
+            "action": "TRIM",
+            "label": "LEAN SHORT",
+            "color": "#ff8c42",
+            "headline": "Tone hardening — escalation building. Trim threatened names before it accelerates.",
+            "confidence": 60,
+            "reasons": [
+                f"Mood {mood:.0f}, decelerating {accel:.1f}",
+                f"{n_avoid} avoid / {n_buy} buy sectors active",
+                "Trajectory suggests further escalation risk",
+            ],
+            "key_factors": [s.get("text", "") for s in top_signals[:3]],
+            "next_watch": "Watch next 24-48h for tariff or sanction announcements.",
+        }
+
+    # ── SIDELINE: mixed / stable ───────────────────────────────────────
+    return {
+        "action": "SIDELINE",
+        "label": "STAY SIDELINE",
+        "color": "#ffc837",
+        "headline": "No decisive signal — mood mixed and trend stable. Hold positions, don't add new exposure.",
+        "confidence": 55,
+        "reasons": [
+            f"Mood {mood:+.0f}, trend {trend}, accel {accel:+.1f} — no edge",
+            f"Buy/avoid signals balanced ({n_buy}/{n_avoid})",
+            "Wait for trend break or volume of new statements before acting",
+        ],
+        "key_factors": [s.get("text", "") for s in top_signals[:3]],
+        "next_watch": "Watch for trend break (3+ posts pulling mood ±10) or major policy statement.",
+    }
+
+
 def _compute_3day_pattern(scored_posts):
     """Compute 3-day rolling pattern from scored posts.
     Returns trend direction and acceleration."""
@@ -636,6 +763,16 @@ def get_trump_mood():
             "pattern": {"trend": "unknown", "acceleration": 0, "day_scores": []},
             "top_signals": [], "posts_analyzed": 0,
             "sources": {"truth_social": 0, "news": 0, "whitehouse": 0},
+            "actionable_signal": {
+                "action": "WAIT_QUIET",
+                "label": "STAY SIDELINE — NO DATA",
+                "color": "#636b7e",
+                "headline": "Cannot fetch Trump statements right now — hold cash until data resumes.",
+                "confidence": 50,
+                "reasons": ["Data sources unreachable (Truth Social / GDELT / White House)"],
+                "key_factors": [],
+                "next_watch": "Retry will run automatically; refresh in a few minutes.",
+            },
             "cached": False,
         }
 
@@ -698,6 +835,9 @@ def get_trump_mood():
     # Derive actionable BUY/AVOID sector signals from current rhetoric
     trade_signals = _derive_trade_signals(top_signals, mood, pattern)
 
+    # Single-decision signal (BUY/TRIM/SIDELINE/WAIT_QUIET) — what users should DO
+    actionable_signal = _derive_actionable_signal(mood, pattern, len(all_posts), top_signals, trade_signals)
+
     result = {
         "mood": round(mood, 1),
         "label": label,
@@ -706,6 +846,7 @@ def get_trump_mood():
         "pattern": pattern,
         "top_signals": top_signals,
         "trade_signals": trade_signals,
+        "actionable_signal": actionable_signal,
         "notable_posts": [{
             "text": p["text"][:200],
             "source": p["source"],
@@ -1150,6 +1291,145 @@ def detect_backtracks(days=90):
                 break  # Found a match for this escalation, move on
 
             i += 1
+
+    # ── Mood-swing-based detection (catches TACOs keyword system misses) ──
+    # Scan daily aggregates for large mood reversals regardless of policy tags
+    # This catches cases where escalation+de-escalation keywords appear together
+    daily_moods = {}
+    for row in history:
+        d = str(row.get("created_at", ""))[:10]
+        m = row.get("mood", 0)
+        signals = row.get("top_signals", [])
+        if isinstance(signals, str):
+            try:
+                signals = json.loads(signals)
+            except Exception:
+                signals = []
+        kws = [s.get("text", "") for s in (signals or [])][:5]
+        if d not in daily_moods:
+            daily_moods[d] = {"min": m, "max": m, "first": m, "last": m, "kws": kws, "date_first": row.get("created_at", ""), "date_last": row.get("created_at", "")}
+        else:
+            daily_moods[d]["min"] = min(daily_moods[d]["min"], m)
+            daily_moods[d]["max"] = max(daily_moods[d]["max"], m)
+            daily_moods[d]["last"] = m
+            daily_moods[d]["date_last"] = row.get("created_at", "")
+
+    sorted_days = sorted(daily_moods.keys())
+    for i in range(1, len(sorted_days)):
+        prev_day = sorted_days[i - 1]
+        curr_day = sorted_days[i]
+        prev_data = daily_moods[prev_day]
+        curr_data = daily_moods[curr_day]
+
+        # Detect swing: previous day's avg was very bearish, current day significantly improved (or vice versa)
+        prev_avg = (prev_data["min"] + prev_data["max"]) / 2
+        curr_avg = (curr_data["min"] + curr_data["max"]) / 2
+        swing = curr_avg - prev_avg
+
+        if abs(swing) < 10:
+            continue
+
+        # Also check multi-day: look at 3-day trough to 3-day peak
+        window_start = max(0, i - 3)
+        window_end = min(len(sorted_days), i + 2)
+        window_days = sorted_days[window_start:window_end]
+        window_mins = [daily_moods[d]["min"] for d in window_days]
+        window_maxs = [daily_moods[d]["max"] for d in window_days]
+        peak_to_trough = max(window_maxs) - min(window_mins)
+
+        if peak_to_trough < 20:
+            continue
+
+        # Determine direction
+        if swing > 0:
+            # Mood improved = de-escalation / reversal (TACO)
+            direction = "bullish"
+            initial_mood = prev_data["min"]
+            backtrack_mood = curr_data["max"]
+            initial_stance = f"bearish trough (mood: {initial_mood:.0f})"
+            backtrack_stance = f"mood recovery (mood: {backtrack_mood:.0f})"
+            initial_date = prev_data["date_first"]
+            backtrack_date = curr_data["date_last"]
+        else:
+            # Mood deteriorated = escalation reversal
+            direction = "bearish"
+            initial_mood = prev_data["max"]
+            backtrack_mood = curr_data["min"]
+            initial_stance = f"bullish peak (mood: {initial_mood:.0f})"
+            backtrack_stance = f"mood collapse (mood: {backtrack_mood:.0f})"
+            initial_date = prev_data["date_last"]
+            backtrack_date = curr_data["date_first"]
+
+        actual_swing = backtrack_mood - initial_mood
+
+        # Identify policy area from keywords present
+        all_kws = " ".join(prev_data.get("kws", []) + curr_data.get("kws", []))
+        if "tariff" in all_kws or "trade war" in all_kws or "trade deal" in all_kws:
+            policy = "general_tariffs"
+        elif "china" in all_kws:
+            policy = "china_tariffs"
+        elif "iran" in all_kws or "hormuz" in all_kws or "bomb" in all_kws:
+            policy = "iran_conflict"
+        elif "crypto" in all_kws or "bitcoin" in all_kws:
+            policy = "crypto_policy"
+        else:
+            policy = "mood_swing"
+
+        dedup_key = (policy, prev_day)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
+        confidence = 0.55
+        if abs(actual_swing) > 30:
+            confidence += 0.15
+        if abs(actual_swing) > 50:
+            confidence += 0.15
+        confidence = min(confidence, 0.90)
+
+        try:
+            d1 = datetime.fromisoformat(str(initial_date).replace("Z", ""))
+            d2 = datetime.fromisoformat(str(backtrack_date).replace("Z", ""))
+            gap = abs((d2 - d1).days)
+        except Exception:
+            gap = 1
+
+        bt = {
+            "policy_area": policy,
+            "initial_stance": initial_stance,
+            "initial_date": initial_date,
+            "initial_mood": initial_mood,
+            "backtrack_stance": backtrack_stance,
+            "backtrack_date": backtrack_date,
+            "backtrack_mood": backtrack_mood,
+            "days_to_reversal": gap,
+            "mood_swing": round(actual_swing, 1),
+            "market_impact": json.dumps({
+                "direction": direction,
+                "severity": "high" if abs(actual_swing) > 30 else "medium" if abs(actual_swing) > 20 else "low",
+            }),
+            "detection_method": "mood_swing",
+            "confidence": round(confidence, 2),
+        }
+        backtracks.append(bt)
+
+    # ── Dedup: keep only the strongest backtrack per policy per 3-day window ──
+    # Buckets by (policy_area, backtrack_date_bucket) — keeps one per reversal event
+    dedup_buckets = {}
+    for bt in backtracks:
+        try:
+            bt_date = str(bt.get("backtrack_date", ""))[:10]
+            d = datetime.fromisoformat(bt_date) if bt_date else datetime.now()
+            # 3-day bucket based on backtrack date
+            bucket_key = (bt["policy_area"], d.year, d.month, d.day // 3)
+        except Exception:
+            bucket_key = (bt["policy_area"], 0, 0, 0)
+
+        existing = dedup_buckets.get(bucket_key)
+        if existing is None or abs(bt.get("mood_swing", 0)) > abs(existing.get("mood_swing", 0)):
+            dedup_buckets[bucket_key] = bt
+
+    backtracks = sorted(dedup_buckets.values(), key=lambda b: str(b.get("backtrack_date", "")), reverse=True)
 
     # Save new backtracks to DB
     for bt in backtracks:

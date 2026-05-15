@@ -37,15 +37,16 @@ async function loadAdminUsers() {
                     <div class="bot-toggle-group" id="bot-toggles-${u.id}" style="${isPro && !isAdmin ? '' : isAdmin ? '' : 'opacity:0.4;pointer-events:none'}">
                         <button class="bot-toggle-btn${hasCrypto ? ' active' : ''}" data-bot="crypto" onclick="toggleBotAccess(${u.id}, 'crypto', this)">Crypto</button>
                         <button class="bot-toggle-btn${hasStock ? ' active' : ''}" data-bot="stock" onclick="toggleBotAccess(${u.id}, 'stock', this)">Stock</button>
-                        <button class="bot-toggle-btn${hasWatchdog ? ' active' : ''}" data-bot="watchdog" onclick="toggleBotAccess(${u.id}, 'watchdog', this)">Watchdog</button>
+                        <button class="bot-toggle-btn${hasWatchdog ? ' active' : ''}" data-bot="watchdog" onclick="toggleBotAccess(${u.id}, 'watchdog', this)">ThunderBot</button>
                     </div>
                 </td>
                 <td>
                     ${u.last_login ? `<div>${new Date(u.last_login).toLocaleDateString()}</div><div style="font-size:10px;color:var(--text-secondary)">${new Date(u.last_login).toLocaleTimeString()}</div>` : '<span style="color:var(--text-secondary)">Never</span>'}
                 </td>
-                <td style="display:flex;gap:4px;align-items:center;">
+                <td style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
                     <button class="btn-save-user" id="save-user-${u.id}" onclick="saveUserSettings(${u.id})" style="display:none">Save</button>
                     ${!isAdmin ? `<button class="btn-lock-user" onclick="toggleUserLock(${u.id}, ${!u.is_locked})" style="padding:4px 8px;font-size:10px;border:1px solid ${u.is_locked ? 'var(--accent-green)' : 'var(--accent-red)'};background:transparent;color:${u.is_locked ? 'var(--accent-green)' : 'var(--accent-red)'};border-radius:4px;cursor:pointer;" title="${u.is_locked ? 'Unlock account' : 'Lock account'}">${u.is_locked ? 'Unlock' : 'Lock'}</button>` : ''}
+                    ${!isAdmin ? `<button onclick="deleteUser(${u.id}, '${(u.email || '').replace(/'/g, "\\'")}')" style="padding:4px 8px;font-size:10px;border:1px solid var(--accent-red);background:var(--accent-red);color:#fff;border-radius:4px;cursor:pointer;" title="Permanently delete user (cascades to all their data)">Delete</button>` : ''}
                 </td>
             </tr>`;
         }).join('');
@@ -73,6 +74,107 @@ async function toggleUserLock(userId, lock) {
         alert(`Failed to ${action} account: ${e.message}`);
     }
 }
+
+async function deleteUser(userId, email) {
+    // Two confirms — destructive, cascades to all the user's bot trades, journal,
+    // searches, etc. via ON DELETE CASCADE FKs.
+    if (!confirm(`Permanently delete user ${email}?\n\nThis cascades to ALL their data: trades, journal, configs, history. There is no undo.`)) return;
+    const typed = prompt(`Type the email exactly to confirm:\n${email}`);
+    if (typed !== email) {
+        if (typed !== null) alert('Email did not match — delete cancelled.');
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/admin/users/${userId}/delete`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.ok) {
+            loadAdminUsers();
+        } else {
+            alert(data.error || 'Delete failed');
+        }
+    } catch (e) {
+        alert(`Delete failed: ${e.message}`);
+    }
+}
+
+
+// ─── Global Bot Defaults (admin-only) ───────────────────────
+
+async function loadAdminBotDefaults() {
+    const tbody = document.getElementById('admin-bot-defaults-body');
+    if (!tbody) return;
+    try {
+        const resp = await fetch('/api/admin/bot-defaults');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const defaults = data.defaults || [];
+        if (!defaults.length) {
+            tbody.innerHTML = '<tr><td colspan="3" style="padding:14px;color:var(--text-secondary);text-align:center;">No global defaults set. Each user falls back to hardcoded engine defaults.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = defaults.map(d => `
+            <tr>
+                <td style="padding:6px 10px;font-family:monospace;font-size:12px;color:var(--text-bright);">${d.key}</td>
+                <td style="padding:6px 10px;"><input type="text" id="bd-${d.key}" value="${(d.value || '').replace(/"/g, '&quot;')}" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border-color);color:var(--text-bright);border-radius:4px;font-size:12px;font-family:monospace;"/></td>
+                <td style="padding:6px 10px;display:flex;gap:6px;">
+                    <button onclick="saveBotDefault('${d.key}')" class="btn-analyze" style="padding:4px 10px;font-size:11px;">Save</button>
+                    <button onclick="deleteBotDefault('${d.key}')" style="padding:4px 10px;font-size:11px;border:1px solid var(--accent-red);background:transparent;color:var(--accent-red);border-radius:4px;cursor:pointer;">Clear</button>
+                </td>
+            </tr>`).join('');
+    } catch (e) {
+        console.error('loadAdminBotDefaults failed:', e);
+    }
+}
+
+async function saveBotDefault(key) {
+    const val = (document.getElementById(`bd-${key}`) || {}).value;
+    if (val == null) return;
+    try {
+        const resp = await fetch('/api/admin/bot-defaults', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value: val }),
+        });
+        const data = await resp.json();
+        if (!data.ok) alert(data.error || 'Save failed');
+        else loadAdminBotDefaults();
+    } catch (e) {
+        alert(`Save failed: ${e.message}`);
+    }
+}
+
+async function deleteBotDefault(key) {
+    if (!confirm(`Clear global default for ${key}?\nUsers fall back to hardcoded engine defaults; per-user overrides remain.`)) return;
+    try {
+        await fetch(`/api/admin/bot-defaults/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        loadAdminBotDefaults();
+    } catch (e) {
+        alert(`Clear failed: ${e.message}`);
+    }
+}
+
+async function addBotDefault() {
+    const key = (document.getElementById('bd-new-key') || {}).value;
+    const val = (document.getElementById('bd-new-value') || {}).value;
+    if (!key) { alert('Key is required'); return; }
+    try {
+        const resp = await fetch('/api/admin/bot-defaults', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: key.trim(), value: val || '' }),
+        });
+        const data = await resp.json();
+        if (!data.ok) alert(data.error || 'Add failed');
+        else {
+            document.getElementById('bd-new-key').value = '';
+            document.getElementById('bd-new-value').value = '';
+            loadAdminBotDefaults();
+        }
+    } catch (e) {
+        alert(`Add failed: ${e.message}`);
+    }
+}
+
 
 function setUserTier(userId, tier, btn) {
     const group = btn.parentElement;
@@ -417,5 +519,150 @@ function adminExport(dataset) {
         statusEl.style.color = 'var(--accent-green)';
         setTimeout(() => { statusEl.textContent = ''; }, 3000);
     }, 1000);
+}
+
+
+// ─── LLM Live Override + Snapshot/Revert ─────────────────────
+
+async function loadAdminLlmOverrides() {
+    try {
+        const resp = await fetch('/api/admin/llm-models');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderLlmOverridesTable(data.models || {});
+        renderLlmSnapshots(data.snapshots || []);
+    } catch (e) {
+        console.error('Failed to load LLM overrides:', e);
+    }
+}
+
+function renderLlmOverridesTable(models) {
+    const body = document.getElementById('admin-llm-roles-body');
+    if (!body) return;
+    const roles = Object.keys(models);
+    if (!roles.length) {
+        body.innerHTML = '<tr><td colspan="5" style="padding:12px;color:var(--text-secondary);">No roles registered.</td></tr>';
+        return;
+    }
+    body.innerHTML = roles.map(role => {
+        const m = models[role];
+        const source = m.override_set ? 'DB override' : (m.env ? 'env var' : 'default');
+        const sourceColor = m.override_set ? '#4f8aff' : '#636b7e';
+        return `<tr style="border-bottom:1px solid var(--border-color);">
+            <td style="padding:6px;font-weight:600;color:var(--text-bright);">${role}</td>
+            <td style="padding:6px;color:var(--text-secondary);font-family:monospace;font-size:10px;">${m.current || '<em>(unset)</em>'}</td>
+            <td style="padding:6px;">
+                <input type="text" id="admin-llm-override-${role}" value="${m.override || ''}"
+                       placeholder="${m.env || m.default || 'leave empty to clear'}"
+                       style="width:100%;padding:3px 6px;background:var(--bg-input);border:1px solid var(--border-color);color:var(--text-bright);border-radius:3px;font-size:10px;font-family:monospace;">
+            </td>
+            <td style="padding:6px;color:${sourceColor};font-size:10px;">${source}</td>
+            <td style="padding:6px;text-align:right;">
+                <button onclick="adminLlmSetOverride('${role}')" class="btn-analyze" style="padding:3px 10px;font-size:10px;">Apply</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function renderLlmSnapshots(snapshots) {
+    const list = document.getElementById('admin-llm-snapshots-list');
+    if (!list) return;
+    if (!snapshots.length) {
+        list.innerHTML = '<div style="color:var(--text-secondary);padding:6px;">No snapshots yet.</div>';
+        return;
+    }
+    list.innerHTML = snapshots.map(s => {
+        const when = s.created_at ? s.created_at.split('.')[0] : '';
+        const modelCount = Object.keys(s.models || {}).length;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-color);">
+            <div style="flex:1;">
+                <div style="color:var(--text-bright);font-weight:600;">${s.label}</div>
+                <div style="color:var(--text-secondary);font-size:10px;">${when} · ${modelCount} roles captured</div>
+            </div>
+            <button onclick="adminLlmRevert(${s.id})" class="btn-analyze" style="padding:3px 10px;font-size:10px;">Revert</button>
+            <button onclick="adminLlmDeleteSnapshot(${s.id})" style="padding:3px 8px;font-size:10px;background:none;border:1px solid var(--border-color);color:var(--text-secondary);border-radius:3px;cursor:pointer;">Delete</button>
+        </div>`;
+    }).join('');
+}
+
+async function adminLlmSetOverride(role) {
+    const input = document.getElementById(`admin-llm-override-${role}`);
+    if (!input) return;
+    const model = input.value.trim();
+    try {
+        const resp = await fetch('/api/admin/llm-models/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, model }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert(data.error || 'Failed to set override');
+            return;
+        }
+        loadAdminLlmOverrides();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function adminLlmSaveSnapshot() {
+    const labelEl = document.getElementById('admin-llm-snapshot-label');
+    const label = labelEl ? labelEl.value.trim() : '';
+    try {
+        const resp = await fetch('/api/admin/llm-models/snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            alert(data.error || 'Snapshot failed');
+            return;
+        }
+        if (labelEl) labelEl.value = '';
+        loadAdminLlmOverrides();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function adminLlmRevert(snapshotId) {
+    if (!confirm('Revert all LLM model overrides to this snapshot? Current overrides will be replaced.')) return;
+    try {
+        const resp = await fetch('/api/admin/llm-models/revert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ snapshot_id: snapshotId }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            alert(data.error || 'Revert failed');
+            return;
+        }
+        loadAdminLlmOverrides();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function adminLlmDeleteSnapshot(snapshotId) {
+    if (!confirm('Delete this snapshot? This cannot be undone.')) return;
+    try {
+        await fetch(`/api/admin/llm-models/snapshot/${snapshotId}`, { method: 'DELETE' });
+        loadAdminLlmOverrides();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function adminLlmClearAllOverrides() {
+    if (!confirm('Clear ALL LLM model overrides? Every role will fall back to env/default.')) return;
+    try {
+        await fetch('/api/admin/llm-models/clear', { method: 'POST' });
+        loadAdminLlmOverrides();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
 }
 

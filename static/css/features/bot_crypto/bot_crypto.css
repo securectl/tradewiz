@@ -877,7 +877,7 @@
     line-height: 1.4;
     border-bottom: 1px solid rgba(54,58,69,0.4);
 }
-.bot-log-time { color: var(--text-secondary); min-width: 65px; flex-shrink: 0; }
+.bot-log-time { color: var(--text-bright); min-width: 65px; flex-shrink: 0; }
 .bot-log-level { font-weight: 600; min-width: 42px; flex-shrink: 0; }
 .bot-log-msg { color: var(--text-primary); word-break: break-word; }
 

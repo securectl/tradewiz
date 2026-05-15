@@ -23,12 +23,23 @@ from crypto_bot.blofin_client import BloFinClient, COIN_MAP, DEFAULT_COINS, ensu
 from crypto_bot.risk_manager import RiskManager
 from crypto_bot.crypto_validator import validate_trade, detect_direction
 from market_sensor import check_market_health
+try:
+    from crypto_bot.ml_brain import get_brain
+    _HAS_ML_BRAIN = True
+except ImportError:
+    _HAS_ML_BRAIN = False
+    logger.info("ML Brain not available — continuing with rule-based self-learning")
 
 P = "%s" if IS_POSTGRES else "?"
 
 
 def _get_config(user_id, key, default=None):
-    row = query_one(f"SELECT value FROM bot_config WHERE user_id = {P} AND key = {P}", (user_id, key))
+    # User-specific row wins; falls back to admin-set global row (user_id=0).
+    row = query_one(
+        f"SELECT value FROM bot_config WHERE user_id IN ({P}, 0) AND key = {P} "
+        f"ORDER BY CASE WHEN user_id = 0 THEN 1 ELSE 0 END LIMIT 1",
+        (user_id, key),
+    )
     return row["value"] if row else default
 
 
@@ -169,9 +180,14 @@ def _get_adaptive_params(user_id) -> dict:
     - Position sizing bounded to [0.7, 1.0] — never scale UP (overfit trap)
     - Uses 14-day rolling window (not all-time) to respond to regime changes
     """
+    # Permanent blacklist — strategies disabled at the engine level regardless
+    # of recent stats. ema_trend audited Apr 2026: 51 trades, 9.8% WR, -$25.53 net
+    # over the rolling window. Statistical evidence is overwhelming; never trade it.
+    permanent_blacklist = ["ema_trend"]
+
     params = {
         "position_scale": 1.0,
-        "blacklisted_strategies": [],
+        "blacklisted_strategies": list(permanent_blacklist),
         "hot_strategies": [],
         "cautious_coins": [],     # Coins with consistently negative P&L — reduce size
         "confidence_threshold": 0.45,
@@ -217,9 +233,12 @@ def _get_adaptive_params(user_id) -> dict:
             wins = sum(1 for p in pnls if p > 0)
             wr = wins / n * 100 if n > 0 else 0
 
-            # Blacklist: min 6 trades + WR < 35% + net negative
-            # This is stricter than raw WR alone — requires both frequency AND consistent loss
-            if n >= 6 and wr < 35 and net < 0:
+            # Blacklist: stricter rule — min 10 trades + WR < 25% + net negative.
+            # Loosened from "n≥6 AND WR<35%" (Apr 2026 audit) — the prior threshold
+            # was banning borderline strategies (macd_cross, trend_dca) that had
+            # acceptable expectancy. New rule keeps marginal strategies alive but
+            # nukes truly broken ones (ema_trend remains in permanent_blacklist).
+            if n >= 10 and wr < 25 and net < 0 and strat not in params["blacklisted_strategies"]:
                 params["blacklisted_strategies"].append(strat)
             # Hot: min 8 trades + WR > 55% + net positive (high bar to avoid false positives)
             elif n >= 8 and wr > 55 and net > 0:
@@ -276,6 +295,10 @@ class TradingBot:
         self._adaptive_params = {}
         self._last_adaptive_refresh = None
         self._kill_switch_time = None
+        # Latest RSI per coin from most recent scan — consumed by _check_exits
+        self._latest_rsi = {}
+        # ML Brain for neural network self-learning
+        self._ml_brain = get_brain(user_id) if _HAS_ML_BRAIN else None
 
     @property
     def is_running(self) -> bool:
@@ -486,6 +509,27 @@ class TradingBot:
 
         self._refresh_adaptive()
 
+        # ML Brain: trigger retraining if needed (runs in background thread)
+        if self._ml_brain:
+            try:
+                self._ml_brain.maybe_retrain()
+                # Apply ML-optimized parameters to adaptive params
+                if self._ml_brain.is_ready():
+                    ml_params = self._ml_brain.get_optimal_params()
+                    # Merge ML strategy insights into adaptive params
+                    for strat in ml_params.get("strategies_to_disable", []):
+                        if strat not in self._adaptive_params.get("blacklisted_strategies", []):
+                            self._adaptive_params.setdefault("blacklisted_strategies", []).append(strat)
+                            _log(self.user_id, "info", f"ML Brain: disabling strategy '{strat}' (negative P&L pattern detected)")
+                    for strat in ml_params.get("strategies_to_boost", []):
+                        if strat not in self._adaptive_params.get("hot_strategies", []):
+                            self._adaptive_params.setdefault("hot_strategies", []).append(strat)
+                    # Store ML-derived SL/TP multipliers for use in trade execution
+                    self._adaptive_params["ml_sl_mult"] = ml_params.get("sl_multiplier", 1.2)
+                    self._adaptive_params["ml_tp_mult"] = ml_params.get("tp_multiplier", 4.0)
+            except Exception as e:
+                _log(self.user_id, "warn", f"ML Brain update failed: {e}")
+
         # Daily goal progress check
         goal = _get_daily_goal_progress(self.user_id)
         if goal["pct"] >= 100:
@@ -558,13 +602,28 @@ class TradingBot:
                 ticker_data = yf.Ticker(yf_ticker)
                 df_daily = ticker_data.history(period="3mo", interval="1d")
 
+                # Defensive: yfinance can return frames riddled with NaN, partial
+                # rows, or empty frames for delisted/renamed tickers (e.g. MATIC
+                # → POL). Drop NaN rows + require ≥50 clean bars before passing
+                # to calculate_indicators, which historically tuple-indexed and
+                # raised "tuple index out of range" on partial data.
+                if df_daily is None or df_daily.empty:
+                    _log(self.user_id, "warn", f"{coin_key}: yfinance returned no daily data (delisted/typo?) — skipping daily TF")
+                    df_daily = None
+                else:
+                    df_daily = df_daily.dropna(how="any", subset=["Close", "High", "Low", "Open", "Volume"]) if all(c in df_daily.columns for c in ["Close","High","Low","Open","Volume"]) else df_daily.dropna(how="all")
+
                 if df_daily is not None and len(df_daily) >= 50:
                     daily_indicators = calculate_indicators(df_daily)
                     swing_signal = self._generate_swing_signal(coin_key, daily_indicators, df_daily)
                     if swing_signal:
                         # Check max 3 open swing positions
                         swing_open = query_one(
-                            f"SELECT COUNT(*) as cnt FROM bot_trades WHERE user_id = {P} AND status = 'open' AND asset_type = 'crypto' AND strategy LIKE 'swing_%'",
+                            # NOTE: psycopg2 substitutes %-tokens — bare '%' in the
+                            # LIKE pattern collides with the %s placeholder for
+                            # user_id and crashes with "tuple index out of range".
+                            # Escape as %% to keep it a literal in the query.
+                            f"SELECT COUNT(*) as cnt FROM bot_trades WHERE user_id = {P} AND status = 'open' AND asset_type = 'crypto' AND strategy LIKE 'swing_%%'",
                             (self.user_id,),
                         )
                         swing_count = int(swing_open["cnt"]) if swing_open else 0
@@ -575,10 +634,15 @@ class TradingBot:
                             indicators = daily_indicators
                             df = df_daily
                             _log(self.user_id, "info", f"{coin_key}: Swing signal on daily TF — {swing_signal['strategy']}")
-                else:
-                    _log(self.user_id, "warn", f"{coin_key}: Insufficient daily data for swing analysis ({len(df_daily) if df_daily is not None else 0} bars)")
+                elif df_daily is not None:
+                    _log(self.user_id, "warn", f"{coin_key}: Insufficient clean daily data ({len(df_daily)} bars after dropna)")
             except Exception as e:
-                _log(self.user_id, "error", f"Failed to fetch daily data for {coin_key}: {e}")
+                # Full traceback so future failures can be pinpointed instead
+                # of being masked behind a one-line "tuple index out of range".
+                import traceback
+                tb = traceback.format_exc().splitlines()
+                origin = tb[-3] if len(tb) >= 3 else str(e)
+                _log(self.user_id, "error", f"Failed to fetch daily data for {coin_key}: {e} | at {origin.strip()[:120]}")
 
         # --- Scalp / Hybrid: fetch hourly data and generate scalp signals ---
         if signal is None and trade_mode in ("scalp", "hybrid"):
@@ -599,6 +663,14 @@ class TradingBot:
                 return
 
             signal = self._generate_signal(coin_key, indicators, df)
+
+        # Cache latest RSI for this coin so _check_exits can fire RSI-based exits
+        try:
+            rsi_val = indicators.get("rsi_14")
+            if rsi_val is not None:
+                self._latest_rsi[coin_key] = float(rsi_val)
+        except Exception:
+            pass
 
         # If swing-only mode and no swing signal, also need hourly data for logging
         if signal is None and trade_mode == "swing":
@@ -750,16 +822,11 @@ class TradingBot:
                 stop_loss = current_price * 1.08   # 8% above
                 take_profit = current_price * 0.75  # 25% below
         else:
-            # Data-driven SL/TP (derived from 127-trade analysis):
-            # - Losers avg 1.8% move, winners avg 2.3% — R:R was 1.27, too tight.
-            # - Tighter SL (1.2x ATR) cuts losers ~25% faster.
-            # - Wider TP (4.0x ATR) lets winners run to capture full momentum.
-            # - Target R:R = 3.3:1, profitable at 30%+ win rate after ~0.16% fee drag.
-            # - Hot strategies get slightly wider SL (1.5x) to avoid premature stops.
+            # Data-driven SL/TP — use ML-optimized multipliers if available
             strategy_name = signal.get("strategy", "")
             is_hot = strategy_name in self._adaptive_params.get("hot_strategies", [])
-            sl_mult = 1.5 if is_hot else 1.2
-            tp_mult = 4.0
+            sl_mult = 1.5 if is_hot else self._adaptive_params.get("ml_sl_mult", 1.2)
+            tp_mult = self._adaptive_params.get("ml_tp_mult", 4.0)
 
             if signal["side"] == "buy":
                 stop_loss = current_price - (sl_mult * effective_atr)
@@ -767,6 +834,63 @@ class TradingBot:
             else:
                 stop_loss = current_price + (sl_mult * effective_atr)
                 take_profit = current_price - (tp_mult * effective_atr)
+
+        # Quick backtest: validate signal against recent price history
+        try:
+            from shared.backtest import quick_backtest
+            sl_pct = abs(current_price - stop_loss) / current_price * 100 if current_price > 0 else 2.0
+            tp_pct = abs(take_profit - current_price) / current_price * 100 if current_price > 0 else 5.0
+            bt = quick_backtest(
+                df, side=signal["side"], strategy=signal.get("strategy", "unknown"),
+                stop_loss_pct=sl_pct, take_profit_pct=tp_pct,
+                lookback=5, max_hold_bars=12 if not is_swing else 30,
+            )
+            _log(self.user_id, "info", f"{coin_key}: {bt['detail']}")
+            if not bt["pass"]:
+                _log(self.user_id, "info", f"{coin_key}: Backtest FAILED — signal would have lost money recently, skipping trade")
+                self._record_rejected_signal(coin_key, signal, current_price,
+                    {"approved": False, "summary": f"Backtest rejected: {bt['detail']}"})
+                return
+        except Exception as e:
+            _log(self.user_id, "warn", f"{coin_key}: Backtest check failed: {e}")
+
+        # ML Brain: score the signal and gate low-quality trades
+        if self._ml_brain and self._ml_brain.is_ready():
+            try:
+                ml_result = self._ml_brain.score_signal(
+                    coin_key, signal["side"], current_price, indicators,
+                    signal.get("strategy", "unknown"), stop_loss, take_profit,
+                )
+                ml_score = ml_result.get("ml_score")
+                ml_rec = ml_result.get("recommendation")
+                cluster = ml_result.get("cluster_info")
+
+                if ml_score is not None:
+                    cluster_str = f" cluster_wr={cluster['win_rate']:.0f}%" if cluster else ""
+                    _log(self.user_id, "info",
+                         f"{coin_key}: ML Brain score={ml_score:.1f}% rec={ml_rec}{cluster_str}")
+
+                    # AVOID: don't block — shrink position to 40% of normal so the
+                    # bot keeps trading on its only available signals (paper-trade
+                    # bias per CLAUDE.md). Hard-block remains for clearly broken
+                    # scores (<5%) where the model is essentially screaming.
+                    if ml_rec == "AVOID" and ml_score < 5:
+                        _log(self.user_id, "info",
+                             f"{coin_key}: ML Brain BLOCKED — score {ml_score:.1f}% is critically low")
+                        self._record_rejected_signal(coin_key, signal, current_price,
+                            {"approved": False, "summary": f"ML Brain rejected: score={ml_score:.1f}%, rec={ml_rec}"})
+                        return
+                    if ml_rec == "AVOID":
+                        size_usd *= 0.4
+                        size_coins = size_usd / current_price if current_price > 0 else 0
+                        _log(self.user_id, "info",
+                             f"{coin_key}: ML Brain AVOID — reducing position 60% to ${size_usd:.2f} (score={ml_score:.1f}%)")
+                    elif ml_rec == "WEAK" and ml_score < 45:
+                        size_usd *= 0.6
+                        size_coins = size_usd / current_price if current_price > 0 else 0
+                        _log(self.user_id, "info", f"{coin_key}: ML Brain WEAK signal — reducing position 40% to ${size_usd:.2f}")
+            except Exception as e:
+                _log(self.user_id, "warn", f"{coin_key}: ML Brain scoring failed: {e}")
 
         order_result = self.client.place_order(
             inst_id=blofin_id, side=signal["side"], size=size_coins,
@@ -786,11 +910,10 @@ class TradingBot:
                  signal.get("strategy", "unknown"), direction_bias),
             )
             _log(self.user_id, "info", f"TRADE OPENED: {signal['side']} {size_coins:.6f} {coin_key} ({contracts} contracts) @ ${current_price:,.2f} | SL: ${stop_loss:,.2f} | TP: ${take_profit:,.2f}")
-            _journal_log(self.user_id,
-                ticker=coin_key, action="BUY" if signal["side"] == "buy" else "SELL",
-                entry_price=current_price, shares=round(size_coins, 6),
-                notes=f"[Crypto Bot] {signal['side'].upper()} — {signal['reason']}",
-            )
+            # Note: bot trades go in `bot_trades` (queried by tracker bot-trades
+            # endpoint). The user-facing `journal_entries` is for manual entries
+            # only — auto-logging here was polluting the journal panel with
+            # crypto pairs (audit Apr 2026).
         else:
             error_msg = order_result.get("error", "unknown")
             _log(self.user_id, "error", f"Order failed for {coin_key}: {error_msg}")
@@ -805,11 +928,6 @@ class TradingBot:
                      signal.get("strategy", "unknown"), direction_bias),
                 )
                 _log(self.user_id, "warn", f"PAPER TRADE (local): {signal['side']} {size_coins:.6f} {coin_key} @ ${current_price:,.2f} — BloFin API key is read-only")
-                _journal_log(self.user_id,
-                    ticker=coin_key, action="BUY" if signal["side"] == "buy" else "SELL",
-                    entry_price=current_price, shares=round(size_coins, 6),
-                    notes=f"[Crypto Bot] PAPER {signal['side'].upper()} — {signal['reason']}",
-                )
 
     def _generate_signal(self, coin_key: str, indicators: dict, df) -> dict:
         """Generate BUY/SELL signal using multiple strategies."""
@@ -874,6 +992,20 @@ class TradingBot:
                     return None
         except Exception:
             pass
+
+        # --- Strategy 0: RSI Reversal (user-mandated mean-reversion buy) ---
+        # Bypasses the data-driven _rsi_buy_ok guard intentionally — guard is built on
+        # momentum strategies (MACD/EMA), not on filtered oversold bounces.
+        # Falling-knife filters: price near EMA20, SMA50 not in freefall, last bar bullish.
+        if rsi < 30 and ema_20 > 0 and sma_50 > 0 and len(df) >= 2:
+            prev_close = float(df["Close"].iloc[-2])
+            dist_to_ema20 = abs(current_price - ema_20) / ema_20
+            dist_to_sma50 = abs(current_price - sma_50) / sma_50
+            bullish_bar = current_price > prev_close * 1.003  # last bar +0.3% min
+            if dist_to_ema20 < 0.05 and dist_to_sma50 < 0.10 and bullish_bar:
+                return {"side": "buy",
+                        "reason": f"RSI reversal: RSI={rsi:.1f} oversold + within {dist_to_ema20:.1%} of EMA20 + bullish reversal bar",
+                        "strategy": "rsi_reversal"}
 
         # --- Strategy 1: MACD Crossover ---
         if macd_bull_cross and macd_pct >= 0.02 and rsi < 68 and rsi > 28 and current_price > ema_20 and _rsi_buy_ok:
@@ -964,6 +1096,18 @@ class TradingBot:
                         return None
                 if close_pos <= 0.25 and rsi > 30 and current_price < sma_50:
                     return {"side": "sell", "reason": f"Dump on close: vol surge ({rel_vol:.1f}x) + large body + close in lower 25% + RSI={rsi:.1f} + below SMA50", "strategy": "pump_on_close"}
+
+        # ── Deep oversold rebound (last-resort BUY when nothing else fired) ──
+        # Fires on RSI < 25 alone — knife-risk explicitly accepted per user spec
+        # Apr 2026. Goal: stay actively trading even when MACD/SMA gates filter
+        # everything out in deep selloffs (markets where every coin is RSI 22-30
+        # but bot generates 0 signals because they're all "still falling").
+        # Discipline: position_scale and cautious_coins still apply; if WR < 25%
+        # over 10 trades the self-learning blacklist auto-removes it.
+        if rsi < 25:
+            return {"side": "buy",
+                    "reason": f"Deep oversold rebound: RSI={rsi:.1f} (<25) — bounce candidate, knife-risk accepted",
+                    "strategy": "deep_oversold_rebound"}
 
         return None
 
@@ -1109,6 +1253,19 @@ class TradingBot:
 
                 is_swing_trade = str(trade.get("strategy", "")).startswith("swing_")
 
+                # +4% hard lock for non-swing trades — preserve gains before reversal
+                if not should_exit and not is_swing_trade and pnl_pct >= 4.0:
+                    should_exit, exit_reason = True, f"Quick profit lock: +{pnl_pct:.1f}% reached (preserving gains)"
+
+                # RSI-based exit using latest cached RSI from _process_coin
+                if not should_exit:
+                    current_rsi = self._latest_rsi.get(trade["coin"])
+                    if current_rsi is not None and pnl_pct > 0.5:
+                        if trade["side"] == "buy" and current_rsi > 60:
+                            should_exit, exit_reason = True, f"RSI overbought exit: RSI={current_rsi:.1f}>60, locking +{pnl_pct:.1f}%"
+                        elif trade["side"] == "sell" and current_rsi < 30:
+                            should_exit, exit_reason = True, f"RSI oversold exit (short): RSI={current_rsi:.1f}<30, locking +{pnl_pct:.1f}%"
+
                 # Trailing stop logic
                 if not should_exit and is_swing_trade:
                     # Swing trades: lock in 50% of max unrealized profit
@@ -1146,7 +1303,12 @@ class TradingBot:
                             opened = datetime.fromisoformat(opened_str)
                         hours_open = (datetime.now() - opened).total_seconds() / 3600
 
-                        if is_swing_trade:
+                        # Hard hold cap: force-close anything still open after 48h
+                        # regardless of P&L or trade type. Prevents capital lockup;
+                        # see audit Apr 2026 — positions sat 56 days untouched.
+                        if hours_open >= 48:
+                            should_exit, exit_reason = True, f"Hard 48h cap: open {hours_open / 24:.1f}d, P&L {pnl_pct:+.2f}% (force-close)"
+                        elif is_swing_trade:
                             # Swing time exit: 14 days
                             if hours_open >= 336 and abs(pnl_pct) < 2.0:
                                 should_exit, exit_reason = True, f"Swing time exit: open {hours_open / 24:.0f}d with only {pnl_pct:+.2f}% P&L (stale swing trade)"

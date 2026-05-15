@@ -402,9 +402,75 @@ function renderScreenerResults(data, fromCache = false) {
     results.innerHTML = html;
 }
 
+// Semi-circle gauge for numeric metrics. value is clamped to [0, max].
+//   options.inverted = true → high = bad (red at top)
+//   options.colorFn = fn(v) → custom color (used for RSI bands)
+//   options.displayValue = override the number shown in center
+//   options.suffix = "%" appended to value
+function _screenerGauge(value, max, label, options) {
+    options = options || {};
+    const v = Math.max(0, Math.min(max, Number(value) || 0));
+    const ratio = max > 0 ? v / max : 0;
+    const suffix = options.suffix || '';
+    let color;
+    if (options.colorFn) {
+        color = options.colorFn(v);
+    } else if (options.inverted) {
+        color = ratio >= 0.7 ? '#ef5350' : ratio >= 0.4 ? '#ff9800' : '#26a69a';
+    } else {
+        color = ratio >= 0.7 ? '#26a69a' : ratio >= 0.4 ? '#ff9800' : '#ef5350';
+    }
+    // 180° arc: center (40,40), radius 32. Sweeps left→right, clockwise.
+    const cx = 40, cy = 40, r = 32;
+    const angle = Math.PI - ratio * Math.PI;
+    const fgX = cx + r * Math.cos(angle);
+    const fgY = cy - r * Math.sin(angle);
+    const startX = cx - r, startY = cy, endX = cx + r, endY = cy;
+    const bgArc = `M ${startX} ${startY} A ${r} ${r} 0 0 1 ${endX} ${endY}`;
+    const fgArc = `M ${startX} ${startY} A ${r} ${r} 0 0 1 ${fgX.toFixed(1)} ${fgY.toFixed(1)}`;
+    const display = options.displayValue != null ? options.displayValue : v.toFixed(0) + suffix;
+    return `<div class="screener-metric-gauge">
+        <svg viewBox="0 0 80 48" width="100%" height="42" style="display:block;">
+            <path d="${bgArc}" stroke="#2a2e39" stroke-width="6" fill="none" stroke-linecap="round"/>
+            <path d="${fgArc}" stroke="${color}" stroke-width="6" fill="none" stroke-linecap="round"/>
+            <text x="40" y="42" text-anchor="middle" fill="${color}" font-size="13" font-weight="700">${display}</text>
+        </svg>
+        <div class="gauge-label">${label}</div>
+    </div>`;
+}
+
+// RSI gauge color: red in oversold (<30) AND overbought (>70), green in middle
+function _rsiGaugeColor(v) {
+    if (v < 30) return '#ef5350';
+    if (v > 70) return '#ef5350';
+    if (v < 40 || v > 60) return '#ff9800';
+    return '#26a69a';
+}
+
+// Map any verdict string to one of five visual tiers. Used to drive card
+// border + verdict-pill colors so each conviction band is distinct instead
+// of collapsing every non-opportunity into a single orange tone.
+function _screenerVerdictTier(verdict) {
+    const v = (verdict || '').toUpperCase();
+    if (v.includes('FALLING') || v === 'AVOID') return 'avoid';
+    if (v === 'RISKY' || v.includes('CAUTIOUS')) return 'cautious';
+    if (v.includes('OPPORTUNITY') || v.includes('STRONG') || v === 'BULLISH') return 'strong';
+    if (v.includes('BOTTOM') || v.includes('MOMENTUM') || v.includes('RECOVERY') || v.includes('ACCELERAT')) return 'momentum';
+    return 'watch';
+}
+
+const _SCREENER_TIER_COLOR = {
+    strong: '#00c896',     // --accent-green (high conviction long)
+    momentum: '#7c5dfa',   // --accent-purple (improving setup)
+    watch: '#4f8aff',      // --accent-blue (wait/neutral)
+    cautious: '#ffc837',   // --accent-yellow (proceed with care)
+    avoid: '#ff4757',      // --accent-red (stay away)
+};
+
 function buildScreenerCard(c, type, cat) {
     cat = cat || screenerCategory;
-    const verdictColor = type === 'opportunity' ? '#26a69a' : '#ff9800';
+    const tier = _screenerVerdictTier(c.verdict);
+    const verdictColor = _SCREENER_TIER_COLOR[tier];
 
     // Category-specific catalysts/risks field names
     const catalystList = c.growth_catalysts || c.catalysts || [];
@@ -568,27 +634,53 @@ function buildScreenerCard(c, type, cat) {
             ${c.position_limit_pct ? `<div class="indicator-row"><span class="indicator-label">Max Position</span><span class="indicator-value" style="font-size:11px;">${c.position_limit_pct}% of account</span></div>` : ''}`;
     }
 
+    // Compact-by-default card. Header row is always visible; details expand on click.
+    // Header shows: ticker, name, verdict pill, price, confidence bar/gauge, expand chevron.
+    const conf = Number(c.confidence || 0);
+    const confColor = conf >= 70 ? '#26a69a' : conf >= 40 ? '#ff9800' : '#ef5350';
+    const cardId = `screener-card-${c.ticker}-${type}`;
+    const compactConfidenceGauge = _screenerGauge(conf, 100, 'Confidence', { suffix: '%' });
+
     return `
-        <div class="screener-card ${type}">
-            <div class="screener-card-header">
-                <div>
-                    <span class="screener-ticker">${c.ticker}</span>
-                    <span class="screener-name">${c.name || ''}</span>
+        <div class="screener-card ${type} tier-${tier}" id="${cardId}">
+            <div class="screener-card-compact" onclick="_toggleScreenerCardDetail('${cardId}')">
+                <div class="screener-compact-main">
+                    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+                        <span class="screener-ticker">${yahooFinanceLink(c.ticker, {stopPropagation: true})}</span>
+                        <span class="screener-name">${c.name || ''}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:#787b86;margin-top:2px;">
+                        <span style="color:#d1d4dc;font-weight:600;">$${c.price}</span>
+                        <span>${c.sector || ''}</span>
+                    </div>
                 </div>
-                <span class="screener-verdict" style="color:${verdictColor};">${c.verdict}</span>
+                <div class="screener-compact-gauge">${compactConfidenceGauge}</div>
+                <div class="screener-compact-right">
+                    <span class="screener-verdict" style="color:${verdictColor};border:1px solid ${verdictColor}44;background:${verdictColor}18;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap;">${c.verdict || '—'}</span>
+                    <span class="screener-card-chevron" style="color:#787b86;font-size:14px;transition:transform 0.2s;">▾</span>
+                </div>
             </div>
-            <div class="screener-card-price">
-                <span>$${c.price}</span>
-                <span class="screener-sector">${c.sector || ''}</span>
+            <div class="screener-card-details" style="display:none;">
+                ${metricsHtml}
+                <div class="screener-card-detail">${detailHtml}</div>
+                ${catalysts ? `<div style="margin-top:6px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">CATALYSTS</div>${catalysts}</div>` : ''}
+                ${flags ? `<div style="margin-top:4px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">${cat === 'lowcap' ? 'RED FLAGS' : 'RISKS'}</div>${flags}</div>` : ''}
+                <div style="margin-top:8px; font-size:11px; color:#787b86; line-height:1.5;">${c.summary || ''}</div>
+                <button class="btn-screener-analyze" onclick="event.stopPropagation();analyzeFromScreener('${c.ticker}')">Full Analysis</button>
             </div>
-            ${metricsHtml}
-            <div class="screener-card-detail">${detailHtml}</div>
-            ${catalysts ? `<div style="margin-top:6px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">CATALYSTS</div>${catalysts}</div>` : ''}
-            ${flags ? `<div style="margin-top:4px;"><div style="font-size:9px; color:#787b86; margin-bottom:3px;">${cat === 'lowcap' ? 'RED FLAGS' : 'RISKS'}</div>${flags}</div>` : ''}
-            <div style="margin-top:8px; font-size:11px; color:#787b86; line-height:1.5;">${c.summary || ''}</div>
-            <button class="btn-screener-analyze" onclick="analyzeFromScreener('${c.ticker}')">Full Analysis</button>
         </div>
     `;
+}
+
+function _toggleScreenerCardDetail(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    const details = card.querySelector('.screener-card-details');
+    const chevron = card.querySelector('.screener-card-chevron');
+    if (!details) return;
+    const willOpen = details.style.display === 'none';
+    details.style.display = willOpen ? 'block' : 'none';
+    if (chevron) chevron.style.transform = willOpen ? 'rotate(180deg)' : 'rotate(0deg)';
 }
 
 function analyzeFromScreener(ticker) {
@@ -675,18 +767,45 @@ function renderQullamaggieResults(data) {
     let html = `<div style="font-size:12px; color:#787b86; margin-bottom:12px;">Found ${results.length} setups from ${data.scanned} stocks scanned</div>`;
     html += '<div class="qullamaggie-grid">';
 
-    results.forEach(r => {
-        const badgeClass = r.setup_type === 'HTF' ? 'setup-badge-htf' : r.setup_type === 'VCP' ? 'setup-badge-vcp' : 'setup-badge-ep';
-        const scoreColor = r.score >= 8 ? '#26a69a' : r.score >= 6 ? '#ff9800' : '#787b86';
+    // Split Stage 2 (recovery / rocket-potential) from momentum setups
+    const stage2 = results.filter(r => r.setup_type === 'STAGE2');
+    const momentum = results.filter(r => r.setup_type !== 'STAGE2');
 
-        html += `
+    function renderCard(r) {
+        const badgeClass = r.setup_type === 'HTF' ? 'setup-badge-htf'
+                         : r.setup_type === 'VCP' ? 'setup-badge-vcp'
+                         : r.setup_type === 'STAGE2' ? 'setup-badge-stage2'
+                         : 'setup-badge-ep';
+        const scoreColor = r.score >= 8 ? '#26a69a' : r.score >= 6 ? '#ff9800' : '#787b86';
+        const isStage2 = r.setup_type === 'STAGE2';
+        const phaseColor = r.phase === 'breakout' ? '#26a69a' : r.phase === 'loaded' ? '#ff9800' : '#787b86';
+
+        const stage2Detail = isStage2 ? `
+                    <div class="indicator-row"><span class="indicator-label">Phase</span><span class="indicator-value" style="font-size:11px; color:${phaseColor}; font-weight:700; text-transform:uppercase;">${r.phase}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Above 52w Low</span><span class="indicator-value" style="font-size:11px;">${r.above_52w_low_pct}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Below 52w High</span><span class="indicator-value" style="font-size:11px;">${r.below_52w_high_pct}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Days Since Low</span><span class="indicator-value" style="font-size:11px;">${r.days_since_52w_low}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">RSI</span><span class="indicator-value" style="font-size:11px;">${r.rsi}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Vol Expansion</span><span class="indicator-value" style="font-size:11px; color:${r.vol_expansion >= 1.4 ? '#26a69a' : 'inherit'};">${r.vol_expansion}x</span></div>
+                    <div class="indicator-row"><span class="indicator-label">SMA50/200</span><span class="indicator-value" style="font-size:11px; color:${r.sma_ratio >= 1.0 ? '#26a69a' : 'inherit'};">${r.sma_ratio}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Base High</span><span class="indicator-value" style="font-size:11px;">$${r.base_high}</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Base Range</span><span class="indicator-value" style="font-size:11px;">${r.consolidation_depth_pct}%</span></div>` : `
+                    <div class="indicator-row"><span class="indicator-label">1M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_1m >= 25 ? '#26a69a' : 'inherit'};">${r.rel_strength_1m}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">3M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_3m >= 50 ? '#26a69a' : 'inherit'};">${r.rel_strength_3m}%</span></div>
+                    <div class="indicator-row"><span class="indicator-label">Vol Ratio</span><span class="indicator-value" style="font-size:11px;">${r.volume_ratio}x</span></div>
+                    <div class="indicator-row"><span class="indicator-label">$ Vol</span><span class="indicator-value" style="font-size:11px;">${r.dollar_volume}M</span></div>
+                    ${r.consolidation_days ? `<div class="indicator-row"><span class="indicator-label">Consol.</span><span class="indicator-value" style="font-size:11px;">${r.consolidation_days}d / -${r.consolidation_depth_pct}%</span></div>` : ''}
+                    ${r.prior_move_pct ? `<div class="indicator-row"><span class="indicator-label">Prior Move</span><span class="indicator-value" style="font-size:11px; color:#26a69a;">+${r.prior_move_pct}%</span></div>` : ''}
+                    <div class="indicator-row"><span class="indicator-label">MA Aligned</span><span class="indicator-value" style="font-size:11px; color:${r.ma_aligned ? '#26a69a' : '#ef5350'};">${r.ma_aligned ? 'Yes' : 'No'}</span></div>`;
+
+        return `
             <div class="qullamaggie-card" onclick="analyzeFromScreener('${r.ticker}')">
                 <div class="qullamaggie-card-header">
                     <div>
                         <span class="qullamaggie-ticker">${r.ticker}</span>
                         <span class="qullamaggie-name">${r.name || ''}</span>
                     </div>
-                    <span class="${badgeClass}">${r.setup_type}</span>
+                    <span class="${badgeClass}">${isStage2 ? 'STAGE 2' : r.setup_type}</span>
                 </div>
                 <div class="qullamaggie-card-price">$${r.current_price} <span style="color:#787b86; font-size:11px;">${r.sector || ''}</span></div>
                 <div class="qullamaggie-card-metrics">
@@ -696,22 +815,29 @@ function renderQullamaggieResults(data) {
                     <div class="qullamaggie-metric"><div class="metric-label">ADR%</div><div class="metric-value">${r.adr_pct}%</div></div>
                 </div>
                 <div class="qullamaggie-card-detail">
-                    <div class="indicator-row"><span class="indicator-label">1M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_1m >= 25 ? '#26a69a' : 'inherit'};">${r.rel_strength_1m}%</span></div>
-                    <div class="indicator-row"><span class="indicator-label">3M RS</span><span class="indicator-value" style="font-size:11px; color:${r.rel_strength_3m >= 50 ? '#26a69a' : 'inherit'};">${r.rel_strength_3m}%</span></div>
-                    <div class="indicator-row"><span class="indicator-label">Vol Ratio</span><span class="indicator-value" style="font-size:11px;">${r.volume_ratio}x</span></div>
-                    <div class="indicator-row"><span class="indicator-label">$ Vol</span><span class="indicator-value" style="font-size:11px;">${r.dollar_volume}M</span></div>
-                    ${r.consolidation_days ? `<div class="indicator-row"><span class="indicator-label">Consol.</span><span class="indicator-value" style="font-size:11px;">${r.consolidation_days}d / -${r.consolidation_depth_pct}%</span></div>` : ''}
-                    ${r.prior_move_pct ? `<div class="indicator-row"><span class="indicator-label">Prior Move</span><span class="indicator-value" style="font-size:11px; color:#26a69a;">+${r.prior_move_pct}%</span></div>` : ''}
-                    <div class="indicator-row"><span class="indicator-label">MA Aligned</span><span class="indicator-value" style="font-size:11px; color:${r.ma_aligned ? '#26a69a' : '#ef5350'};">${r.ma_aligned ? 'Yes' : 'No'}</span></div>
+                    ${stage2Detail}
                 </div>
                 <div style="margin-top:6px; padding:6px 8px; background:rgba(41,98,255,0.08); border-radius:4px; font-size:10px; color:#787b86;">
                     ${r.shares} shares @ $${r.entry_price} = $${r.position_value} | Risk: $${r.risk_amount}
                     <br>${r.sell_plan}
                 </div>
             </div>`;
-    });
+    }
 
-    html += '</div>';
+    if (stage2.length) {
+        html += `<div style="font-size:13px; font-weight:700; color:#ff9800; margin:14px 0 8px 0; padding:6px 0; border-bottom:1px solid rgba(255,152,0,0.3);">🚀 Rocket Setups — Stage 2 Recovery (${stage2.length})</div>`;
+        html += '<div class="qullamaggie-grid">';
+        stage2.forEach(r => { html += renderCard(r); });
+        html += '</div>';
+    }
+
+    if (momentum.length) {
+        html += `<div style="font-size:13px; font-weight:700; color:#26a69a; margin:18px 0 8px 0; padding:6px 0; border-bottom:1px solid rgba(38,166,154,0.3);">⚡ Momentum Breakouts — HTF / VCP / EP (${momentum.length})</div>`;
+        html += '<div class="qullamaggie-grid">';
+        momentum.forEach(r => { html += renderCard(r); });
+        html += '</div>';
+    }
+
     container.innerHTML = html;
 }
 
@@ -773,12 +899,11 @@ async function loadTrendingSignals() {
                 <tbody>`;
 
         data.trending.forEach(t => {
-            const verdictColor = (t.latest_verdict || '').includes('OPPORTUNITY') || (t.latest_verdict || '').includes('BULLISH') || (t.latest_verdict || '').includes('STRONG') || (t.latest_verdict || '').includes('BOTTOM') || (t.latest_verdict || '').includes('MOMENTUM') || (t.latest_verdict || '').includes('RECOVERY')
-                ? '#26a69a' : (t.latest_verdict || '').includes('AVOID') || (t.latest_verdict || '').includes('FALLING') ? '#ef5350' : '#ff9800';
+            const verdictColor = _SCREENER_TIER_COLOR[_screenerVerdictTier(t.latest_verdict)];
             const appBadge = t.appearances >= 5 ? '#26a69a' : t.appearances >= 3 ? '#42a5f5' : '#ff9800';
             html += `
                 <tr style="border-bottom:1px solid #2a2e39;">
-                    <td style="padding:6px 10px; color:#d1d4dc; font-weight:600;">${t.ticker}</td>
+                    <td style="padding:6px 10px; color:#d1d4dc; font-weight:600;">${yahooFinanceLink(t.ticker)}</td>
                     <td style="padding:6px 10px; color:#787b86; font-size:12px;">${t.name || '—'}</td>
                     <td style="padding:6px 10px; color:#787b86; font-size:12px;">${t.sector || '—'}</td>
                     <td style="padding:6px 10px; text-align:center;"><span style="background:${appBadge}; color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">${t.appearances}x</span></td>
@@ -875,13 +1000,12 @@ function renderPastScanTable(date) {
     const catLabel = SCREENER_CATEGORY_CONFIG[screenerCategory]?.label || screenerCategory;
 
     const rows = items.map(r => {
-        const isOpp = !RISKY_VERDICTS.includes(r.verdict);
-        const verdictColor = isOpp ? '#26a69a' : (r.verdict === 'AVOID' || r.verdict === 'FALLING KNIFE') ? '#ef5350' : '#ff9800';
+        const verdictColor = _SCREENER_TIER_COLOR[_screenerVerdictTier(r.verdict)];
         const confColor = (r.confidence || 0) >= 75 ? '#26a69a' : (r.confidence || 0) >= 50 ? '#ff9800' : '#ef5350';
         const mcap = r.market_cap ? (r.market_cap >= 1e9 ? `$${(r.market_cap / 1e9).toFixed(1)}B` : r.market_cap >= 1e6 ? `$${(r.market_cap / 1e6).toFixed(0)}M` : '—') : '—';
 
         return `<tr style="border-bottom:1px solid #2a2e39;">
-            <td style="padding:8px 10px; color:#d1d4dc; font-weight:700; font-size:13px; white-space:nowrap;">${r.ticker}</td>
+            <td style="padding:8px 10px; color:#d1d4dc; font-weight:700; font-size:13px; white-space:nowrap;">${yahooFinanceLink(r.ticker)}</td>
             <td style="padding:8px 10px; color:#a0a4b0; font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.name || '—'}</td>
             <td style="padding:8px 10px; color:#787b86; font-size:11px; white-space:nowrap;">${r.sector || '—'}</td>
             <td style="padding:8px 10px; white-space:nowrap;">
@@ -915,7 +1039,34 @@ function renderPastScanTable(date) {
         </table>`;
 }
 
-// Auto-load trending on screener page init
-if (document.getElementById('screener-trending-panel')) {
-    loadTrendingSignals();
+// ─── Archive toggle (Trending + Past Scans collapse) ─────────
+
+function toggleScreenerArchive() {
+    const body = document.getElementById('screener-archive-body');
+    const chev = document.getElementById('screener-archive-chevron');
+    const sum = document.getElementById('screener-archive-summary');
+    if (!body) return;
+    const willOpen = body.style.display === 'none';
+    body.style.display = willOpen ? '' : 'none';
+    if (chev) chev.style.transform = willOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+    if (sum) sum.textContent = willOpen ? 'click to collapse' : 'click to expand';
+    try { localStorage.setItem('screenerArchiveOpen', willOpen ? '1' : '0'); } catch (_) {}
+    // Lazy-load trending data the first time we open
+    if (willOpen && !_screenerArchiveLoaded) {
+        _screenerArchiveLoaded = true;
+        loadTrendingSignals();
+    }
+}
+
+let _screenerArchiveLoaded = false;
+
+// Restore prior open/close state on init; skip auto-load when collapsed
+// (this is the perf win — avoids hitting /api/screener/trending on every page load)
+if (document.getElementById('screener-archive-body')) {
+    let savedOpen = '0';
+    try { savedOpen = localStorage.getItem('screenerArchiveOpen') || '0'; } catch (_) {}
+    if (savedOpen === '1') {
+        // Mimic a click so the chevron + label sync up
+        toggleScreenerArchive();
+    }
 }

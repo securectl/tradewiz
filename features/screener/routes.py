@@ -175,12 +175,23 @@ def api_screener_trending():
             (cutoff,),
         )
 
+    # PostgreSQL ROUND(numeric, n) returns Decimal — Flask's JSON encoder
+    # serializes Decimal as a string, which breaks `.toFixed()` on the client.
+    # Coerce to float so the client sees a JS Number.
+    def _f(v):
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
     results = [{
         "ticker": r["ticker"], "name": r.get("name"), "sector": r.get("sector"),
         "appearances": r["appearances"], "categories": r.get("categories", 1),
         "last_seen": r["last_seen"], "first_seen": r["first_seen"],
-        "avg_confidence": r.get("avg_confidence"), "latest_verdict": r.get("latest_verdict"),
-        "avg_price": r.get("avg_price"),
+        "avg_confidence": _f(r.get("avg_confidence")), "latest_verdict": r.get("latest_verdict"),
+        "avg_price": _f(r.get("avg_price")),
     } for r in rows]
 
     return jsonify({"trending": results, "count": len(results), "days": days})

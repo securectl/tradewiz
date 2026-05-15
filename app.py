@@ -62,7 +62,10 @@ from features.user.routes import bp as user_bp
 from features.analysis.routes import bp as analysis_bp
 from features.predictions.routes import bp as predictions_bp
 from features.congress.routes import bp as congress_bp
+from features.smart_money.routes import bp as smart_money_bp
 from features.watchdog.routes import bp as watchdog_bp
+from features.backtest.routes import bp as backtest_bp
+from claude_bot.routes import bp as claude_bot_bp
 
 app.register_blueprint(ipo_bp)
 app.register_blueprint(status_bp)
@@ -75,7 +78,10 @@ app.register_blueprint(user_bp)
 app.register_blueprint(analysis_bp)
 app.register_blueprint(predictions_bp)
 app.register_blueprint(congress_bp)
+app.register_blueprint(smart_money_bp)
 app.register_blueprint(watchdog_bp)
+app.register_blueprint(backtest_bp)
+app.register_blueprint(claude_bot_bp)
 
 # ─── Startup: log rotation + cleanup ────────────────────────────
 def _startup_cleanup():
@@ -89,7 +95,7 @@ def _startup_cleanup():
     try:
         from db import execute, IS_POSTGRES
         if IS_POSTGRES:
-            execute("DELETE FROM bot_log WHERE created_at < NOW() - INTERVAL '7 days'")
+            execute("DELETE FROM bot_log WHERE created_at < NOW() - INTERVAL '30 days'")
             execute("DELETE FROM service_checks WHERE checked_at < NOW() - INTERVAL '7 days'")
             execute("DELETE FROM llm_usage_log WHERE created_at < NOW() - INTERVAL '30 days'")
             import logging
@@ -97,7 +103,10 @@ def _startup_cleanup():
     except Exception:
         pass
 
-_startup_cleanup()
+# Note: do NOT call _startup_cleanup() here. With gunicorn --preload it runs in
+# the master before fork, opens psycopg2 pool connections, and the workers
+# inherit broken TCP sockets — the worker boot then hangs on futex/connection.
+# It's invoked from _on_startup() (post-fork in the worker) instead.
 
 
 # ─── Scheduled Jobs (daily screener scans @ 9 AM CST) ───────
@@ -408,6 +417,40 @@ def api_trump_backtracks_predict():
     return jsonify(get_backtrack_prediction(force=force))
 
 
+# ─── Trump → Market ML Forecaster ────────────────────────────────────
+
+@app.route("/api/trump/forecast")
+@login_required
+@subscription_required("pro")
+def api_trump_forecast():
+    """Forward-looking ML forecast: predicts SPY/QQQ/BTC/ETH returns (1D/5D/21D)
+    from Trump mood using a self-correcting ensemble (Ridge + KNN + EWMA + Opus LLM)."""
+    from trump_forecaster import generate_forecast
+    force = bool(request.args.get("force"))
+    return jsonify(generate_forecast(force=force))
+
+
+@app.route("/api/trump/correlation")
+@login_required
+@subscription_required("pro")
+def api_trump_correlation():
+    """Mood ↔ market correlation timeline with lead/lag Pearson at 0-7 day lags."""
+    from trump_forecaster import get_correlation_timeline
+    days = request.args.get("days", 60, type=int)
+    return jsonify(get_correlation_timeline(days=min(days, 180)))
+
+
+@app.route("/api/trump/forecast/accuracy")
+@login_required
+@subscription_required("pro")
+def api_trump_forecast_accuracy():
+    """Per-asset, per-horizon accuracy metrics from self-learning pipeline."""
+    from trump_forecaster import get_forecast_accuracy, evaluate_past_predictions
+    if request.args.get("evaluate"):
+        evaluate_past_predictions()
+    return jsonify(get_forecast_accuracy())
+
+
 # ─── Health Check (for orchestrators, load balancers, monitoring) ────
 
 @app.route("/healthz")
@@ -460,38 +503,92 @@ def init_db():
 # ─── Auto-start bots ─────────────────────────────────────────────────
 
 def _auto_start_bots():
-    """Auto-start crypto/stock bots for users who had them running before restart."""
-    import logging
-    import time
-    _log = logging.getLogger(__name__)
-    try:
-        from db import query
-        from shared.helpers import P
-        rows = query(
-            "SELECT DISTINCT bc.user_id FROM bot_config bc "
-            f"WHERE bc.key = 'bot_enabled' AND bc.value = '1'"
-        )
-        for row in rows:
-            uid = row["user_id"]
-            try:
-                from crypto_bot.bot_engine import get_bot
-                bot = get_bot(uid)
-                if not bot.is_running:
-                    bot.start()
-                    _log.info(f"[AUTO-START] Crypto bot started for user {uid}")
-            except Exception as e:
-                _log.warning(f"[AUTO-START] Crypto bot failed for user {uid}: {e}")
+    """Auto-restart all bots that were enabled before the container went down.
 
-            try:
-                from stock_bot.stock_engine import get_stock_bot
-                sbot = get_stock_bot(uid)
-                if not sbot.is_running:
-                    sbot.start()
-                    _log.info(f"[AUTO-START] Stock bot started for user {uid}")
-            except Exception as e:
-                _log.warning(f"[AUTO-START] Stock bot failed for user {uid}: {e}")
+    Reads `bot_config` enable flags per bot and restarts the matching engine for
+    each user. Also starts the global options-flow scanner unconditionally.
+    Idempotent: each bot's start path internally guards against double-spawn.
+
+    Bots covered:
+      - Crypto bot (enable flag: bot_enabled)
+      - Stock bot  (enable flag: stock_bot_enabled)
+      - Watchdog   (enable flag: wd_enabled)
+      - Claude Bot (enable flag: cb_enabled)
+      - Options-flow scanner (global, no per-user flag)
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    def _enabled_uids(flag: str) -> list:
+        try:
+            from db import query
+            rows = query(
+                "SELECT DISTINCT user_id FROM bot_config "
+                "WHERE key = %s AND value = '1'" if _is_postgres() else
+                "SELECT DISTINCT user_id FROM bot_config WHERE key = ? AND value = '1'",
+                (flag,),
+            )
+            return [r["user_id"] for r in (rows or [])]
+        except Exception as e:
+            _log.warning(f"[AUTO-START] enable-flag query for {flag} failed: {e}")
+            return []
+
+    # Crypto bot
+    for uid in _enabled_uids("bot_enabled"):
+        try:
+            from crypto_bot.bot_engine import get_bot
+            bot = get_bot(uid)
+            if not bot.is_running:
+                bot.start()
+                _log.info(f"[AUTO-START] Crypto bot started for user {uid}")
+        except Exception as e:
+            _log.warning(f"[AUTO-START] Crypto bot failed for user {uid}: {e}")
+
+    # Stock bot
+    for uid in _enabled_uids("stock_bot_enabled"):
+        try:
+            from stock_bot.stock_engine import get_stock_bot
+            sbot = get_stock_bot(uid)
+            if not sbot.is_running:
+                sbot.start()
+                _log.info(f"[AUTO-START] Stock bot started for user {uid}")
+        except Exception as e:
+            _log.warning(f"[AUTO-START] Stock bot failed for user {uid}: {e}")
+
+    # Watchdog auto-trader
+    for uid in _enabled_uids("wd_enabled"):
+        try:
+            from features.watchdog.engine import start_auto_trader
+            start_auto_trader(uid)
+            _log.info(f"[AUTO-START] Watchdog auto-trader started for user {uid}")
+        except Exception as e:
+            _log.warning(f"[AUTO-START] Watchdog failed for user {uid}: {e}")
+
+    # Claude Bot
+    for uid in _enabled_uids("cb_enabled"):
+        try:
+            from claude_bot.bot_engine import start as cb_start
+            cb_start(uid)
+            _log.info(f"[AUTO-START] Claude Bot started for user {uid}")
+        except Exception as e:
+            _log.warning(f"[AUTO-START] Claude Bot failed for user {uid}: {e}")
+
+    # Options-flow scanner (global, no per-user flag)
+    try:
+        from features.watchdog.options_flow import start_scanner, is_scanner_running
+        if not is_scanner_running():
+            start_scanner()
+            _log.info("[AUTO-START] Options-flow scanner started")
     except Exception as e:
-        _log.warning(f"[AUTO-START] Failed: {e}")
+        _log.warning(f"[AUTO-START] Options-flow scanner failed: {e}")
+
+
+def _is_postgres():
+    try:
+        from db import IS_POSTGRES
+        return IS_POSTGRES
+    except Exception:
+        return False
 
 
 def _on_startup():
@@ -505,6 +602,13 @@ def _on_startup():
     except Exception as e:
         _log.error(f"Migration error: {e}")
 
+    # Run cleanup AFTER fork — opening DB pool in master before fork breaks
+    # workers under gunicorn --preload (they inherit broken pg sockets).
+    try:
+        _startup_cleanup()
+    except Exception as e:
+        _log.warning(f"Startup cleanup failed: {e}")
+
     start_background_checker()
 
     # Auto-start bots after short delay
@@ -512,6 +616,13 @@ def _on_startup():
         import time
         time.sleep(5)
         _auto_start_bots()
+        # Start Smart Money daily refresh
+        try:
+            from features.smart_money.engine import start_daily_refresh
+            start_daily_refresh()
+            _log.info("[STARTUP] Smart Money daily refresh started")
+        except Exception as e:
+            _log.warning(f"[STARTUP] Smart Money start failed: {e}")
         _log.info("[STARTUP] Background checker and bot auto-start complete")
 
     threading.Thread(target=_delayed_start, daemon=True).start()

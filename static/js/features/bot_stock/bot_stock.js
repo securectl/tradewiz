@@ -485,6 +485,7 @@ async function loadStockBotConfig() {
         const el = (id) => document.getElementById(id);
         if (cfg.stock_daily_goal) el('sbot-cfg-daily-goal').value = cfg.stock_daily_goal;
         if (cfg.stock_max_position_pct) el('sbot-cfg-max-pct').value = cfg.stock_max_position_pct;
+        if (cfg.stock_max_total_exposure_pct) el('sbot-cfg-max-exposure').value = cfg.stock_max_total_exposure_pct;
         if (cfg.stock_daily_loss_limit) el('sbot-cfg-loss-limit').value = cfg.stock_daily_loss_limit;
         if (cfg.stock_max_open_positions) el('sbot-cfg-max-open').value = cfg.stock_max_open_positions;
         if (cfg.stock_max_daily_trades) el('sbot-cfg-max-daily-trades').value = cfg.stock_max_daily_trades;
@@ -585,6 +586,7 @@ async function updateStockBotConfig() {
         const payload = {
             stock_daily_goal: document.getElementById('sbot-cfg-daily-goal').value,
             stock_max_position_pct: document.getElementById('sbot-cfg-max-pct').value,
+            stock_max_total_exposure_pct: document.getElementById('sbot-cfg-max-exposure').value,
             stock_daily_loss_limit: document.getElementById('sbot-cfg-loss-limit').value,
             stock_max_open_positions: document.getElementById('sbot-cfg-max-open').value,
             stock_max_daily_trades: document.getElementById('sbot-cfg-max-daily-trades').value,

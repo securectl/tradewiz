@@ -251,6 +251,51 @@ def _run_postgres(conn):
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_bl_user ON bot_log(user_id)")
 
+    # Re-entry watchlist: when claude_bot exits a position, ticker stays here
+    # for up to N days so the bot can scalp-and-rotate back in if it stabilizes.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bot_reentry_watch (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            ticker TEXT NOT NULL,
+            asset_type TEXT DEFAULT 'claude',
+            exit_price REAL,
+            exit_pnl_pct REAL,
+            exit_reason TEXT,
+            attempts INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'watching',
+            created_at TIMESTAMP DEFAULT NOW(),
+            resolved_at TIMESTAMP
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_brw_user_status ON bot_reentry_watch(user_id, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_brw_user_ticker ON bot_reentry_watch(user_id, ticker, status)")
+
+    # Backtest run history — strategy validation before deploying capital
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS backtest_runs (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            strategy TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            universe_size INTEGER,
+            trade_count INTEGER,
+            total_return_pct REAL,
+            cagr_pct REAL,
+            sharpe REAL,
+            max_drawdown_pct REAL,
+            win_rate REAL,
+            profit_factor REAL,
+            expectancy_pct REAL,
+            report_json TEXT,
+            status TEXT DEFAULT 'completed',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_btr_user_created ON backtest_runs(user_id, created_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_btr_strategy ON backtest_runs(strategy, created_at DESC)")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stock_daily_pnl (
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -291,6 +336,18 @@ def _run_postgres(conn):
         )
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+
+    # LLM model snapshots — admin-saved point-in-time captures of which models
+    # are wired to which roles. Used by the "revert to previous version"
+    # button in the admin UI when a cheaper-model swap turns out worse.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS llm_snapshots (
+            id SERIAL PRIMARY KEY,
+            label TEXT NOT NULL,
+            models_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
 
     # Add bot_access column to user_subscriptions
     cur.execute("ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS bot_access TEXT NOT NULL DEFAULT 'none'")
@@ -432,6 +489,40 @@ def _run_postgres(conn):
         ON trump_backtracks (backtrack_date DESC)
     """)
 
+    # ── Trump → Market ML Forecaster ─────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trump_market_predictions (
+            id SERIAL PRIMARY KEY,
+            asset TEXT NOT NULL,
+            horizon TEXT NOT NULL,
+            predicted_return_pct REAL NOT NULL,
+            confidence REAL,
+            model_predictions TEXT,
+            mood_at_prediction REAL,
+            mood_label TEXT,
+            target_date TIMESTAMP,
+            actual_return_pct REAL,
+            error_pct REAL,
+            evaluated_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tmp_asset_h ON trump_market_predictions(asset, horizon, created_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tmp_target ON trump_market_predictions(target_date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tmp_eval ON trump_market_predictions(evaluated_at)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trump_forecast_weights (
+            asset TEXT NOT NULL,
+            horizon TEXT NOT NULL,
+            weights_json TEXT NOT NULL,
+            mae_json TEXT,
+            n_samples INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            PRIMARY KEY (asset, horizon)
+        )
+    """)
+
     # ── Watchdog Trader ────────────────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS watchdog_snapshots (
@@ -541,6 +632,62 @@ def _run_postgres(conn):
     cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_screener_cat_date_ticker ON screener_results (category, scan_date, ticker)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_screener_cat_date ON screener_results (category, scan_date DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_screener_ticker ON screener_results (ticker, scan_date DESC)")
+
+    # ── Institutional / Whale Tracker ──────────────────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whale_entities (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            cik TEXT,
+            description TEXT,
+            aum_billions REAL,
+            notable_holdings TEXT,
+            data_json TEXT,
+            last_updated TIMESTAMP DEFAULT NOW(),
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(name, entity_type)
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whale_holdings (
+            id SERIAL PRIMARY KEY,
+            entity_id INTEGER REFERENCES whale_entities(id),
+            ticker TEXT NOT NULL,
+            company_name TEXT,
+            shares BIGINT,
+            value_usd REAL,
+            pct_of_portfolio REAL,
+            change_shares BIGINT DEFAULT 0,
+            change_pct REAL DEFAULT 0,
+            action TEXT,
+            filing_date TEXT,
+            report_date TEXT,
+            source TEXT,
+            data_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wh_entity_ticker ON whale_holdings (entity_id, ticker)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wh_ticker ON whale_holdings (ticker, created_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wh_filing ON whale_holdings (filing_date DESC)")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whale_activity (
+            id SERIAL PRIMARY KEY,
+            entity_id INTEGER REFERENCES whale_entities(id),
+            ticker TEXT NOT NULL,
+            action TEXT NOT NULL,
+            shares BIGINT,
+            value_usd REAL,
+            price_at_filing REAL,
+            filing_date TEXT,
+            source TEXT,
+            data_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wa_ticker ON whale_activity (ticker, created_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_wa_entity ON whale_activity (entity_id, created_at DESC)")
 
     cur.close()
     logger.info("PostgreSQL tables created.")
@@ -770,6 +917,48 @@ def _run_sqlite(conn):
     """)
 
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS bot_reentry_watch (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            ticker TEXT NOT NULL,
+            asset_type TEXT DEFAULT 'claude',
+            exit_price REAL,
+            exit_pnl_pct REAL,
+            exit_reason TEXT,
+            attempts INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'watching',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_brw_user_status ON bot_reentry_watch(user_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_brw_user_ticker ON bot_reentry_watch(user_id, ticker, status)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS backtest_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            strategy TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            universe_size INTEGER,
+            trade_count INTEGER,
+            total_return_pct REAL,
+            cagr_pct REAL,
+            sharpe REAL,
+            max_drawdown_pct REAL,
+            win_rate REAL,
+            profit_factor REAL,
+            expectancy_pct REAL,
+            report_json TEXT,
+            status TEXT DEFAULT 'completed',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_btr_user_created ON backtest_runs(user_id, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_btr_strategy ON backtest_runs(strategy, created_at DESC)")
+
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS stock_daily_pnl (
             user_id INTEGER,
             date TEXT NOT NULL,
@@ -809,6 +998,15 @@ def _run_sqlite(conn):
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS llm_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            models_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # Seed free tier for existing users without a subscription row
     conn.execute("""
@@ -966,6 +1164,40 @@ def _run_sqlite(conn):
         )
     """)
 
+    # ── Trump → Market ML Forecaster ─────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trump_market_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset TEXT NOT NULL,
+            horizon TEXT NOT NULL,
+            predicted_return_pct REAL NOT NULL,
+            confidence REAL,
+            model_predictions TEXT,
+            mood_at_prediction REAL,
+            mood_label TEXT,
+            target_date TIMESTAMP,
+            actual_return_pct REAL,
+            error_pct REAL,
+            evaluated_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tmp_asset_h ON trump_market_predictions(asset, horizon, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tmp_target ON trump_market_predictions(target_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tmp_eval ON trump_market_predictions(evaluated_at)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trump_forecast_weights (
+            asset TEXT NOT NULL,
+            horizon TEXT NOT NULL,
+            weights_json TEXT NOT NULL,
+            mae_json TEXT,
+            n_samples INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (asset, horizon)
+        )
+    """)
+
     # ── Watchdog Trader ────────────────────────────────────────
     conn.execute("""
         CREATE TABLE IF NOT EXISTS watchdog_snapshots (
@@ -1066,6 +1298,57 @@ def _run_sqlite(conn):
             data_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(category, scan_date, ticker)
+        )
+    """)
+
+    # ── Institutional / Whale Tracker ──────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS whale_entities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            cik TEXT,
+            description TEXT,
+            aum_billions REAL,
+            notable_holdings TEXT,
+            data_json TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, entity_type)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS whale_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id INTEGER REFERENCES whale_entities(id),
+            ticker TEXT NOT NULL,
+            company_name TEXT,
+            shares INTEGER,
+            value_usd REAL,
+            pct_of_portfolio REAL,
+            change_shares INTEGER DEFAULT 0,
+            change_pct REAL DEFAULT 0,
+            action TEXT,
+            filing_date TEXT,
+            report_date TEXT,
+            source TEXT,
+            data_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS whale_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id INTEGER REFERENCES whale_entities(id),
+            ticker TEXT NOT NULL,
+            action TEXT NOT NULL,
+            shares INTEGER,
+            value_usd REAL,
+            price_at_filing REAL,
+            filing_date TEXT,
+            source TEXT,
+            data_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 

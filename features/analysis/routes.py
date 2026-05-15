@@ -17,6 +17,83 @@ from db import execute
 bp = Blueprint("analysis", __name__)
 
 
+@bp.route("/api/analyze/<ticker>/news")
+@login_required
+def api_news(ticker):
+    """Recent news + social mentions for a ticker (last 24h by default).
+
+    Query params:
+        hours=<int>   Lookback window (default 24, max 72)
+        force=1       Bypass 5-minute cache
+    """
+    from shared.news_fetcher import fetch_news
+    try:
+        hours = min(72, max(1, int(request.args.get("hours", 24))))
+    except ValueError:
+        hours = 24
+    force = request.args.get("force") in ("1", "true", "yes")
+    return jsonify(fetch_news(ticker, hours=hours, force=force))
+
+
+@bp.route("/api/analyze/<ticker>/liquidity")
+@login_required
+def api_liquidity(ticker):
+    """Compact liquidity snapshot — cash, debt, ratios, runway. Pulled from
+    the same yfinance fundamentals as the full analysis but without the
+    heavy LLM/technical pipeline."""
+    try:
+        f = fetch_fundamentals(ticker.strip().upper())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if not f or f.get("error"):
+        return jsonify({"error": (f or {}).get("error", "no data")}), 404
+
+    cash = f.get("total_cash") or 0
+    debt = f.get("total_debt") or 0
+    cash_to_debt = f.get("cash_to_debt")
+    current_ratio = f.get("current_ratio")
+    runway = f.get("cash_runway_months")
+    fcf = f.get("free_cf") or 0
+    op_cf = f.get("operating_cf") or 0
+    market_cap = f.get("market_cap") or 0
+
+    # Health score: simple composite — cash > debt + positive FCF + current ratio > 1
+    health = 50
+    if cash_to_debt is not None:
+        if cash_to_debt >= 1.0: health += 20
+        elif cash_to_debt >= 0.5: health += 10
+        elif cash_to_debt < 0.2: health -= 15
+    if current_ratio is not None:
+        if current_ratio >= 1.5: health += 10
+        elif current_ratio < 1.0: health -= 10
+    if fcf and fcf > 0: health += 10
+    if op_cf and op_cf < 0: health -= 10
+    health = max(0, min(100, health))
+
+    if health >= 70: rating, color = "STRONG", "#00c896"
+    elif health >= 50: rating, color = "OK", "#ffc837"
+    elif health >= 30: rating, color = "WEAK", "#ff8c42"
+    else: rating, color = "RISK", "#ff4757"
+
+    return jsonify({
+        "ticker": ticker.upper(),
+        "total_cash": cash,
+        "total_debt": debt,
+        "net_cash": cash - debt,
+        "cash_to_debt": round(cash_to_debt, 2) if cash_to_debt is not None else None,
+        "current_ratio": round(current_ratio, 2) if current_ratio is not None else None,
+        "debt_to_equity": f.get("de_ratio"),
+        "operating_cf": op_cf,
+        "free_cf": fcf,
+        "fcf_yield_pct": f.get("fcf_yield"),
+        "cash_runway_months": round(runway, 1) if runway is not None else None,
+        "market_cap": market_cap,
+        "health_score": health,
+        "rating": rating,
+        "color": color,
+    })
+
+
 @bp.route("/api/analyze", methods=["POST"])
 @login_required
 def api_analyze():

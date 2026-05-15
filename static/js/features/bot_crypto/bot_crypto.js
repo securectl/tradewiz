@@ -602,6 +602,7 @@ async function loadBotConfig() {
         const el = (id) => document.getElementById(id);
         if (cfg.daily_goal) el('bot-cfg-daily-goal').value = cfg.daily_goal;
         if (cfg.max_position_pct) el('bot-cfg-max-pct').value = cfg.max_position_pct;
+        if (cfg.max_total_exposure_pct) el('bot-cfg-max-exposure').value = cfg.max_total_exposure_pct;
         if (cfg.daily_loss_limit) el('bot-cfg-loss-limit').value = cfg.daily_loss_limit;
         if (cfg.max_open_positions) el('bot-cfg-max-open').value = cfg.max_open_positions;
         if (cfg.max_daily_trades) el('bot-cfg-max-daily-trades').value = cfg.max_daily_trades;
@@ -802,6 +803,7 @@ async function updateBotConfig() {
         const payload = {
             daily_goal: document.getElementById('bot-cfg-daily-goal').value,
             max_position_pct: document.getElementById('bot-cfg-max-pct').value,
+            max_total_exposure_pct: document.getElementById('bot-cfg-max-exposure').value,
             daily_loss_limit: document.getElementById('bot-cfg-loss-limit').value,
             max_open_positions: document.getElementById('bot-cfg-max-open').value,
             max_daily_trades: document.getElementById('bot-cfg-max-daily-trades').value,

@@ -61,8 +61,19 @@ def _call_ollama(prompt: str, timeout: int = 30) -> dict:
         return {"error": str(e), "execute": None}
 
 
-def _call_openrouter(model: str, messages: list, timeout: int = 60) -> str:
-    """Make a single call to OpenRouter (reuses ai_validator.py pattern)."""
+def _call_openrouter(model: str, messages: list, timeout: int = 60, role: str = None) -> str:
+    """Make a single call to OpenRouter (reuses ai_validator.py pattern).
+
+    `role` lets the admin LLM-config DB override take precedence over the
+    env-resolved `model` argument, so swapping to a cheaper model from the
+    admin UI takes effect without redeploy.
+    """
+    if role:
+        try:
+            from shared.llm_config import get_model
+            model = get_model(role, model)
+        except Exception:
+            pass
     payload = {
         "model": model,
         "messages": messages,
@@ -193,7 +204,7 @@ Approve if momentum generally supports the trade direction and 2+ indicators ali
 - Indicators significantly conflict with the trade side
 Default to execute=true for reasonable swing setups."""}
     ]
-    raw = _call_openrouter(LLM_BOT_SENTIMENT, messages)
+    raw = _call_openrouter(LLM_BOT_SENTIMENT, messages, role="bot_sentiment")
     return _parse_json(raw)
 
 
@@ -219,7 +230,7 @@ Reject ONLY when:
 - False signal probability exceeds 0.7
 This is paper trading — err toward taking trades to gather data. Approve trades with acceptable risk/reward and reasonable indicator support."""}
     ]
-    raw = _call_openrouter(LLM_BOT_RISK, messages)
+    raw = _call_openrouter(LLM_BOT_RISK, messages, role="bot_risk")
     return _parse_json(raw)
 
 
@@ -359,7 +370,7 @@ Respond in JSON:
         {"role": "user", "content": prompt},
     ]
 
-    raw = _call_openrouter(LLM_BOT_SENTIMENT, messages, timeout=30)
+    raw = _call_openrouter(LLM_BOT_SENTIMENT, messages, timeout=30, role="bot_sentiment")
     analysis = _parse_json(raw)
 
     return {
@@ -399,7 +410,7 @@ Respond in JSON:
 }}"""},
     ]
     try:
-        raw = _call_openrouter(LLM_BOT_SENTIMENT, messages, timeout=15)
+        raw = _call_openrouter(LLM_BOT_SENTIMENT, messages, timeout=15, role="bot_sentiment")
         result = _parse_json(raw)
         if "direction" not in result:
             return {"direction": "neutral", "confidence": 0, "reasoning": "Failed to parse LLM response"}
@@ -455,13 +466,13 @@ def validate_trade(coin: str, side: str, price: float,
             sentiment_result = sentiment_future.result(timeout=90)
         except Exception as e:
             logger.warning(f"Sentiment future failed/timed out: {e}")
-            sentiment_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — sentiment validator timed out (paper trading auto-approve)"}
+            sentiment_result = {"execute": True, "confidence": 0.25, "reasoning": "Fallback — sentiment validator timed out (paper trading auto-approve, low confidence)"}
 
         try:
             risk_result = risk_future.result(timeout=90)
         except Exception as e:
             logger.warning(f"Risk future failed/timed out: {e}")
-            risk_result = {"execute": True, "confidence": 0.5, "reasoning": "Fallback — risk validator timed out (paper trading auto-approve)"}
+            risk_result = {"execute": True, "confidence": 0.25, "reasoning": "Fallback — risk validator timed out (paper trading auto-approve, low confidence)"}
 
     result["sentiment"] = sentiment_result
     result["risk"] = risk_result

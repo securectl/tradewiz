@@ -54,7 +54,9 @@ def api_settings_get():
             )
             user_keys[f"{provider}_{kn}"] = {"configured": kr is not None, "masked_value": "****" if kr else ""}
 
-    result = {"user_keys": user_keys}
+    # Expose under both keys for forward/backward compatibility — historical
+    # frontend uses `api_keys`, server-internal name is `user_keys`.
+    result = {"user_keys": user_keys, "api_keys": user_keys}
 
     # System config (LLM models) — visible to all, editable by admin
     import ai_validator as av
@@ -89,8 +91,9 @@ def api_settings_save():
 
     from crypto_utils import encrypt
 
-    # User broker keys
-    user_keys = data.get("user_keys", {})
+    # User broker keys — accept either field name (api_keys is the historical
+    # frontend convention; user_keys is the server-internal name).
+    user_keys = data.get("api_keys") or data.get("user_keys") or {}
     key_map = {
         "BLOFIN_API_KEY": ("blofin", "api_key"),
         "BLOFIN_API_SECRET": ("blofin", "api_secret"),

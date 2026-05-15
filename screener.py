@@ -88,6 +88,10 @@ MIDCAP_TICKERS = [
     "GTLB", "PATH", "ESTC", "DOCN", "BRZE", "TOST", "CWAN",
     # Semiconductors
     "MRVL", "ON", "SWKS", "QRVO", "SLAB", "DIOD", "AMBA", "CRUS",
+    "WOLF", "AXTI", "INDI", "NVTS", "POWI", "SITM", "ALGM",
+    # AI Infra / Optical / Networking (the rocket names — Nov '25/'26 leaders)
+    "NBIS", "COHR", "AAOI", "LITE", "FN", "CIEN", "ANET", "CRDO",
+    "ALAB", "VRT", "PSTG", "SMCI", "ARM", "TSM",
     # Healthcare
     "DXCM", "ISRG", "VEEV", "ALGN", "TFX", "NVCR", "INSP", "GMED",
     # Financial Tech
@@ -881,7 +885,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         {"role": "user", "content": LOWCAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -928,7 +932,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         {"role": "user", "content": MIDCAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_midcap_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -977,7 +981,7 @@ Recommendation: {info.get('recommendationKey', 'N/A')}"""
         {"role": "user", "content": LARGECAP_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_largecap_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1016,7 +1020,7 @@ YTD Return: {ytd_str}
         {"role": "user", "content": ETF_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_etf_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1060,7 +1064,7 @@ Debt/Equity: {info.get('debtToEquity', 'N/A')}
         {"role": "user", "content": METALS_MINING_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_metals_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1088,7 +1092,7 @@ Avg Volume: {candidate.get('volume', 0):,.0f}"""
         {"role": "user", "content": CRYPTO_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_crypto_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1133,7 +1137,7 @@ ROE: {info.get('returnOnEquity', 'N/A')}
         {"role": "user", "content": AI_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, "screener_ai_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1187,7 +1191,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
         {"role": "user", "content": OVERSOLD_USER_TEMPLATE.format(summary=summary)},
     ]
 
-    raw_tag = _call_openrouter(LLM_SCREENER, messages_tag, max_tokens=768, timeout=20)
+    raw_tag = _call_openrouter(LLM_SCREENER, messages_tag, max_tokens=768, timeout=20, role="screener")
     tag_result = _parse_json_response(raw_tag, "screener_oversold_tag")
 
     initial_verdict = tag_result.get("verdict", "WATCH")
@@ -1213,7 +1217,8 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
     ]
 
     raw_validate = _call_openrouter(LLM_SUPERVISOR if LLM_SUPERVISOR else LLM_SCREENER,
-                                     messages_validate, max_tokens=768, timeout=20)
+                                     messages_validate, max_tokens=768, timeout=20,
+                                     role="supervisor" if LLM_SUPERVISOR else "screener")
     val_result = _parse_json_response(raw_validate, "screener_oversold_validate")
 
     # Merge results — validator gets final say
@@ -1298,7 +1303,7 @@ Analyst Target: ${info.get('targetMeanPrice', 'N/A')}"""
         {"role": "user", "content": user_msg},
     ]
 
-    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20)
+    raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
     result = _parse_json_response(raw, f"screener_{direction}_vet")
     result["ticker"] = ticker
     result["price"] = candidate.get("price")
@@ -1381,7 +1386,7 @@ def get_hot_sectors(period: str = "1mo") -> dict:
     ]
 
     try:
-        raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=1024, timeout=25)
+        raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=1024, timeout=25, role="screener")
         parsed = _parse_json_response(raw, "hot_sectors")
         return {
             "period": period,

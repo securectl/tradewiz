@@ -112,14 +112,77 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 10px;
-    padding: 14px;
+    padding: 0;
     transition: border-color 0.2s;
+    overflow: hidden;
+}
+
+/* Compact (always-visible) card row — clicking it expands details */
+.screener-card-compact {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    cursor: pointer;
+}
+.screener-card-compact:hover { background: rgba(255,255,255,0.02); }
+.screener-compact-main { flex: 1; min-width: 0; }
+.screener-compact-gauge { width: 90px; flex-shrink: 0; }
+.screener-compact-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+/* Expanded detail section */
+.screener-card-details {
+    padding: 0 14px 14px 14px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 4px;
+}
+
+/* Modern semi-circle gauge */
+.screener-metric-gauge {
+    background: var(--bg-tertiary, #1a1d26);
+    border-radius: 8px;
+    padding: 8px 6px 6px;
+    text-align: center;
+}
+.screener-metric-gauge .gauge-label {
+    font-size: 9px;
+    color: var(--text-secondary, #787b86);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-top: 2px;
 }
 
 .screener-card:hover { border-color: var(--hover-bg); }
 
+/* Legacy two-tone classes — kept so the old type='opportunity'/'risky' selector
+   path remains a valid fallback for any code still passing it directly. The
+   tier-* classes below take precedence (later cascade rule) and drive the
+   real per-verdict colors. */
 .screener-card.opportunity { border-left: 3px solid var(--accent-green); }
 .screener-card.risky { border-left: 3px solid var(--accent-orange); }
+
+/* Verdict-tier borders + subtle background glow. Five tones map to the
+   five conviction bands derived from c.verdict in screener.js. */
+.screener-card.tier-strong {
+    border-left: 4px solid var(--accent-green);
+    box-shadow: inset 2px 0 12px -8px rgba(0, 200, 150, 0.55);
+}
+.screener-card.tier-momentum {
+    border-left: 4px solid var(--accent-purple);
+    box-shadow: inset 2px 0 12px -8px rgba(124, 93, 250, 0.55);
+}
+.screener-card.tier-watch {
+    border-left: 4px solid var(--accent-blue);
+    box-shadow: inset 2px 0 12px -8px rgba(79, 138, 255, 0.45);
+}
+.screener-card.tier-cautious {
+    border-left: 4px solid var(--accent-yellow);
+    box-shadow: inset 2px 0 12px -8px rgba(255, 200, 55, 0.50);
+}
+.screener-card.tier-avoid {
+    border-left: 4px solid var(--accent-red);
+    box-shadow: inset 2px 0 12px -8px rgba(255, 71, 87, 0.55);
+}
 
 .screener-card-header {
     display: flex;
@@ -630,7 +693,7 @@
 }
 
 /* Setup type badges */
-.setup-badge-htf, .setup-badge-vcp, .setup-badge-ep {
+.setup-badge-htf, .setup-badge-vcp, .setup-badge-ep, .setup-badge-stage2 {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 10px;
@@ -653,6 +716,12 @@
 .setup-badge-ep {
     background: rgba(38, 166, 154, 0.15);
     color: #26a69a;
+}
+
+.setup-badge-stage2 {
+    background: rgba(255, 87, 34, 0.18);
+    color: #ff7043;
+    border: 1px solid rgba(255, 87, 34, 0.4);
 }
 
 @media (max-width: 1200px) {

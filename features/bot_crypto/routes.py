@@ -85,22 +85,76 @@ def api_bot_trades():
     if asset_type:
         clauses.append(f"asset_type = {P}")
         params.append(asset_type)
+    else:
+        # Crypto bot UI's dropdown only offers crypto/stock/All — never include
+        # watchdog/claude trades on the crypto bot view.
+        clauses.append("asset_type IN ('crypto','stock')")
 
     where = " WHERE " + " AND ".join(clauses)
     params.append(limit)
     rows = query(f"SELECT * FROM bot_trades{where} ORDER BY opened_at DESC LIMIT {P}", params)
 
-    return jsonify([{
-        "id": r["id"], "coin": r["coin"], "side": r["side"],
-        "size": r["size"], "entry_price": r["entry_price"],
-        "exit_price": r["exit_price"], "pnl": r["pnl"],
-        "pnl_pct": r["pnl_pct"], "status": r["status"],
-        "signal_reason": r["signal_reason"], "strategy": r["strategy"],
-        "asset_type": r["asset_type"], "direction_bias": r["direction_bias"],
-        "stop_loss": r["stop_loss"], "take_profit": r["take_profit"],
-        "opened_at": r["opened_at"], "closed_at": r["closed_at"],
-        "blofin_order_id": r["blofin_order_id"],
-    } for r in rows])
+    # Live mark prices for open trades — single batched yfinance call so the
+    # frontend can show unrealized P&L on positions that haven't closed yet.
+    # Failures are silent: trades without a mark just show null and the UI
+    # falls back to "—" exactly like before.
+    open_tickers = sorted({r["coin"] for r in rows if r["status"] == "open" and r.get("coin")})
+    marks: dict[str, float] = {}
+    if open_tickers:
+        try:
+            import yfinance as yf
+            tk = yf.Tickers(" ".join(open_tickers))
+            for sym in open_tickers:
+                try:
+                    fi = tk.tickers[sym].fast_info
+                    lp = fi.get("last_price") if isinstance(fi, dict) else getattr(fi, "last_price", None)
+                    if lp:
+                        marks[sym] = float(lp)
+                except Exception:
+                    continue
+        except Exception:
+            marks = {}
+
+    def _enrich(r):
+        out = {
+            "id": r["id"], "coin": r["coin"], "side": r["side"],
+            "size": r["size"], "entry_price": r["entry_price"],
+            "exit_price": r["exit_price"], "pnl": r["pnl"],
+            "pnl_pct": r["pnl_pct"], "status": r["status"],
+            "signal_reason": r["signal_reason"], "strategy": r["strategy"],
+            "asset_type": r["asset_type"], "direction_bias": r["direction_bias"],
+            "stop_loss": r["stop_loss"], "take_profit": r["take_profit"],
+            "opened_at": r["opened_at"], "closed_at": r["closed_at"],
+            "blofin_order_id": r["blofin_order_id"],
+            "current_price": None, "pnl_unrealized": None, "pnl_pct_unrealized": None,
+        }
+        if r["status"] != "open":
+            return out
+        mark = marks.get(r["coin"])
+        entry = r.get("entry_price")
+        size = r.get("size") or 0
+        if mark is None or not entry:
+            return out
+        try:
+            mult = 1 if str(r.get("side", "buy")) in ("long", "buy") else -1
+            entry_f = float(entry)
+            # Sanity guardrail: clamp display to avoid +3666% phantom rows from
+            # yfinance bad ticks. >100% intraday move = data bug; show the mark
+            # but null out P&L so the dashboard doesn't mislead.
+            if entry_f > 0 and abs(mark / entry_f - 1.0) > 1.0:
+                out["current_price"] = round(mark, 2)
+                # leave pnl_unrealized / pnl_pct_unrealized as None
+                return out
+            pnl = (mark - entry_f) * float(size) * mult
+            pct = ((mark - entry_f) / entry_f) * 100.0 * mult if entry_f else 0.0
+            out["current_price"] = round(mark, 2)
+            out["pnl_unrealized"] = round(pnl, 2)
+            out["pnl_pct_unrealized"] = round(pct, 2)
+        except Exception:
+            pass
+        return out
+
+    return jsonify([_enrich(r) for r in rows])
 
 
 @bp.route("/api/bot/trades/<int:trade_id>")
@@ -262,9 +316,15 @@ def api_bot_dashboard():
         "total_fees": round(float(r["total_fees"] or 0), 2),
     } for r in asset_rows]
 
-    # ── By asset type (crypto vs stock) ──
+    # ── By asset type — honor the requested asset filter so the stock view
+    # never leaks crypto rows (audit Apr 2026). When ?asset=stock is set we
+    # only emit the stock bucket; when ?asset=all we emit all 4 sources.
     by_asset = {}
-    for at in ["crypto", "stock"]:
+    if asset_filter in ("crypto", "stock", "claude", "watchdog"):
+        asset_iter = [asset_filter]
+    else:
+        asset_iter = ["crypto", "stock", "claude", "watchdog"]
+    for at in asset_iter:
         at_row = query_one(
             f"SELECT COUNT(*) as trades, "
             f"SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
@@ -296,6 +356,47 @@ def api_bot_dashboard():
             return None
         return {"coin": r["coin"], "side": r["side"], "pnl": round(float(r["pnl"] or 0), 2), "strategy": r["strategy"]}
 
+    # ── Funds deployed (notional value of open positions) ──
+    # Honors the same asset_filter as the rest of the dashboard.
+    funds_clause = asset_clause  # already includes "AND asset_type=%s" if filtered
+    deployed_row = query_one(
+        f"SELECT COALESCE(SUM(size * entry_price), 0) as deployed, COUNT(*) as positions "
+        f"FROM bot_trades WHERE status='open' AND user_id={P}{funds_clause}",
+        (uid,) + asset_param,
+    )
+    deployed_usd = float(deployed_row["deployed"]) if deployed_row else 0.0
+    open_position_count = int(deployed_row["positions"]) if deployed_row else 0
+
+    # Per-bot exposure caps (so the UI can show "X% of cap used")
+    cap_keys = {
+        "crypto":   ("max_position_pct",          "max_total_exposure_pct",          "10", "60"),
+        "stock":    ("stock_max_position_pct",    "stock_max_total_exposure_pct",    "10", "60"),
+        "watchdog": ("wd_max_position_pct",       "wd_max_total_exposure_pct",       "15", "50"),
+        "claude":   ("cb_max_position_pct",       "cb_max_total_exposure_pct",       "12", "60"),
+    }
+    bot_caps = {}
+    for bot, (pos_key, exp_key, pos_def, exp_def) in cap_keys.items():
+        pos_row = query_one(
+            f"SELECT value FROM bot_config WHERE user_id IN ({P}, 0) AND key = {P} "
+            f"ORDER BY CASE WHEN user_id = 0 THEN 1 ELSE 0 END LIMIT 1",
+            (uid, pos_key),
+        )
+        exp_row = query_one(
+            f"SELECT value FROM bot_config WHERE user_id IN ({P}, 0) AND key = {P} "
+            f"ORDER BY CASE WHEN user_id = 0 THEN 1 ELSE 0 END LIMIT 1",
+            (uid, exp_key),
+        )
+        bot_caps[bot] = {
+            "max_position_pct": float(pos_row["value"]) if pos_row else float(pos_def),
+            "max_total_exposure_pct": float(exp_row["value"]) if exp_row else float(exp_def),
+        }
+
+    funds = {
+        "deployed_usd": round(deployed_usd, 2),
+        "open_positions": open_position_count,
+        "bot_caps": bot_caps,
+    }
+
     return jsonify({
         "win_rate": win_rate,
         "total_trades": total_trades,
@@ -310,6 +411,7 @@ def api_bot_dashboard():
         "by_asset": by_asset,
         "best_trade": _trade_dict(best),
         "worst_trade": _trade_dict(worst),
+        "funds": funds,
     })
 
 
@@ -587,7 +689,7 @@ def api_bot_config():
         return jsonify({r["key"]: r["value"] for r in rows})
 
     data = request.get_json()
-    allowed_keys = {"max_position_pct", "daily_loss_limit", "max_open_positions", "scan_interval_sec", "daily_goal", "trading_mode", "direction_bias", "trade_mode", "quick_trade_mode"}
+    allowed_keys = {"max_position_pct", "max_total_exposure_pct", "daily_loss_limit", "max_open_positions", "scan_interval_sec", "daily_goal", "trading_mode", "direction_bias", "trade_mode", "quick_trade_mode"}
     for k, v in data.items():
         if k in allowed_keys:
             _upsert_bot_config(uid, k, str(v))
@@ -597,24 +699,75 @@ def api_bot_config():
 @bp.route("/api/bot/log")
 @trader_required
 def api_bot_log():
+    """Crypto bot activity feed.
+
+    Always returns the last `limit` bot_log rows PLUS up to 20 of the most
+    recent synthetic 'TRADE CLOSED' entries derived from bot_trades. The
+    synthetic entries persist beyond bot_log's 30-day retention and are also
+    additive — so the user sees recent closes even when the activity log is
+    saturated with high-volume scan-cycle messages.
+    """
     uid = _uid()
     level = request.args.get("level")
     limit = int(request.args.get("limit", 100))
+    CLOSE_TAIL = 20  # always reserved for synthesized close events
 
+    clauses = [f"user_id = {P}", "source = 'crypto'"]
+    params = [uid]
     if level:
-        rows = query(
-            f"SELECT * FROM bot_log WHERE user_id = {P} AND level = {P} ORDER BY created_at DESC LIMIT {P}",
-            (uid, level, limit),
-        )
-    else:
-        rows = query(
-            f"SELECT * FROM bot_log WHERE user_id = {P} ORDER BY created_at DESC LIMIT {P}",
-            (uid, limit),
-        )
-    return jsonify([{
+        clauses.append(f"level = {P}")
+        params.append(level)
+    where = " WHERE " + " AND ".join(clauses)
+    params.append(limit)
+    rows = query(f"SELECT * FROM bot_log{where} ORDER BY created_at DESC LIMIT {P}", params)
+
+    out = [{
         "id": r["id"], "level": r["level"], "message": r["message"],
         "details": r["details"], "created_at": r["created_at"],
-    } for r in rows])
+    } for r in rows]
+
+    if level in (None, "info"):
+        closes = query(
+            f"SELECT id, coin, side, entry_price, exit_price, pnl, pnl_pct, strategy, closed_at "
+            f"FROM bot_trades WHERE user_id = {P} AND asset_type = 'crypto' "
+            f"AND status = 'closed' AND closed_at IS NOT NULL "
+            f"ORDER BY closed_at DESC LIMIT {P}",
+            (uid, CLOSE_TAIL),
+        )
+
+        # Dedup: a real 'TRADE CLOSED' bot_log row may already exist for closes
+        # that happened inside the retention window. Skip synthesizing it again
+        # when the same trade-id appears in a real log message.
+        existing_close_ids = set()
+        for r in out:
+            msg = r.get("message") or ""
+            if msg.startswith("TRADE CLOSED:"):
+                # Real log lines don't carry the id, so dedup by (coin, ts) bucket.
+                existing_close_ids.add((msg[:60], str(r.get("created_at") or "")[:16]))
+
+        for c in closes:
+            entry = float(c["entry_price"] or 0)
+            exit_ = float(c["exit_price"] or 0)
+            pnl = float(c["pnl"] or 0)
+            pct = float(c["pnl_pct"] or 0)
+            strat = c["strategy"] or "—"
+            msg = (f"TRADE CLOSED: {c['coin']} {c['side']} | "
+                   f"Entry: ${entry:,.2f} → Exit: ${exit_:,.2f} | "
+                   f"Net P&L: ${pnl:,.2f} ({pct:+.1f}%) | Strategy: {strat}")
+            key = (msg[:60], str(c["closed_at"] or "")[:16])
+            if key in existing_close_ids:
+                continue
+            out.append({
+                "id": -int(c["id"]),
+                "level": "info",
+                "message": msg,
+                "details": None,
+                "created_at": c["closed_at"],
+            })
+
+        out.sort(key=lambda r: str(r["created_at"] or ""), reverse=True)
+
+    return jsonify(out)
 
 
 @bp.route("/api/bot/top-volume")

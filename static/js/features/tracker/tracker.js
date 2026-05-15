@@ -1,3 +1,125 @@
+// ─── Bot Trades panel (per-user, source-filterable) ────────
+
+let _trackerBotSource = 'all';  // 'all' | 'crypto' | 'stock' | 'claude' | 'watchdog'
+
+const _BOT_SOURCE_LABELS = {
+    all: 'All',
+    crypto: 'Crypto Bot',
+    stock: 'Stock Bot',
+    claude: 'Claude Bot',
+    watchdog: 'Watchdog',
+};
+const _BOT_SOURCE_COLORS = {
+    crypto: '#ff7043',
+    stock: '#42a5f5',
+    claude: '#ab47bc',
+    watchdog: '#26a69a',
+};
+
+async function loadTrackerBotTrades() {
+    const tableEl = document.getElementById('tracker-bot-table');
+    const pillsEl = document.getElementById('tracker-bot-pills');
+    const overallEl = document.getElementById('tracker-bot-overall');
+    if (!tableEl || !pillsEl || !overallEl) return;
+    overallEl.textContent = 'Loading…';
+    tableEl.innerHTML = '';
+    try {
+        const resp = await fetch(`/api/tracker/bot-trades?source=${_trackerBotSource}&limit=200`);
+        if (!resp.ok) {
+            tableEl.innerHTML = `<div style="padding:18px;color:#ef5350;font-size:12px;">Failed to load bot trades (HTTP ${resp.status})</div>`;
+            overallEl.textContent = '';
+            return;
+        }
+        const data = await resp.json();
+        const overall = data.overall || {};
+        const sourceCount = data.by_source || {};
+
+        // Overall P/L line
+        const pnlColor = (overall.pnl || 0) >= 0 ? '#26a69a' : '#ef5350';
+        overallEl.innerHTML = `
+            Overall <strong style="color:${pnlColor};">${overall.pnl >= 0 ? '+' : ''}$${(overall.pnl || 0).toFixed(2)}</strong>
+            · ${overall.trades || 0} trades · ${overall.closed || 0} closed
+            · win rate <strong>${(overall.win_rate || 0).toFixed(1)}%</strong>`;
+
+        // Filter pills (with counts)
+        const pillKeys = ['all', 'crypto', 'stock', 'claude', 'watchdog'];
+        pillsEl.innerHTML = pillKeys.map(k => {
+            const active = _trackerBotSource === k;
+            const count = k === 'all'
+                ? overall.trades || 0
+                : (sourceCount[k] && sourceCount[k].trades) || 0;
+            const pnl = k === 'all'
+                ? overall.pnl || 0
+                : (sourceCount[k] && sourceCount[k].total_pnl) || 0;
+            const color = _BOT_SOURCE_COLORS[k] || '#787b86';
+            const bg = active ? `${color}33` : 'var(--bg-card, #1a1d26)';
+            const border = active ? color : 'var(--border-color)';
+            const label = _BOT_SOURCE_LABELS[k] || k;
+            const pnlBadge = count > 0
+                ? `<span style="color:${pnl >= 0 ? '#26a69a' : '#ef5350'};font-size:9px;">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}</span>`
+                : '';
+            return `<button onclick="setTrackerBotSource('${k}')"
+                style="padding:5px 11px;border:1px solid ${border};background:${bg};color:var(--text-bright);border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                <span>${label}</span>
+                <span style="color:var(--text-secondary);font-weight:500;">${count}</span>
+                ${pnlBadge}
+            </button>`;
+        }).join('');
+
+        // Trade list
+        const trades = data.trades || [];
+        if (!trades.length) {
+            tableEl.innerHTML = `<div style="padding:24px;color:var(--text-secondary);text-align:center;font-size:12px;">No trades for this filter.</div>`;
+            return;
+        }
+        const rows = trades.map(t => {
+            const c = _BOT_SOURCE_COLORS[t.source] || '#787b86';
+            const sourceLabel = _BOT_SOURCE_LABELS[t.source] || t.source;
+            const pnl = t.pnl != null ? Number(t.pnl) : null;
+            const pnlPct = t.pnl_pct != null ? Number(t.pnl_pct) : null;
+            const pnlColor = pnl == null ? 'var(--text-secondary)' : pnl >= 0 ? '#26a69a' : '#ef5350';
+            const pnlText = pnl == null
+                ? '—'
+                : `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}${pnlPct != null ? ` (${pnlPct.toFixed(2)}%)` : ''}`;
+            return `<tr style="border-bottom:1px solid var(--border-color);">
+                <td style="padding:5px 8px;"><span style="background:${c}26;color:${c};padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700;">${sourceLabel}</span></td>
+                <td style="padding:5px 8px;font-weight:700;">${t.coin || '—'}</td>
+                <td style="padding:5px 8px;font-size:11px;">${t.side || ''}</td>
+                <td style="padding:5px 8px;font-family:monospace;text-align:right;">${Number(t.size || 0).toFixed(0)}</td>
+                <td style="padding:5px 8px;font-family:monospace;text-align:right;">$${Number(t.entry_price || 0).toFixed(2)}</td>
+                <td style="padding:5px 8px;font-family:monospace;text-align:right;">${t.exit_price ? '$' + Number(t.exit_price).toFixed(2) : '—'}</td>
+                <td style="padding:5px 8px;font-family:monospace;text-align:right;color:${pnlColor};font-weight:600;">${pnlText}</td>
+                <td style="padding:5px 8px;font-size:10px;color:var(--text-secondary);">${t.status || ''}</td>
+                <td style="padding:5px 8px;font-size:10px;color:var(--text-bright);">${(t.opened_at || '').slice(0, 16)}</td>
+            </tr>`;
+        }).join('');
+        tableEl.innerHTML = `
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead><tr style="border-bottom:1px solid var(--border-color);color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;">
+                    <th style="padding:5px 8px;text-align:left;">Source</th>
+                    <th style="padding:5px 8px;text-align:left;">Ticker</th>
+                    <th style="padding:5px 8px;text-align:left;">Side</th>
+                    <th style="padding:5px 8px;text-align:right;">Qty</th>
+                    <th style="padding:5px 8px;text-align:right;">Entry</th>
+                    <th style="padding:5px 8px;text-align:right;">Exit</th>
+                    <th style="padding:5px 8px;text-align:right;">P&amp;L</th>
+                    <th style="padding:5px 8px;text-align:left;">Status</th>
+                    <th style="padding:5px 8px;text-align:left;">Opened</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+    } catch (e) {
+        tableEl.innerHTML = `<div style="padding:18px;color:#ef5350;font-size:12px;">Error: ${e.message}</div>`;
+        overallEl.textContent = '';
+    }
+}
+
+function setTrackerBotSource(src) {
+    _trackerBotSource = src;
+    loadTrackerBotTrades();
+}
+
+
 function toggleTradeFields() {
     const fields = document.getElementById('journal-trade-fields');
     const btn = document.getElementById('btn-toggle-trade');

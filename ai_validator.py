@@ -61,8 +61,21 @@ def is_configured() -> bool:
 
 def _call_openrouter(model: str, messages: list, temperature: float = None,
                      max_tokens: int = None, timeout: int = None,
-                     _user_id: int = None, _source: str = None) -> str:
-    """Make a single LLM call. Routes to Vertex AI if configured, else OpenRouter."""
+                     _user_id: int = None, _source: str = None,
+                     role: str = None) -> str:
+    """Make a single LLM call. Routes to Vertex AI if configured, else OpenRouter.
+
+    If `role` is passed, the model name is resolved through shared.llm_config
+    so admin-set DB overrides take precedence over the env-resolved `model`
+    argument. This is what makes the admin "swap to cheaper model" UI work
+    without a redeploy. Without `role`, behavior is unchanged.
+    """
+    if role:
+        try:
+            from shared.llm_config import get_model
+            model = get_model(role, model)
+        except Exception:
+            pass  # llm_config unavailable — fall through with original model
 
     # ── Vertex AI path (direct Google Cloud, no OpenRouter markup) ──
     try:
@@ -142,6 +155,8 @@ def _build_data_summary(analysis: dict, context: str = "full") -> str:
     indicators = analysis.get("indicators", {})
     breakout = analysis.get("breakout_status", {})
     trade_plan = analysis.get("trade_plan")
+    recent_news = analysis.get("recent_news") or []  # list[str], 24h headlines
+    active_catalysts = analysis.get("active_catalysts") or []  # high-signal bullish news
 
     parts = []
 
@@ -215,6 +230,20 @@ Change: {analysis['change']} ({analysis['change_pct']}%)""")
   Risk Amount: ${trade_plan.get('risk_amount', 'N/A')} (1.5% of $25K)
   Setup Grade: {trade_plan.get('grade', 'N/A')}""")
 
+    # Active catalysts — high-signal bullish news (earnings beats, guidance raises,
+    # FDA approvals, M&A, contract wins). Surfaced separately so the model weighs them
+    # ahead of generic headlines. Empty when nothing material in the window.
+    if active_catalysts and context in ("research", "prediction", "full"):
+        cat_block = "\n".join(f"  - {c}" for c in active_catalysts[:5])
+        parts.append(f"ACTIVE CATALYSTS (last 24h, high-signal bullish news):\n{cat_block}")
+
+    # Recent news headlines (last 24h, included for research + prediction contexts).
+    # Helps the LLM weigh catalysts vs noise — e.g., earnings beat, M&A, FDA, sector
+    # rotation. Capped at 8 lines to keep token cost low.
+    if recent_news and context in ("research", "prediction", "full"):
+        news_block = "\n".join(f"  - {h}" for h in recent_news[:8])
+        parts.append(f"RECENT NEWS / SOCIAL (last 24h):\n{news_block}")
+
     return "\n\n".join(parts).strip()
 
 
@@ -223,11 +252,12 @@ Change: {analysis['change']} ({analysis['change_pct']}%)""")
 def _validate_research(data_summary: str, ticker: str, fast_mode: bool = False) -> dict:
     """Model 1: Fundamental research — risk-first, concise."""
     model = LLM_RESEARCH_FAST if fast_mode else LLM_RESEARCH
+    role = "research_fast" if fast_mode else "research"
     messages = [
         {"role": "system", "content": RESEARCH_SYSTEM},
         {"role": "user", "content": RESEARCH_USER_TEMPLATE.format(ticker=ticker, data_summary=data_summary)},
     ]
-    raw = _call_openrouter(model, messages, max_tokens=768, timeout=30)
+    raw = _call_openrouter(model, messages, max_tokens=768, timeout=30, role=role)
     return _parse_json_response(raw, "research")
 
 
@@ -237,7 +267,7 @@ def _validate_pattern(data_summary: str, ticker: str) -> dict:
         {"role": "system", "content": PATTERN_SYSTEM},
         {"role": "user", "content": PATTERN_USER_TEMPLATE.format(ticker=ticker, data_summary=data_summary)},
     ]
-    raw = _call_openrouter(LLM_PATTERN, messages, max_tokens=768, timeout=30)
+    raw = _call_openrouter(LLM_PATTERN, messages, max_tokens=768, timeout=30, role="pattern")
     return _parse_json_response(raw, "pattern")
 
 
@@ -247,7 +277,7 @@ def _validate_prediction(data_summary: str, ticker: str) -> dict:
         {"role": "system", "content": PREDICTION_SYSTEM},
         {"role": "user", "content": PREDICTION_USER_TEMPLATE.format(ticker=ticker, data_summary=data_summary)},
     ]
-    raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1024, timeout=45)
+    raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1024, timeout=45, role="prediction")
     return _parse_json_response(raw, "prediction")
 
 
@@ -486,23 +516,25 @@ def _build_price_action_summary(indicators: dict, df) -> str:
 def _gather_facts(fundamentals_summary: str, price_action_summary: str, ticker: str, fast_mode: bool = False) -> dict:
     """LLM 1 (Fact Gatherer): Gather and organize all relevant facts about the company."""
     model = LLM_RESEARCH_FAST if fast_mode else LLM_RESEARCH
+    role = "research_fast" if fast_mode else "research"
     messages = [
         {"role": "system", "content": FACT_GATHERER_SYSTEM},
         {"role": "user", "content": FACT_GATHERER_USER_TEMPLATE.format(ticker=ticker, fundamentals_summary=fundamentals_summary, price_action_summary=price_action_summary)},
     ]
-    raw = _call_openrouter(model, messages, max_tokens=1200, timeout=45)
+    raw = _call_openrouter(model, messages, max_tokens=1200, timeout=45, role=role)
     return _parse_json_response(raw, "fact_gatherer")
 
 
 def _evaluate_company_health(fundamentals_summary: str, fact_gatherer_output: dict, ticker: str, fast_mode: bool = False) -> dict:
     """LLM 2 (Company Health): Financial health + moat assessment, informed by fact gatherer."""
     model = LLM_RESEARCH_FAST if fast_mode else LLM_PATTERN
+    role = "research_fast" if fast_mode else "pattern"
     facts_context = json.dumps({k: v for k, v in fact_gatherer_output.items() if not k.startswith("_")}, default=str)[:1500]
     messages = [
         {"role": "system", "content": COMPANY_HEALTH_SYSTEM},
         {"role": "user", "content": COMPANY_HEALTH_USER_TEMPLATE.format(ticker=ticker, fundamentals_summary=fundamentals_summary, facts_context=facts_context)},
     ]
-    raw = _call_openrouter(model, messages, max_tokens=1200, timeout=45)
+    raw = _call_openrouter(model, messages, max_tokens=1200, timeout=45, role=role)
     return _parse_json_response(raw, "company_health")
 
 
@@ -513,7 +545,7 @@ def _evaluate_price_action(price_action_summary: str, fundamentals_summary: str,
         {"role": "system", "content": PRICE_ACTION_SYSTEM},
         {"role": "user", "content": PRICE_ACTION_USER_TEMPLATE.format(ticker=ticker, fundamentals_summary=fundamentals_summary, price_action_summary=price_action_summary, facts_context=facts_context)},
     ]
-    raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1200, timeout=45)
+    raw = _call_openrouter(LLM_PREDICTION, messages, max_tokens=1200, timeout=45, role="prediction")
     return _parse_json_response(raw, "price_action")
 
 
@@ -618,7 +650,7 @@ def _validate_supervisor(context: str, prior_verdicts: dict, layer: str) -> dict
     ]
 
     try:
-        raw = _call_openrouter(LLM_SUPERVISOR, messages, max_tokens=1024, timeout=45)
+        raw = _call_openrouter(LLM_SUPERVISOR, messages, max_tokens=1024, timeout=45, role="supervisor")
         result = _parse_json_response(raw, "supervisor")
         result["model"] = LLM_SUPERVISOR
         return result
@@ -780,6 +812,7 @@ def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
 def _supervisor_review(facts: dict, health: dict, price: dict, ticker: str, fast_mode: bool = False) -> dict:
     """LLM 4 (Supervisor): Reviews all prior model outputs and casts own vote."""
     model = LLM_SUPERVISOR if LLM_SUPERVISOR else (LLM_RESEARCH_FAST if fast_mode else LLM_RESEARCH)
+    role = "supervisor" if LLM_SUPERVISOR else ("research_fast" if fast_mode else "research")
     prior_summary = json.dumps({
         "fact_gatherer": {k: v for k, v in facts.items() if not k.startswith("_")},
         "company_health": {k: v for k, v in health.items() if not k.startswith("_")},
@@ -802,7 +835,7 @@ As the final reviewer, check for:
 Respond with ONLY this JSON:
 {{"verdict":"INVEST","confidence":70,"agrees_with_health":true,"agrees_with_price_action":true,"override_flags":["any critical issue that should force a different verdict"],"reasoning":"2-3 sentences explaining your independent assessment","risk_flags":["risk1"],"summary":"1 sentence final take"}}"""}
     ]
-    raw = _call_openrouter(model, messages, max_tokens=1024, timeout=45)
+    raw = _call_openrouter(model, messages, max_tokens=1024, timeout=45, role=role)
     return _parse_json_response(raw, "supervisor")
 
 
