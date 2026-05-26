@@ -37,7 +37,9 @@ _TMP_DB.close()
 os.environ["SQLITE_DB_PATH_OVERRIDE"] = _TMP_DB.name  # documented, even if app ignores it
 
 
-# ─── Common Android viewport profiles ─────────────────────────────
+# ─── Common mobile viewport profiles ──────────────────────────────
+# Covers the spread the user reports issues on: modern Android + older Android +
+# small-screen edge cases + iPhone (Safari renders differently from Chrome).
 ANDROID_VIEWPORTS = {
     "pixel_5": {"width": 393, "height": 851, "device_scale_factor": 2.75,
                 "user_agent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 "
@@ -48,6 +50,14 @@ ANDROID_VIEWPORTS = {
     "small_android": {"width": 320, "height": 568, "device_scale_factor": 2.0,
                       "user_agent": "Mozilla/5.0 (Linux; Android 10; SM-J260F) AppleWebKit/537.36 "
                                     "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"},
+    "iphone_se": {"width": 375, "height": 667, "device_scale_factor": 2.0,
+                  "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
+                                "Mobile/15E148 Safari/604.1"},
+    "iphone_13": {"width": 390, "height": 844, "device_scale_factor": 3.0,
+                  "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
+                                "Mobile/15E148 Safari/604.1"},
 }
 
 TEST_EMAIL = "mobile-test@example.com"
@@ -237,6 +247,68 @@ def assert_viewport_meta(page):
     """)
     assert content, "Missing <meta name=viewport>"
     assert "width=device-width" in content, f"viewport meta lacks width=device-width: {content!r}"
+
+
+def find_overflowing_elements(page, tolerance_px=4, ignore_selectors=None):
+    """Walk every visible element and return those whose RIGHT edge exceeds the
+    viewport — i.e. content that would force horizontal scroll or be clipped
+    by overflow:hidden. Returns a sorted list of:
+        {tag, id, cls, selector, overflow_px, width, x}
+    `ignore_selectors` lets callers skip known-OK containers (e.g. inner
+    scrollable carousels with overflow-x:auto that legitimately scroll).
+    """
+    ignore_selectors = ignore_selectors or []
+    return page.evaluate(
+        """
+        ({tolerance, ignore}) => {
+            const vp = window.innerWidth;
+            const out = [];
+            // Build a short, unique-ish selector path for diagnostic output.
+            const selectorFor = (el) => {
+                if (el.id) return '#' + el.id;
+                let s = el.tagName.toLowerCase();
+                if (el.classList && el.classList.length) {
+                    s += '.' + Array.from(el.classList).slice(0, 2).join('.');
+                }
+                return s;
+            };
+            const ignoreSet = new Set(ignore);
+            const matchesIgnore = (el) => {
+                for (const sel of ignoreSet) {
+                    try { if (el.matches(sel) || el.closest(sel)) return true; } catch (_) {}
+                }
+                return false;
+            };
+            for (const el of document.querySelectorAll('*')) {
+                const s = getComputedStyle(el);
+                if (s.display === 'none' || s.visibility === 'hidden') continue;
+                if (s.position === 'fixed') continue;       // fixed elements are tracked separately
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                const right = r.left + r.width;
+                if (right > vp + tolerance) {
+                    if (matchesIgnore(el)) continue;
+                    out.push({
+                        tag: el.tagName,
+                        id: el.id || '',
+                        cls: typeof el.className === 'string'
+                            ? el.className.slice(0, 60) : '',
+                        selector: selectorFor(el),
+                        text: (el.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+                        width: Math.round(r.width),
+                        x: Math.round(r.left),
+                        right: Math.round(right),
+                        overflow: Math.round(right - vp),
+                    });
+                }
+            }
+            // Sort widest overflow first; cap to keep output readable.
+            out.sort((a, b) => b.overflow - a.overflow);
+            return out.slice(0, 30);
+        }
+        """,
+        {"tolerance": tolerance_px, "ignore": ignore_selectors},
+    )
 
 
 def collect_tap_targets_too_small(page, selector, min_px=40):
