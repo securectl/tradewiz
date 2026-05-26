@@ -24,6 +24,7 @@ openpyxl>=3.1.0
 matplotlib>=3.8.0
 feedparser>=6.0.0
 pdfplumber>=0.10.0
+reportlab>=4.0.0
 APScheduler>=3.10.0
 scikit-learn>=1.4.0
 torch>=2.2.0

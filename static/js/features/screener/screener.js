@@ -202,6 +202,27 @@ function switchScreenerCategory(cat) {
         timeframeBar.style.display = config.showTimeframe ? 'flex' : 'none';
     }
 
+    // Show/hide oversold export bar (only meaningful for the oversold tracker)
+    const exportBar = document.getElementById('screener-export-bar');
+    if (exportBar) {
+        if (cat === 'oversold') {
+            exportBar.style.display = 'flex';
+            // Default date range: last 30 days
+            const startInput = document.getElementById('oversold-export-start');
+            const endInput = document.getElementById('oversold-export-end');
+            if (startInput && !startInput.value) {
+                const d = new Date();
+                d.setDate(d.getDate() - 30);
+                startInput.value = d.toISOString().split('T')[0];
+            }
+            if (endInput && !endInput.value) {
+                endInput.value = new Date().toISOString().split('T')[0];
+            }
+        } else {
+            exportBar.style.display = 'none';
+        }
+    }
+
     // Update risk banner color
     const banner = document.getElementById('screener-risk-banner');
     if (cat === 'lowcap') {
@@ -1059,6 +1080,24 @@ function toggleScreenerArchive() {
 }
 
 let _screenerArchiveLoaded = false;
+
+// ─── Oversold Export ─────────────────────────────────────────
+function exportOversold(format) {
+    const start = (document.getElementById('oversold-export-start') || {}).value || '';
+    const end = (document.getElementById('oversold-export-end') || {}).value || '';
+    const dedupe = (document.getElementById('oversold-export-dedupe') || {}).checked !== false ? '1' : '0';
+
+    if (start && end && start > end) {
+        alert('Start date must be on or before end date.');
+        return;
+    }
+
+    const params = new URLSearchParams({ format, dedupe });
+    if (start) params.append('start', start);
+    if (end) params.append('end', end);
+    // Open in a new tab so the browser handles download via Content-Disposition.
+    window.open(`/api/screener/oversold/export?${params.toString()}`, '_blank');
+}
 
 // Restore prior open/close state on init; skip auto-load when collapsed
 // (this is the perf win — avoids hitting /api/screener/trending on every page load)
