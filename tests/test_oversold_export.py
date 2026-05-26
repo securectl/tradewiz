@@ -17,19 +17,31 @@ class TestExportRouteRegistration(unittest.TestCase):
         cls.client = app.test_client()
         cls.rules = {str(r) for r in app.url_map.iter_rules()}
 
-    def test_route_registered(self):
+    def test_oversold_alias_route_registered(self):
         self.assertIn("/api/screener/oversold/export", self.rules)
 
-    def test_route_requires_auth(self):
+    def test_generic_export_route_registered(self):
+        self.assertIn("/api/screener/export", self.rules)
+
+    def test_oversold_route_requires_auth(self):
         r = self.client.get("/api/screener/oversold/export?format=csv")
-        # Login-required decorator returns 401 or redirect (302), never 500.
+        self.assertIn(r.status_code, [401, 302, 403])
+        self.assertNotEqual(r.status_code, 500)
+
+    def test_generic_route_requires_auth(self):
+        r = self.client.get("/api/screener/export?category=lowcap&format=csv")
         self.assertIn(r.status_code, [401, 302, 403])
         self.assertNotEqual(r.status_code, 500)
 
     def test_invalid_format_rejected_before_auth_for_authed_user(self):
-        # Even with bad format, unauth users still get redirected/401 first.
         r = self.client.get("/api/screener/oversold/export?format=xml")
         self.assertIn(r.status_code, [400, 401, 302, 403])
+
+    def test_valid_categories_include_all_ui_categories(self):
+        from features.screener.routes import VALID_EXPORT_CATEGORIES
+        for cat in ("lowcap", "midcap", "largecap", "etf", "metals_mining",
+                    "crypto", "ai", "gainers", "losers", "oversold"):
+            self.assertIn(cat, VALID_EXPORT_CATEGORIES, f"category {cat} missing")
 
 
 class TestDedupeLogic(unittest.TestCase):
@@ -144,6 +156,84 @@ class TestBuilders(unittest.TestCase):
         body = _build_pdf(self._sample(), date(2026, 5, 1), date(2026, 5, 26), True)
         self.assertIsInstance(body, (bytes, bytearray))
         # PDF magic header
+        self.assertTrue(body.startswith(b"%PDF"))
+
+
+class TestGenericScreenerDedupe(unittest.TestCase):
+    """The generalized path (lowcap, midcap, etc.) reads screener_results
+    instead of oversold_daily and dedupes on verdict instead of price_trend."""
+
+    def test_collapse_with_verdict_path(self):
+        from features.screener.routes import _dedupe_screener
+        rows = [
+            {"ticker": "XYZ", "scan_date": "2026-05-20", "price": 12.0, "verdict": "WATCH",
+             "confidence": 55, "name": "Xyz Co", "sector": "Tech", "market_cap": 500_000_000},
+            {"ticker": "XYZ", "scan_date": "2026-05-22", "price": 12.5, "verdict": "OPPORTUNITY",
+             "confidence": 70, "name": "Xyz Co", "sector": "Tech", "market_cap": 510_000_000},
+            {"ticker": "XYZ", "scan_date": "2026-05-25", "price": 13.0, "verdict": "OPPORTUNITY",
+             "confidence": 75, "name": "Xyz Co", "sector": "Tech", "market_cap": 520_000_000},
+        ]
+        out = _dedupe_screener(rows)
+        self.assertEqual(len(out), 1)
+        r = out[0]
+        self.assertEqual(r["ticker"], "XYZ")
+        self.assertEqual(r["days_seen"], 3)
+        self.assertEqual(r["first_seen"], "2026-05-20")
+        self.assertEqual(r["last_seen"], "2026-05-25")
+        # Consecutive duplicate verdicts collapsed
+        self.assertEqual(r["verdict_path"], "WATCH → OPPORTUNITY")
+        self.assertEqual(r["best_confidence"], 75)
+        self.assertEqual(r["latest_confidence"], 75)
+        self.assertAlmostEqual(r["price_change_pct"], 8.33, places=1)
+
+    def test_sort_prefers_persistent_tickers(self):
+        from features.screener.routes import _dedupe_screener
+        rows = [
+            {"ticker": "ONESHOT", "scan_date": "2026-05-25", "price": 5.0, "verdict": "OPPORTUNITY", "confidence": 95},
+            {"ticker": "STICKY", "scan_date": "2026-05-20", "price": 5.0, "verdict": "WATCH", "confidence": 60},
+            {"ticker": "STICKY", "scan_date": "2026-05-22", "price": 5.0, "verdict": "WATCH", "confidence": 65},
+        ]
+        out = _dedupe_screener(rows)
+        # STICKY appears twice — should rank above ONESHOT despite ONESHOT's higher confidence
+        self.assertEqual(out[0]["ticker"], "STICKY")
+
+    def test_empty_input(self):
+        from features.screener.routes import _dedupe_screener
+        self.assertEqual(_dedupe_screener([]), [])
+
+
+class TestGenericBuilders(unittest.TestCase):
+
+    def _sample(self):
+        return [{
+            "ticker": "TEST", "name": "Test Co", "sector": "Tech", "market_cap": 1_000_000_000,
+            "days_seen": 2, "first_seen": "2026-05-20", "last_seen": "2026-05-22",
+            "first_price": 10.0, "latest_price": 11.0, "price_change_pct": 10.0,
+            "latest_verdict": "OPPORTUNITY", "latest_confidence": 75, "best_confidence": 80,
+            "verdict_path": "WATCH → OPPORTUNITY",
+            "summary": "Constructive setup forming.",
+        }]
+
+    def test_screener_csv_includes_verdict_path(self):
+        from features.screener.routes import _build_screener_csv
+        body = _build_screener_csv(self._sample())
+        self.assertIn("Verdict Path", body)
+        self.assertIn("WATCH → OPPORTUNITY", body)
+        self.assertIn("TEST", body)
+        self.assertIn("Best Confidence", body)
+
+    def test_screener_txt_block(self):
+        from features.screener.routes import _build_screener_txt
+        from datetime import date
+        body = _build_screener_txt("lowcap", self._sample(), date(2026, 5, 1), date(2026, 5, 26), True)
+        self.assertIn("LOWCAP SCREENER EXPORT", body)
+        self.assertIn("Verdict Path:", body)
+        self.assertIn("Seen 2 day(s)", body)
+
+    def test_screener_pdf_bytes(self):
+        from features.screener.routes import _build_screener_pdf
+        from datetime import date
+        body = _build_screener_pdf("midcap", self._sample(), date(2026, 5, 1), date(2026, 5, 26), True)
         self.assertTrue(body.startswith(b"%PDF"))
 
 
