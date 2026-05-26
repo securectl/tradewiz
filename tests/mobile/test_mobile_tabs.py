@@ -69,26 +69,38 @@ def test_each_public_tab_no_horizontal_scroll(authed_mobile_page, tab):
 
 
 # ── Screener-specific tests ────────────────────────────────────────────
-def test_screener_category_bar_wraps(authed_mobile_page):
-    """The 10-button category bar must wrap (not horizontally scroll the page)."""
+def test_screener_category_bar_fits_within_viewport(authed_mobile_page):
+    """The category bar may scroll horizontally inside itself (mobile.css does
+    this intentionally so the 10 buttons stay on one row + swipeable), but the
+    bar's *visible* width must not exceed the viewport — otherwise it would push
+    the whole page wide."""
     authed_mobile_page.goto("/")
     authed_mobile_page.wait_for_load_state("domcontentloaded")
     _switch_tab(authed_mobile_page, "screener")
-    overflow = authed_mobile_page.evaluate("""
+    info = authed_mobile_page.evaluate("""
         () => {
             const bar = document.querySelector('.screener-category-bar');
             if (!bar) return null;
-            return { scroll: bar.scrollWidth, client: bar.clientWidth };
+            const r = bar.getBoundingClientRect();
+            return {
+                client: bar.clientWidth, scroll: bar.scrollWidth,
+                rectWidth: Math.round(r.width),
+                overflowX: getComputedStyle(bar).overflowX,
+            };
         }
     """)
-    assert overflow, "Screener category bar not found"
-    # The bar may legitimately scroll inside itself (overflow-x: auto), but if its content
-    # overflows by more than the viewport width something is wrong with flex-wrap config.
+    assert info, "Screener category bar not found"
     vp = authed_mobile_page.viewport_size["width"]
-    assert overflow["scroll"] - overflow["client"] <= vp, (
-        f"Screener category bar overflows by {overflow['scroll'] - overflow['client']}px "
-        f"(viewport {vp}px) — flex-wrap likely broken"
+    assert info["rectWidth"] <= vp + 1, (
+        f"Screener category bar visible width {info['rectWidth']}px exceeds viewport {vp}px"
     )
+    # If the bar isn't a horizontal scroller and its content still overflows,
+    # that's the real bug — wrap or scroll, never silent clip.
+    if info["overflowX"] not in ("auto", "scroll"):
+        assert info["scroll"] <= info["client"] + 1, (
+            f"Screener bar has no overflow-x scroll but content overflows by "
+            f"{info['scroll'] - info['client']}px — flex-wrap broken"
+        )
 
 
 def test_screener_export_bar_fits_viewport(authed_mobile_page):

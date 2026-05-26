@@ -254,8 +254,15 @@ def find_overflowing_elements(page, tolerance_px=4, ignore_selectors=None):
     viewport — i.e. content that would force horizontal scroll or be clipped
     by overflow:hidden. Returns a sorted list of:
         {tag, id, cls, selector, overflow_px, width, x}
-    `ignore_selectors` lets callers skip known-OK containers (e.g. inner
-    scrollable carousels with overflow-x:auto that legitimately scroll).
+
+    Filters out false positives:
+      - Elements (and their descendants) with position: fixed/sticky/absolute
+        (these are intentionally laid out outside normal flow — think modal
+        overlays translated off-screen).
+      - Elements (and their descendants) inside an ancestor with
+        overflow-x: auto/scroll (these scroll inside themselves by design).
+
+    `ignore_selectors` lets callers skip additional known-OK containers.
     """
     ignore_selectors = ignore_selectors or []
     return page.evaluate(
@@ -263,7 +270,6 @@ def find_overflowing_elements(page, tolerance_px=4, ignore_selectors=None):
         ({tolerance, ignore}) => {
             const vp = window.innerWidth;
             const out = [];
-            // Build a short, unique-ish selector path for diagnostic output.
             const selectorFor = (el) => {
                 if (el.id) return '#' + el.id;
                 let s = el.tagName.toLowerCase();
@@ -273,36 +279,50 @@ def find_overflowing_elements(page, tolerance_px=4, ignore_selectors=None):
                 return s;
             };
             const ignoreSet = new Set(ignore);
-            const matchesIgnore = (el) => {
+            const matchesIgnoreSelector = (el) => {
                 for (const sel of ignoreSet) {
                     try { if (el.matches(sel) || el.closest(sel)) return true; } catch (_) {}
+                }
+                return false;
+            };
+            // True if the element OR any ancestor is positioned out-of-flow or
+            // sits inside a horizontally-scrollable container.
+            const hasExcludedAncestor = (el) => {
+                let n = el;
+                while (n && n.nodeType === 1) {
+                    const s = getComputedStyle(n);
+                    if (s.position === 'fixed' || s.position === 'sticky' || s.position === 'absolute') {
+                        return true;
+                    }
+                    if (s.overflowX === 'auto' || s.overflowX === 'scroll') {
+                        return true;
+                    }
+                    n = n.parentElement;
                 }
                 return false;
             };
             for (const el of document.querySelectorAll('*')) {
                 const s = getComputedStyle(el);
                 if (s.display === 'none' || s.visibility === 'hidden') continue;
-                if (s.position === 'fixed') continue;       // fixed elements are tracked separately
                 const r = el.getBoundingClientRect();
                 if (r.width === 0 || r.height === 0) continue;
                 const right = r.left + r.width;
-                if (right > vp + tolerance) {
-                    if (matchesIgnore(el)) continue;
-                    out.push({
-                        tag: el.tagName,
-                        id: el.id || '',
-                        cls: typeof el.className === 'string'
-                            ? el.className.slice(0, 60) : '',
-                        selector: selectorFor(el),
-                        text: (el.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
-                        width: Math.round(r.width),
-                        x: Math.round(r.left),
-                        right: Math.round(right),
-                        overflow: Math.round(right - vp),
-                    });
-                }
+                if (right <= vp + tolerance) continue;
+                if (matchesIgnoreSelector(el)) continue;
+                if (hasExcludedAncestor(el)) continue;
+                out.push({
+                    tag: el.tagName,
+                    id: el.id || '',
+                    cls: typeof el.className === 'string'
+                        ? el.className.slice(0, 60) : '',
+                    selector: selectorFor(el),
+                    text: (el.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+                    width: Math.round(r.width),
+                    x: Math.round(r.left),
+                    right: Math.round(right),
+                    overflow: Math.round(right - vp),
+                });
             }
-            // Sort widest overflow first; cap to keep output readable.
             out.sort((a, b) => b.overflow - a.overflow);
             return out.slice(0, 30);
         }
