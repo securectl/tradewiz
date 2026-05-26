@@ -1,0 +1,11 @@
+# Test-only dependencies. Kept out of the main image to avoid bloating the
+# production container with Chromium + Playwright runtime (~300 MB).
+#
+# Setup once:
+#   pip install -r requirements-test.txt
+#   python -m playwright install chromium
+#
+# Run mobile tests:
+#   python -m pytest tests/mobile/ -v
+playwright>=1.45.0
+pytest-playwright>=0.5.0
