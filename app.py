@@ -65,6 +65,10 @@ from features.congress.routes import bp as congress_bp
 from features.smart_money.routes import bp as smart_money_bp
 from features.watchdog.routes import bp as watchdog_bp
 from features.backtest.routes import bp as backtest_bp
+from features.sector_radar.routes import bp as sector_radar_bp
+from features.release_notes.routes import bp as release_notes_bp
+from features.dashboard.routes import bp as dashboard_bp
+from features.feedback.routes import bp as feedback_bp
 from claude_bot.routes import bp as claude_bot_bp
 
 app.register_blueprint(ipo_bp)
@@ -81,6 +85,10 @@ app.register_blueprint(congress_bp)
 app.register_blueprint(smart_money_bp)
 app.register_blueprint(watchdog_bp)
 app.register_blueprint(backtest_bp)
+app.register_blueprint(sector_radar_bp)
+app.register_blueprint(release_notes_bp)
+app.register_blueprint(dashboard_bp)
+app.register_blueprint(feedback_bp)
 app.register_blueprint(claude_bot_bp)
 
 # ─── Startup: log rotation + cleanup ────────────────────────────
@@ -146,6 +154,23 @@ def _run_scheduled_screener_scans():
         log.error(f"[SCHEDULER] Screener pre-cache failed: {e}")
 
 
+def _run_scheduled_sector_radar():
+    """Run the Sector Radar auto research analyst daily at 9:30 AM CST.
+    Mondays get the deeper (Opus) weekly synthesis; other days use Sonnet."""
+    import logging
+    from datetime import datetime as _dt
+    log = logging.getLogger("scheduler")
+    deep = _dt.utcnow().weekday() == 0  # Monday
+    log.info(f"[SCHEDULER] Starting Sector Radar analysis (deep={deep})...")
+    try:
+        from features.sector_radar.engine import run_analysis
+        report = run_analysis(deep=deep, trigger="scheduled")
+        top = (report.get("analyst") or {}).get("top_sector", "?")
+        log.info(f"[SCHEDULER] Sector Radar complete — top sector: {top}")
+    except Exception as e:
+        log.error(f"[SCHEDULER] Sector Radar failed: {e}")
+
+
 def _init_scheduler():
     """Initialize APScheduler for daily jobs. Only runs in one gunicorn worker."""
     try:
@@ -189,8 +214,17 @@ def _init_scheduler():
             replace_existing=True,
         )
 
+        # Sector Radar auto research analyst at 9:30 AM CST (14:30 UTC), after
+        # the screener pre-cache. Mondays run the deeper Opus weekly synthesis.
+        scheduler.add_job(
+            _run_scheduled_sector_radar,
+            CronTrigger(hour=14, minute=30, timezone="UTC"),  # 9:30 AM CST
+            id="daily_sector_radar",
+            replace_existing=True,
+        )
+
         scheduler.start()
-        logging.getLogger("scheduler").info("[SCHEDULER] Started — trials at 8AM CST, oversold at 9AM CST, screener at 9:10AM CST")
+        logging.getLogger("scheduler").info("[SCHEDULER] Started — trials 8AM, oversold 9AM, screener 9:10AM, sector radar 9:30AM CST")
     except Exception as e:
         import logging
         logging.getLogger("scheduler").warning(f"[SCHEDULER] Failed to start: {e}")
@@ -459,7 +493,13 @@ def healthz():
     try:
         from db import query_one
         query_one("SELECT 1 AS ok", ())
-        return jsonify({"status": "healthy", "db": "ok"}), 200
+        platform = "unknown"
+        try:
+            from shared.platform_config import get_platform
+            platform = get_platform()["effective"]
+        except Exception:
+            pass
+        return jsonify({"status": "healthy", "db": "ok", "platform": platform}), 200
     except Exception as e:
         return jsonify({"status": "unhealthy", "db": str(e)}), 503
 
@@ -623,6 +663,10 @@ def _on_startup():
             _log.info("[STARTUP] Smart Money daily refresh started")
         except Exception as e:
             _log.warning(f"[STARTUP] Smart Money start failed: {e}")
+        # NOTE: Sector Radar is intentionally NOT seeded at startup — a full
+        # scan (yfinance + news + LLM) would compete with bot auto-start on the
+        # single gunicorn worker during the fragile boot window. The daily 9:30
+        # CST cron and the manual "Run now" button populate it instead.
         _log.info("[STARTUP] Background checker and bot auto-start complete")
 
     threading.Thread(target=_delayed_start, daemon=True).start()

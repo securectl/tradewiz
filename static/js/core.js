@@ -1879,8 +1879,10 @@ function switchTab(tab, skipHash) {
     const trumpContent = document.getElementById('trump-content');
     const watchdogContent = document.getElementById('watchdog-content');
     const claudeBotContent = document.getElementById('claude-bot-content');
+    const dashboardContent = document.getElementById('dashboard-content');
 
     mainContent.style.display = 'none';
+    if (dashboardContent) dashboardContent.style.display = 'none';
     if (qullamaggieContent) qullamaggieContent.style.display = 'none';
     trackerContent.style.display = 'none';
     screenerContent.style.display = 'none';
@@ -1924,7 +1926,10 @@ function switchTab(tab, skipHash) {
         window._claudeBotRefreshInterval = null;
     }
 
-    if (tab === 'qullamaggie') {
+    if (tab === 'dashboard') {
+        if (dashboardContent) dashboardContent.style.display = 'block';
+        if (typeof loadDashboard === 'function') loadDashboard();
+    } else if (tab === 'qullamaggie') {
         qullamaggieContent.style.display = 'flex';
     } else if (tab === 'tracker') {
         trackerContent.style.display = 'grid';
@@ -1962,8 +1967,13 @@ function switchTab(tab, skipHash) {
         statusRefreshInterval = setInterval(loadStatus, 60000);
     } else if (tab === 'research') {
         researchContent.style.display = 'flex';
-        loadSkillCatalog();
-        loadSkillJobs();
+        // Default to the Sector Radar sub-view; Skills load lazily on switch.
+        if (typeof initResearchTab === 'function') {
+            initResearchTab();
+        } else {
+            loadSkillCatalog();
+            loadSkillJobs();
+        }
     } else if (tab === 'finskills') {
         finskillsContent.style.display = 'block';
         loadFinSkills();
@@ -2004,6 +2014,9 @@ function switchTab(tab, skipHash) {
         loadAdminConfig();
         loadAdminBotDefaults();
         if (typeof loadAdminLlmOverrides === 'function') loadAdminLlmOverrides();
+        if (typeof loadAdminOllamaConfig === 'function') loadAdminOllamaConfig();
+        if (typeof loadAdminPlatform === 'function') loadAdminPlatform();
+        if (typeof loadAdminUsersUsage === 'function') loadAdminUsersUsage();
     } else {
         mainContent.style.display = 'grid';
     }
@@ -2395,3 +2408,18 @@ function renderNarrativeDashboard(container, d, assetFilter) {
 
     container.innerHTML = html;
 }
+
+/* ─── Theme switcher (Aurora / Terminal / Daylight) ─────────── */
+function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem('tw_theme', t); } catch (e) {}
+    document.querySelectorAll('.theme-switch-btn').forEach(function (b) {
+        b.classList.toggle('active', b.dataset.theme === t);
+    });
+}
+document.addEventListener('DOMContentLoaded', function () {
+    var t = document.documentElement.getAttribute('data-theme') || 'aurora';
+    document.querySelectorAll('.theme-switch-btn').forEach(function (b) {
+        b.classList.toggle('active', b.dataset.theme === t);
+    });
+});

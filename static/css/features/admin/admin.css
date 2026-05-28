@@ -276,3 +276,31 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Source-of-truth chip on settings rows (DB / env / default) */
+.settings-source {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+    font-style: italic;
+}
+
+/* Usage range chips */
+.usage-range-chip {
+    padding: 4px 10px;
+    font-size: 11px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.usage-range-chip.active {
+    background: var(--accent-primary, #3b82f6);
+    border-color: var(--accent-primary, #3b82f6);
+    color: #fff;
+    font-weight: 600;
+}
+.usage-range-chip:hover:not(.active) {
+    color: var(--text-bright);
+}

@@ -19,8 +19,8 @@ Roles in use (May 2026):
   supervisor        — optional supervisor gate (default unset)
   bot_sentiment     — crypto/stock validator gate 2 (default gemini-flash)
   bot_risk          — crypto/stock validator gate 3 (default deepseek)
-  watchdog_gating   — _llm_vet_watchdog_candidate (default gemini-flash)
-  claude_gating     — claude_bot._llm_validate (default deepseek-chat)
+  watchdog_gating   — _llm_vet_watchdog_candidate (default ollama/gpt-oss:20b)
+  claude_gating     — claude_bot._llm_validate (default ollama/gpt-oss:20b)
   forecast_opus     — trump_forecaster (default opus)
 """
 import json
@@ -47,10 +47,17 @@ KNOWN_ROLES = (
     "watchdog_gating",
     "claude_gating",
     "forecast_opus",
+    "sector_research",       # Sector Radar daily thesis — Sonnet 4.6 default
+    "sector_research_deep",  # Sector Radar weekly deep-dive — Opus default
 )
 
 # Hardcoded fallbacks — must match the constants in their original modules so
 # behavior is identical when no override and no env var are set.
+#
+# Routing convention: a model string prefixed `ollama/` routes the call to
+# Ollama Cloud (https://ollama.com) with Bearer auth; anything else uses
+# OpenRouter. Gating/limiter tier defaults to Ollama Cloud per the project
+# subscription (see memory: project_ollama_cloud.md).
 DEFAULTS = {
     "research":        "anthropic/claude-sonnet-4-6",
     "research_fast":   "google/gemini-2.5-flash",
@@ -60,9 +67,11 @@ DEFAULTS = {
     "supervisor":      "",
     "bot_sentiment":   "google/gemini-2.5-flash",
     "bot_risk":        "deepseek/deepseek-chat-v3-0324",
-    "watchdog_gating": "google/gemini-2.0-flash-001",
-    "claude_gating":   "deepseek/deepseek-chat",
+    "watchdog_gating": "ollama/gpt-oss:20b",
+    "claude_gating":   "ollama/gpt-oss:20b",
     "forecast_opus":   "anthropic/claude-opus-4-6",
+    "sector_research":      "anthropic/claude-sonnet-4-6",
+    "sector_research_deep": "anthropic/claude-opus-4-6",
 }
 
 

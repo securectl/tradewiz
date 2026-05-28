@@ -724,17 +724,14 @@ def _llm_vet_watchdog_candidate(ticker, setup, screener_info, regime):
     """
     try:
         import os, requests
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
-        # DB override > env > default
+        # DB override > env > default. Default resolves to ollama/gpt-oss:20b
+        # via shared.llm_config DEFAULTS — Ollama Cloud handles the gating tier.
         try:
             from shared.llm_config import get_model
             model = get_model("watchdog_gating",
-                              os.getenv("OPENROUTER_MODEL_RESEARCH", "google/gemini-2.0-flash-001"))
+                              os.getenv("OPENROUTER_MODEL_RESEARCH", "ollama/gpt-oss:20b"))
         except Exception:
-            model = os.getenv("OPENROUTER_MODEL_RESEARCH", "google/gemini-2.0-flash-001")
-        if not api_key:
-            # Fallback: approve if both screener and technical agree
-            return setup.get("signal") == "BUY" and setup.get("confidence", 0) >= 65
+            model = os.getenv("OPENROUTER_MODEL_RESEARCH", "ollama/gpt-oss:20b")
 
         days = screener_info.get("days_tracked", 1)
         persistence_line = (
@@ -762,21 +759,53 @@ MARKET REGIME: {regime.get('regime', 'UNKNOWN')} (score: {regime.get('composite_
 Respond in JSON only:
 {{"approve": true/false, "confidence": 0-100, "reasoning": "one sentence"}}"""
 
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": prompt}],
-                  "temperature": 0.1, "max_tokens": 200},
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            content = resp.json()["choices"][0]["message"]["content"]
-            # Parse JSON from response
-            import re
-            match = re.search(r'\{[^}]+\}', content)
-            if match:
-                result = json.loads(match.group())
-                return result.get("approve", False) and result.get("confidence", 0) >= 60
+        # ── Ollama Cloud branch ───────────────────────────────────────────
+        if model.startswith("ollama/"):
+            from shared.runtime_config import get_setting as _rt_get
+            ollama_key = _rt_get("ollama_api_key", "", env_aliases=("OLLAMA_API_KEY",))
+            if not ollama_key:
+                return (setup.get("signal") == "BUY" and
+                        setup.get("confidence", 0) >= 65 and
+                        screener_info.get("screener_confidence", 0) >= 75)
+            ollama_url = _rt_get("ollama_url", "https://ollama.com", env_aliases=("OLLAMA_URL",))
+            bare_model = model[len("ollama/"):]
+            resp = requests.post(
+                f"{ollama_url}/api/chat",
+                headers={"Authorization": f"Bearer {ollama_key}",
+                         "Content-Type": "application/json"},
+                json={"model": bare_model,
+                      "messages": [{"role": "user", "content": prompt}],
+                      "stream": False, "format": "json",
+                      "options": {"temperature": 0.1, "num_predict": 200}},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                content = resp.json().get("message", {}).get("content", "")
+                import re
+                match = re.search(r'\{[^}]+\}', content)
+                if match:
+                    result = json.loads(match.group())
+                    return result.get("approve", False) and result.get("confidence", 0) >= 60
+            # fall through to rule-based fallback below
+        else:
+            # ── OpenRouter branch (unchanged shape) ───────────────────────
+            api_key = os.getenv("OPENROUTER_API_KEY", "")
+            if not api_key:
+                return setup.get("signal") == "BUY" and setup.get("confidence", 0) >= 65
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": [{"role": "user", "content": prompt}],
+                      "temperature": 0.1, "max_tokens": 200},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                content = resp.json()["choices"][0]["message"]["content"]
+                import re
+                match = re.search(r'\{[^}]+\}', content)
+                if match:
+                    result = json.loads(match.group())
+                    return result.get("approve", False) and result.get("confidence", 0) >= 60
     except Exception as e:
         logger.warning(f"LLM vet failed for {ticker}: {e}")
 
@@ -1080,6 +1109,18 @@ WD_DEFAULTS = {
     "wd_min_confidence": "65",    # min signal confidence to trade
     "wd_watchlist": json.dumps(DEFAULT_WATCHLIST),
     "wd_kill_switch": "0",
+    # Exit tuning — let winners run instead of bailing at ~1%. Trade review
+    # (May 2026) found 48% of trades exited via an RSI>60/+0.5% rule at +0.97%
+    # avg while the 4-7% target was hit twice in 96 trades. Trailing stop +
+    # raised RSI bar fix this; catastrophic floor caps tail losses.
+    "wd_hard_floor_pct": "5",          # absolute -% kill regardless of stop level
+    "wd_trail_arm_pct": "2.5",         # start trailing once up this much
+    "wd_trail_giveback_pct": "1.5",    # trail this far below peak (arm..tight band)
+    "wd_trail_tight_pct": "4.0",       # past this gain, tighten the trail
+    "wd_trail_tight_giveback_pct": "1.0",  # tighter giveback in the 4-7% band
+    "wd_rsi_exit_min": "75",           # only momentum-exit when truly overbought
+    "wd_rsi_exit_min_pnl": "3.0",      # ...and only on a real winner (was 0.5%)
+    "wd_min_candidate_score": "55",    # don't execute weak top-2 candidates
 }
 
 
@@ -1354,6 +1395,14 @@ def _wd_execute_trade(user_id, signal, broker_client, mode):
             f"PULLBACK-GATE {ticker}: risk={gate['risk_score']} size×{gate['size_mult']:.2f} "
             f"stop=-{gate['hard_stop_pct']:.1f}% src={gate['source']} | {gate['reasoning']}")
 
+    # Score-based sizing: concentrate capital in higher-conviction setups so
+    # the strongest pole+flag candidates (the proven edge) get the most size.
+    # score 50→0.7x, 70→~1.0x, 90→1.25x (clamped). The position-% cap and risk
+    # check still bound the absolute size downstream.
+    score = float(signal.get("confidence", 50) or 50)
+    score_mult = max(0.6, min(1.25, 0.7 + (score - 50) * 0.01375))
+    size_usd *= score_mult
+
     shares = max(1, int(size_usd / price))
 
     # Risk check
@@ -1454,18 +1503,85 @@ def _quick_rsi(ticker, period="1mo", interval="1d"):
         return None
 
 
+def _wd_decide_exit(trade, current_price, rsi, cfg):
+    """Pure exit-decision logic for one open position.
+
+    Returns (exit_reason | None, new_stop_loss | None). new_stop_loss is the
+    ratcheted trailing stop to persist when we are NOT exiting (None = leave
+    the stored stop unchanged). Kept free of DB/yfinance so it is unit-testable.
+
+    Priority (highest first):
+      0.  EOD force-close (cfg['eod'])
+      0b. Overnight carry — opened a prior session (cfg['overnight'])
+      1.  Catastrophic floor — pnl <= -hard_floor_pct, regardless of stop level
+      2.  Trailing stop ratchet (long only): arms at trail_arm_pct, tightens
+          past trail_tight_pct. Raises the stored stop; never lowers it.
+      3.  Stop-loss hit (possibly the freshly-ratcheted trailing stop)
+      4.  +7% hard cap (don't get greedy)
+      5.  RSI overbought safety — only when truly overbought AND already a real
+          winner (raised from RSI>60/+0.5%, which was strangling winners at ~1%)
+      6.  Original take-profit level
+    """
+    entry_price = trade["entry_price"]
+    multiplier = 1 if trade.get("side", "long") in ("long", "buy") else -1
+    pnl_pct = (current_price - entry_price) / entry_price * 100 * multiplier
+    sl = trade.get("stop_loss")
+    tp = trade.get("take_profit")
+    new_stop = None
+
+    # 0. EOD force-close — day-trader rule: nothing carries overnight.
+    if cfg.get("eod"):
+        return f"EOD close: day-trader rule (3:55 PM ET, P&L {pnl_pct:+.2f}%)", None
+
+    # 0b. Overnight carry — EOD close was missed (bot down over the close).
+    if cfg.get("overnight"):
+        return f"Overnight carry exit: opened prior session (P&L {pnl_pct:+.2f}%)", None
+
+    # 1. Catastrophic floor — backstop in case the stop is wider than the floor
+    # or price gapped past it. Caps tail losses like the -12.4% VCX blowup.
+    floor = cfg["hard_floor_pct"]
+    if floor > 0 and pnl_pct <= -floor:
+        return f"Catastrophic stop: {pnl_pct:+.2f}% (≤ -{floor:.1f}% hard floor)", None
+
+    # 2. Trailing stop ratchet (long only). Locks in profit once the trade is
+    # working, then keeps rising so winners can run toward the 7% cap.
+    if multiplier == 1 and pnl_pct >= cfg["trail_arm_pct"]:
+        giveback = cfg["trail_giveback_pct"]
+        if pnl_pct >= cfg["trail_tight_pct"]:
+            giveback = cfg["trail_tight_giveback_pct"]
+        candidate_stop = round(current_price * (1 - giveback / 100), 2)
+        if sl is None or candidate_stop > sl:
+            new_stop = candidate_stop
+            sl = candidate_stop  # use the tightened stop for this cycle's check
+
+    # 3. Stop-loss (possibly the freshly-ratcheted trailing stop)
+    if sl and current_price <= sl:
+        tag = "Trailing stop" if new_stop is not None else "Stop-loss"
+        return f"{tag} hit (${sl:.2f}, P&L {pnl_pct:+.2f}%)", new_stop
+
+    # 4. +7% hard cap
+    if pnl_pct >= 7.0:
+        return f"Quick-trade hard exit: +{pnl_pct:.1f}% (7% cap reached)", new_stop
+
+    # 5. RSI overbought safety — truly overbought AND a real winner only
+    if (rsi is not None and rsi > cfg["rsi_exit_min"]
+            and pnl_pct >= cfg["rsi_exit_min_pnl"]):
+        return (f"RSI overbought ({rsi:.1f}>{cfg['rsi_exit_min']:.0f}): "
+                f"locking +{pnl_pct:.1f}% gain"), new_stop
+
+    # 6. Original take-profit
+    if tp and current_price >= tp:
+        return f"Take-profit hit (${tp:.2f})", new_stop
+
+    return None, new_stop
+
+
 def _wd_check_exits(user_id, broker_client, mode):
     """Check open watchdog positions for exits.
 
-    Exit triggers (in priority order):
-      0. EOD force-close at 3:55 PM ET (day-trader rule, never hold overnight)
-      1. Stop-loss hit
-      2. Quick-trade profit exit: 4-7% gain → auto-close
-         - ≥7%: hard exit (don't get greedy)
-         - ≥4%: exit (solid quick-trade profit)
-      3. RSI overbought exit (RSI>60) — preserves gains when momentum tops
-      4. Take-profit hit (original TP level)
-      5. Stale exit: 1-day max hold (defense in depth for EOD close)
+    Reads config + live price, then delegates the decision to the pure
+    _wd_decide_exit helper. Persists any ratcheted trailing stop so it carries
+    across scan cycles.
     """
     try:
         open_trades = query(
@@ -1475,70 +1591,72 @@ def _wd_check_exits(user_id, broker_client, mode):
     except Exception:
         return
 
+    # Exit-tuning config (resolved once per cycle)
+    base_cfg = {
+        "hard_floor_pct": float(_wd_config(user_id, "wd_hard_floor_pct", "5")),
+        "trail_arm_pct": float(_wd_config(user_id, "wd_trail_arm_pct", "2.5")),
+        "trail_giveback_pct": float(_wd_config(user_id, "wd_trail_giveback_pct", "1.5")),
+        "trail_tight_pct": float(_wd_config(user_id, "wd_trail_tight_pct", "4.0")),
+        "trail_tight_giveback_pct": float(_wd_config(user_id, "wd_trail_tight_giveback_pct", "1.0")),
+        "rsi_exit_min": float(_wd_config(user_id, "wd_rsi_exit_min", "75")),
+        "rsi_exit_min_pnl": float(_wd_config(user_id, "wd_rsi_exit_min_pnl", "3.0")),
+    }
+
+    # EOD / overnight flags (ET-based, shared by all trades this cycle)
+    eod_now = False
+    today_et = None
+    try:
+        import pytz
+        _et = pytz.timezone("US/Eastern")
+        _now_et = datetime.now(pytz.utc).astimezone(_et)
+        today_et = _now_et.date()
+        if _now_et.weekday() < 5:  # Mon=0..Fri=4
+            _eod_cutoff = _now_et.replace(hour=15, minute=55, second=0, microsecond=0)
+            eod_now = _now_et >= _eod_cutoff
+    except Exception:
+        pass
+
     for trade in open_trades:
         try:
             ticker = trade["coin"]
             entry_price = trade["entry_price"]
-            sl = trade.get("stop_loss")
-            tp = trade.get("take_profit")
 
             # Get current price
             current_price = yf.Ticker(ticker).info.get("regularMarketPrice")
             if not current_price:
                 continue
 
-            # Calculate current P&L %
             multiplier = 1 if trade.get("side", "long") in ("long", "buy") else -1
             current_pnl_pct = (current_price - entry_price) / entry_price * 100 * multiplier
 
-            exit_reason = None
-
-            # 0. EOD force-close — day-trader rule: nothing carries overnight.
-            # 3:55 PM ET on weekdays gives a 5-min cushion before market close
-            # to avoid partial fills. Highest-priority gate so it always wins.
+            cfg = dict(base_cfg)
+            cfg["eod"] = eod_now
+            # Overnight: opened on a prior calendar date (any carry, not just 24h)
+            cfg["overnight"] = False
+            opened = trade.get("opened_at", "")
             try:
-                import pytz
-                _et = pytz.timezone("US/Eastern")
-                _now_et = datetime.now(pytz.utc).astimezone(_et)
-                _is_weekday = _now_et.weekday() < 5  # Mon=0..Fri=4
-                _eod_cutoff = _now_et.replace(hour=15, minute=55, second=0, microsecond=0)
-                if _is_weekday and _now_et >= _eod_cutoff:
-                    exit_reason = f"EOD close: day-trader rule (3:55 PM ET, P&L {current_pnl_pct:+.2f}%)"
+                if opened and today_et is not None:
+                    opened_dt = datetime.fromisoformat(str(opened).replace("Z", ""))
+                    cfg["overnight"] = opened_dt.date() < today_et
             except Exception:
                 pass
 
-            # 1. Stop-loss
-            if not exit_reason and sl and current_price <= sl:
-                exit_reason = f"Stop-loss hit (${sl:.2f})"
+            # Only spend an RSI fetch when the RSI-exit rule could actually fire
+            rsi = _quick_rsi(ticker) if current_pnl_pct >= cfg["rsi_exit_min_pnl"] else None
 
-            # 2. Quick-trade profit exit: 4-7% band
-            elif not exit_reason and current_pnl_pct >= 7.0:
-                exit_reason = f"Quick-trade hard exit: +{current_pnl_pct:.1f}% (7% cap reached)"
-            elif not exit_reason and current_pnl_pct >= 4.0:
-                exit_reason = f"Quick-trade profit exit: +{current_pnl_pct:.1f}% (4%+ target hit)"
+            exit_reason, new_stop = _wd_decide_exit(trade, current_price, rsi, cfg)
 
-            # 3. RSI overbought — lock in any gains before momentum reverses
-            elif not exit_reason and current_pnl_pct > 0.5 and (lambda r: r is not None and r > 60)(_quick_rsi(ticker)):
-                rsi_now = _quick_rsi(ticker)
-                exit_reason = f"RSI overbought ({rsi_now:.1f}>60): preserving +{current_pnl_pct:.1f}% gain"
-
-            # 4. Original take-profit
-            elif not exit_reason and tp and current_price >= tp:
-                exit_reason = f"Take-profit hit (${tp:.2f})"
-
-            elif not exit_reason:
-                # 5. Stale exit: 1-day max hold (defense in depth — EOD close
-                # should already have caught these, but if the bot was stopped
-                # over the close window, this catches anything older than 24h).
-                opened = trade.get("opened_at", "")
+            # Persist a ratcheted trailing stop when we're holding (not exiting)
+            if new_stop is not None and not exit_reason:
                 try:
-                    if opened:
-                        from datetime import timedelta
-                        opened_dt = datetime.fromisoformat(str(opened).replace("Z", ""))
-                        if (datetime.now() - opened_dt).days >= 1:
-                            exit_reason = "Stale exit: 1-day max hold (day-trader rule)"
-                except Exception:
-                    pass
+                    execute(
+                        f"UPDATE bot_trades SET stop_loss = {_P} WHERE id = {_P}",
+                        (new_stop, trade["id"]),
+                    )
+                    _wd_log(user_id, "info",
+                        f"TRAIL {ticker}: stop → ${new_stop:.2f} (P&L {current_pnl_pct:+.2f}%)")
+                except Exception as e:
+                    _wd_log(user_id, "warning", f"Trail-stop update failed {ticker}: {e}")
 
             if not exit_reason:
                 continue
@@ -1666,9 +1784,16 @@ def _wd_scan_loop(user_id):
             # trade based on LLM judgment.
             if in_buy_window:
                 executed = 0
+                min_score = int(_wd_config(user_id, "wd_min_candidate_score", "55"))
                 for cand in candidates:
                     if executed >= 2:  # Max 2 new trades per cycle
                         break
+                    # Conviction floor — don't trade a weak top-2 candidate just
+                    # because it ranked. Cuts the EOD-flat dead trades.
+                    if cand.get("score", 0) < min_score:
+                        _wd_log(user_id, "info",
+                            f"SKIP {cand['ticker']}: score {cand.get('score', 0)} < {min_score} floor")
+                        continue
                     # Build a signal dict compatible with _wd_execute_trade.
                     # entry_price seeds the position-sizing math; stop/take
                     # are set by the pullback-risk gate at execution time.
@@ -2534,6 +2659,12 @@ Respond in JSON only:
 
 THUNDERBOT_MAX_CANDIDATES = 6
 THUNDERBOT_REFRESH_SEC = 900  # 15 min — matches user's "rolling 15-min" ask
+
+# Entry-conviction gates. Raised (May 2026) after the trade review found 26
+# positions force-closed flat at EOD — low-conviction entries that went
+# nowhere. A real volume surge + actual intraday movement filters those out.
+_TB_MIN_REL_VOL = 1.35       # was 1.2 — require volume pacing ahead of normal
+_TB_MIN_INTRA_RANGE = 1.0    # was 0.8 — skip stocks that aren't really moving
 _THUNDERBOT_CACHE_KEY = "thunderbot:candidates"
 _THUNDERBOT_SCAN_INFLIGHT = {"running": False, "started_at": 0}
 
@@ -2713,9 +2844,9 @@ def _score_thunderbot_candidate(ticker, df_5m, df_daily, premarket_pct=0.0,
         expected_so_far = max(1.0, avg_vol_20d * day_fraction)
         today_vol = float(vol[-1])
         rel_vol = today_vol / expected_so_far if expected_so_far > 0 else 0
-        if rel_vol < 1.2:
+        if rel_vol < _TB_MIN_REL_VOL:
             return {"reject": True, "stage": "rel_volume",
-                    "reason": f"rel-vol pace {rel_vol:.2f}x < 1.2x", "rel_volume": round(rel_vol, 2)}
+                    "reason": f"rel-vol pace {rel_vol:.2f}x < {_TB_MIN_REL_VOL}x", "rel_volume": round(rel_vol, 2)}
 
         # Intraday range from 5m frame (need real price movement, not a dead stock)
         if df_5m is None or df_5m.empty or len(df_5m) < 4:
@@ -2724,9 +2855,9 @@ def _score_thunderbot_candidate(ticker, df_5m, df_daily, premarket_pct=0.0,
         intra_low = float(df_5m["Low"].min())
         intra_open = float(df_5m["Open"].iloc[0])
         intra_range_pct = (intra_high - intra_low) / intra_open * 100 if intra_open > 0 else 0
-        if intra_range_pct < 0.8:
+        if intra_range_pct < _TB_MIN_INTRA_RANGE:
             return {"reject": True, "stage": "intra_range",
-                    "reason": f"intraday range {intra_range_pct:.2f}% < 0.8%",
+                    "reason": f"intraday range {intra_range_pct:.2f}% < {_TB_MIN_INTRA_RANGE}%",
                     "intra_range_pct": round(intra_range_pct, 2)}
 
         # Bull flag is the hard gate
@@ -2736,12 +2867,14 @@ def _score_thunderbot_candidate(ticker, df_5m, df_daily, premarket_pct=0.0,
                     "reason": flag.get("reason", "no bull flag"), "bull_flag": flag}
 
         # ─── Composite score ───────────────────────────────────
+        # Weighted toward pole strength (May 2026): the proven edge is tight
+        # high-pole flags (HTF-style), so pole gets 30 pts and RSI 25.
         # RSI sweet-spot: peak at 55, falls off either side
-        rsi_score = max(0, 30 - abs(rsi - 55) * 1.2)
+        rsi_score = max(0, 25 - abs(rsi - 55) * 1.0)
         # Rel volume: linear up to 2.5x pace = full marks
-        vol_score = min(30, max(0, (rel_vol - 1.2) / 1.3 * 30))
-        # Pole strength: 0.8% = 0pts, 3.0% = 25pts (linear)
-        pole_score = min(25, max(0, (flag["pole_pct"] - 0.8) / 2.2 * 25))
+        vol_score = min(30, max(0, (rel_vol - _TB_MIN_REL_VOL) / 1.15 * 30))
+        # Pole strength: 0.8% = 0pts, 3.0% = 30pts (linear)
+        pole_score = min(30, max(0, (flag["pole_pct"] - 0.8) / 2.2 * 30))
         # Pre-market move bonus/penalty
         pm_score = max(-5, min(15, premarket_pct * 2.5))  # +1% = +2.5pts, +6% = +15pts
 

@@ -163,3 +163,14 @@
     .pred-gauge svg { width: 44px; height: 44px; }
     .pred-gauge-pct { font-size: 12px; }
 }
+
+/* ─── Aurora pass (May 2026) ───────────────────────────────── */
+.pred-card {
+    background: linear-gradient(180deg, var(--surface-glass), transparent), var(--bg-secondary);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: transform var(--transition), box-shadow var(--transition);
+}
+.pred-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(10,14,30,0.5); }
+.pred-cat-btn.active { background: var(--accent-grad-soft); border-color: transparent; color: var(--text-bright); box-shadow: inset 0 0 0 1px rgba(124,93,250,0.35); }
+.pred-section-title { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; opacity: .95; }

@@ -293,19 +293,27 @@ def _build_comparison(sector, pe_trailing, pe_forward, pb, ev_ebitda, net_margin
 
 
 def fetch_stock_data(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
-    """Fetch OHLCV data from Yahoo Finance."""
-    stock = yf.Ticker(ticker)
-    df = stock.history(period=period, interval=interval)
-    if df.empty:
+    """Fetch OHLCV data from Yahoo Finance via the resilient cached/retrying
+    fetch layer. Raises ValueError for a bad symbol; RateLimited propagates so
+    the route can serve a cached analysis."""
+    from shared.yf_fetch import get_history
+    df = get_history(ticker, period=period, interval=interval)
+    if df is None or df.empty:
         raise ValueError(f"No data found for ticker '{ticker}'. Please check the symbol is correct (e.g. AAPL not APPL).")
     df.index = df.index.tz_localize(None) if df.index.tz else df.index
     return df
 
 
 def get_stock_info(ticker: str) -> dict:
-    """Get basic stock info."""
-    stock = yf.Ticker(ticker)
-    info = stock.info
+    """Best-effort basic stock info. Never raises — if Yahoo is rate-limited,
+    return minimal defaults so analysis can still proceed on price data."""
+    defaults = {"name": ticker, "exchange": "N/A", "currency": "USD",
+                "sector": "N/A", "industry": "N/A", "market_cap": 0}
+    try:
+        from shared.yf_fetch import ticker as _yt
+        info = _yt(ticker).info or {}
+    except Exception:
+        return defaults
     return {
         "name": info.get("shortName", info.get("longName", ticker)),
         "exchange": info.get("exchange", "N/A"),
@@ -1596,6 +1604,92 @@ def calculate_moving_averages_series(df: pd.DataFrame) -> dict:
     }
 
 
+def generate_recommendation(indicators: dict, breakout_status: dict, current_price: float) -> dict:
+    """Rule-based BUY / ACCUMULATE / HOLD / REDUCE / SELL signal from the
+    technical picture — trend (MA structure), RSI, MACD, breakout, Bollinger.
+    Returns action + a -100..100 score + confidence + plain-English reasons,
+    so the analyzer can say when to buy, hold, or dispose."""
+    indicators = indicators or {}
+    score = 0
+    reasons = []
+    rsi = indicators.get("rsi_14") or 50
+    sma20 = indicators.get("sma_20") or 0
+    sma50 = indicators.get("sma_50") or 0
+    sma200 = indicators.get("sma_200") or 0
+    macd_h = indicators.get("macd_histogram") or 0
+    bb_up = indicators.get("bb_upper") or 0
+    bb_low = indicators.get("bb_lower") or 0
+    rel_vol = indicators.get("relative_volume") or 1
+
+    # Trend / MA structure (highest weight)
+    if sma50 and sma200:
+        if sma50 > sma200:
+            score += 20; reasons.append("Uptrend — 50-day MA above 200-day MA")
+        else:
+            score -= 20; reasons.append("Downtrend — 50-day MA below 200-day MA")
+    if sma50 and current_price:
+        if current_price > sma50:
+            score += 12; reasons.append("Price holding above the 50-day MA")
+        else:
+            score -= 12; reasons.append("Price below the 50-day MA")
+    if sma20 and current_price:
+        score += 6 if current_price > sma20 else -6
+
+    # RSI momentum
+    if rsi >= 70:
+        score -= 8; reasons.append(f"RSI {rsi:.0f} overbought — extended, consider trimming")
+    elif rsi >= 55:
+        score += 12; reasons.append(f"RSI {rsi:.0f} — strong momentum")
+    elif rsi >= 45:
+        score += 3; reasons.append(f"RSI {rsi:.0f} — neutral")
+    elif rsi >= 30:
+        score -= 5; reasons.append(f"RSI {rsi:.0f} — weak momentum")
+    else:
+        score += 2; reasons.append(f"RSI {rsi:.0f} oversold — possible bounce, but elevated risk")
+
+    # MACD
+    if indicators.get("macd_bullish_cross"):
+        score += 12; reasons.append("MACD bullish crossover")
+    elif indicators.get("macd_bearish_cross"):
+        score -= 12; reasons.append("MACD bearish crossover")
+    elif macd_h > 0:
+        score += 6; reasons.append("MACD histogram positive")
+    elif macd_h < 0:
+        score -= 6; reasons.append("MACD histogram negative")
+
+    # Breakout structure
+    bs = (breakout_status or {}).get("status", "") or ""
+    if bs in ("breakout_up", "breakout", "confirmed"):
+        score += 15
+        reasons.append("Confirmed upside breakout" + (" on strong volume" if rel_vol >= 1.5 else ""))
+    elif bs in ("breakdown", "breakout_down"):
+        score -= 15; reasons.append("Downside breakdown")
+
+    # Bollinger extremes
+    if bb_up and current_price and current_price > bb_up:
+        score -= 5; reasons.append("Above the upper Bollinger Band — overextended")
+    elif bb_low and current_price and current_price < bb_low:
+        score += 3; reasons.append("Below the lower Bollinger Band — stretched")
+
+    score = max(-100, min(100, score))
+    if score >= 35:
+        action, label, summary = "BUY", "Buy", "Bullish confluence — favorable entry."
+    elif score >= 12:
+        action, label, summary = "ACCUMULATE", "Accumulate / Hold", "Leaning bullish — hold or add on strength."
+    elif score > -12:
+        action, label, summary = "HOLD", "Hold / Neutral", "Mixed signals — hold and wait for confirmation."
+    elif score > -35:
+        action, label, summary = "REDUCE", "Reduce / Trim", "Leaning bearish — consider trimming exposure."
+    else:
+        action, label, summary = "SELL", "Sell / Dispose", "Bearish confluence — distribute or avoid."
+
+    return {
+        "action": action, "label": label, "score": score,
+        "confidence": int(min(95, 50 + abs(score) // 2)),
+        "summary": summary, "reasons": reasons[:6],
+    }
+
+
 def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> dict:
     """Full analysis pipeline for a ticker."""
     # Fetch data
@@ -1749,6 +1843,7 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
         "indicators": indicators,
         "breakout_status": breakout_status,
         "trade_plan": trade_plan,
+        "recommendation": generate_recommendation(indicators, breakout_status, current_price),
         "moving_averages": ma_chart,
         "trendline_tests": trendline_tests_ts,
         "candle_patterns": [

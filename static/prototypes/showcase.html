@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="aurora">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeWiz — Next-Gen UI Prototype</title>
+<style>
+/* ============================================================
+   PROTOTYPE ONLY — self-contained, mock data, no backend.
+   Three design directions switchable at the top:
+     • Aurora   — glassmorphism, vivid gradients (modern/premium)
+     • Terminal — dense pro-trader cockpit (Bloomberg-style)
+     • Daylight — clean light theme, airy spacing
+   ============================================================ */
+:root{
+  --pos:#16c784; --neg:#ea3943;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:var(--font, "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif);
+  background:var(--bg); color:var(--text);
+  -webkit-font-smoothing:antialiased; transition:background .3s, color .3s;
+}
+
+/* ---------- THEME: AURORA ---------- */
+[data-theme="aurora"]{
+  --bg:radial-gradient(1200px 600px at 80% -10%, #1b2a4a 0%, transparent 60%), radial-gradient(900px 500px at -10% 10%, #2a1b4a 0%, transparent 55%), #0a0e1a;
+  --surface:rgba(255,255,255,.04); --surface-2:rgba(255,255,255,.06);
+  --border:rgba(255,255,255,.10); --text:#eaf0ff; --muted:#8b93b0;
+  --accent:#5b8cff; --accent2:#a855f7; --accent-grad:linear-gradient(135deg,#5b8cff,#a855f7);
+  --radius:18px; --shadow:0 12px 40px rgba(0,0,0,.45); --blur:blur(14px); --font:"Inter",system-ui,sans-serif;
+  --card-bg:rgba(255,255,255,.045);
+}
+/* ---------- THEME: TERMINAL ---------- */
+[data-theme="terminal"]{
+  --bg:#06080d; --surface:#0c1018; --surface-2:#11161f;
+  --border:#1c2430; --text:#cfe3ff; --muted:#6b7a90;
+  --accent:#00e0b8; --accent2:#00e0b8; --accent-grad:#00e0b8;
+  --radius:6px; --shadow:none; --blur:none; --font:"JetBrains Mono","SF Mono",ui-monospace,monospace;
+  --card-bg:#0c1018;
+}
+/* ---------- THEME: DAYLIGHT ---------- */
+[data-theme="daylight"]{
+  --bg:#eef1f7; --surface:#ffffff; --surface-2:#f6f8fc;
+  --border:#e2e7f0; --text:#16203a; --muted:#697089;
+  --accent:#3b6cff; --accent2:#7c5cff; --accent-grad:linear-gradient(135deg,#3b6cff,#7c5cff);
+  --radius:16px; --shadow:0 8px 28px rgba(40,60,120,.10); --blur:none; --font:"Inter",system-ui,sans-serif;
+  --card-bg:#ffffff;
+}
+
+/* ---------- Layout ---------- */
+.shell{max-width:1280px; margin:0 auto; padding:18px 22px 60px}
+.topbar{display:flex; align-items:center; gap:18px; padding:12px 16px; margin-bottom:18px;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); box-shadow:var(--shadow)}
+.brand{display:flex; align-items:center; gap:10px; font-weight:800; font-size:18px; letter-spacing:-.02em}
+.brand .dot{width:12px;height:12px;border-radius:50%;background:var(--accent-grad);box-shadow:0 0 16px var(--accent)}
+.nav{display:flex; gap:4px; margin-left:6px}
+.nav a{color:var(--muted); text-decoration:none; font-size:13px; font-weight:600; padding:7px 12px; border-radius:10px}
+.nav a.active{color:var(--text); background:var(--surface-2)}
+.nav a:hover{color:var(--text)}
+.spacer{flex:1}
+
+/* theme switch */
+.theme-switch{display:flex; gap:2px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:3px}
+.theme-switch button{border:0; background:transparent; color:var(--muted); font:inherit; font-size:12px; font-weight:700;
+  padding:6px 12px; border-radius:9px; cursor:pointer}
+.theme-switch button.active{background:var(--accent-grad); color:#fff}
+[data-theme="terminal"] .theme-switch button.active{color:#001a16}
+
+.bell{position:relative; cursor:pointer; border:1px solid var(--border); background:var(--surface-2);
+  color:var(--text); border-radius:11px; padding:8px 12px; font-size:13px; font-weight:700; display:flex; gap:7px; align-items:center}
+.bell .badge{position:absolute; top:-5px; right:-5px; background:var(--neg); color:#fff; font-size:10px; font-weight:800;
+  width:17px;height:17px;border-radius:50%; display:grid; place-items:center}
+
+/* regime strip */
+.regime{display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:10px 16px; margin-bottom:18px;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); backdrop-filter:var(--blur)}
+.pill{display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; padding:5px 11px; border-radius:999px; border:1px solid var(--border)}
+.pill .led{width:8px;height:8px;border-radius:50%}
+.regime .kv{font-size:12px; color:var(--muted)} .regime .kv b{color:var(--text)}
+
+/* grid */
+.grid{display:grid; gap:16px}
+.grid.hero{grid-template-columns:1.25fr 1fr}
+.grid.cols2{grid-template-columns:1.4fr 1fr}
+.kpis{display:grid; grid-template-columns:repeat(2,1fr); gap:14px}
+@media(max-width:900px){.grid.hero,.grid.cols2{grid-template-columns:1fr}}
+
+.card{background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius);
+  padding:18px; backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); box-shadow:var(--shadow)}
+.card h3{font-size:13px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-bottom:14px; font-weight:700}
+.card .sub{font-size:11px; color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0}
+
+/* Sector radar hero */
+.sr-hero{display:flex; gap:20px; align-items:flex-start}
+.sr-left{flex:1}
+.sr-tag{font-size:11px; font-weight:800; letter-spacing:.12em; color:var(--accent)}
+.sr-sector{font-size:30px; font-weight:800; letter-spacing:-.02em; margin:4px 0 2px}
+.sr-etf{font-size:12px; color:var(--muted); border:1px solid var(--border); padding:2px 8px; border-radius:7px; margin-left:8px; vertical-align:middle}
+.sr-thesis{color:var(--muted); font-size:13.5px; line-height:1.6; margin:12px 0}
+.sr-why{list-style:none; display:flex; flex-direction:column; gap:6px; margin:10px 0}
+.sr-why li{font-size:12.5px; padding-left:18px; position:relative}
+.sr-why li:before{content:"▸"; position:absolute; left:0; color:var(--accent)}
+.chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:10px}
+.chip{font-size:12px; font-weight:700; padding:5px 11px; border-radius:9px; border:1px solid var(--border); background:var(--surface-2); cursor:pointer}
+.chip.t{color:var(--pos)}
+/* conviction donut */
+.donut{--v:91; width:120px;height:120px;border-radius:50%; display:grid; place-items:center; flex:0 0 auto;
+  background:conic-gradient(var(--accent) calc(var(--v)*1%), var(--surface-2) 0)}
+.donut .inner{width:92px;height:92px;border-radius:50%; background:var(--bg); display:grid; place-items:center; text-align:center}
+[data-theme="aurora"] .donut .inner{background:#0a0e1a}
+.donut .num{font-size:30px;font-weight:800;line-height:1}
+.donut .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+
+/* KPI tiles */
+.kpi{background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:16px; backdrop-filter:var(--blur); box-shadow:var(--shadow)}
+.kpi .k{font-size:12px; color:var(--muted); font-weight:600}
+.kpi .v{font-size:26px; font-weight:800; letter-spacing:-.02em; margin-top:6px}
+.kpi .d{font-size:12px; font-weight:700; margin-top:2px}
+.up{color:var(--pos)} .down{color:var(--neg)}
+.spark{margin-top:8px; width:100%; height:34px; display:block}
+
+/* leaderboard */
+table{width:100%; border-collapse:collapse; font-size:13px}
+th{text-align:left; color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; padding:8px 10px; border-bottom:1px solid var(--border)}
+td{padding:10px; border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:0}
+tr.top td{background:linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent)}
+.rank{color:var(--muted); font-weight:800}
+.sec b{font-weight:700} .sec span{color:var(--muted); font-size:11px}
+.bar{position:relative; height:18px; min-width:90px; background:var(--surface-2); border-radius:6px; overflow:hidden}
+.bar>i{position:absolute; inset:0 auto 0 0; background:var(--accent-grad)}
+.bar>span{position:relative; z-index:1; font-size:11px; font-weight:800; line-height:18px; padding-left:7px; color:#fff}
+[data-theme="daylight"] .bar>span{color:#fff}
+.badge2{font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; border:1px solid var(--border)}
+.badge2.on{color:var(--pos)}
+
+/* bot rows */
+.botrow{display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--border)}
+.botrow:last-child{border-bottom:0}
+.botrow .name{font-weight:700; font-size:13px; flex:1}
+.botrow .name small{display:block; color:var(--muted); font-weight:500; font-size:11px}
+.minibars{display:flex; gap:3px; align-items:flex-end; height:30px}
+.minibars i{width:5px; background:var(--accent); border-radius:2px; opacity:.85}
+
+/* What's New drawer */
+.scrim{position:fixed; inset:0; background:rgba(2,4,10,.55); opacity:0; pointer-events:none; transition:.25s; z-index:40}
+.scrim.open{opacity:1; pointer-events:auto}
+.drawer{position:fixed; top:0; right:0; height:100%; width:420px; max-width:92vw; z-index:50;
+  background:var(--surface); border-left:1px solid var(--border); box-shadow:-20px 0 60px rgba(0,0,0,.5);
+  backdrop-filter:blur(20px); transform:translateX(100%); transition:transform .3s cubic-bezier(.22,1,.36,1); display:flex; flex-direction:column}
+[data-theme="daylight"] .drawer{background:#fff}
+.drawer.open{transform:none}
+.drawer-head{display:flex; align-items:center; justify-content:space-between; padding:18px 20px; border-bottom:1px solid var(--border)}
+.drawer-head h2{font-size:17px} .drawer-head .sub{font-size:12px;color:var(--muted)}
+.drawer-head button{border:0;background:var(--surface-2);color:var(--text);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px}
+.releases{overflow-y:auto; padding:8px 20px 30px}
+.rel{padding:18px 0; border-bottom:1px solid var(--border)}
+.rel .vtag{display:inline-block; font-size:11px; font-weight:800; color:#fff; background:var(--accent-grad); padding:3px 9px; border-radius:7px}
+[data-theme="terminal"] .rel .vtag{color:#001a16}
+.rel .date{font-size:11px; color:var(--muted); margin-left:8px}
+.rel h4{font-size:15px; margin:10px 0 8px}
+.rel ul{list-style:none; display:flex; flex-direction:column; gap:7px}
+.rel li{font-size:13px; color:var(--muted); line-height:1.5; padding-left:22px; position:relative}
+.rel li .t{position:absolute; left:0; font-size:10px; font-weight:800; padding:1px 5px; border-radius:5px; top:2px}
+.t.new{background:rgba(22,199,132,.15); color:var(--pos)}
+.t.imp{background:rgba(91,140,255,.18); color:var(--accent)}
+.t.fix{background:rgba(234,57,67,.15); color:var(--neg)}
+.note{font-size:11px; color:var(--muted); text-align:center; margin-top:26px; opacity:.7}
+</style>
+</head>
+<body data-theme="aurora">
+
+<div class="shell">
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span> TradeWiz</div>
+    <nav class="nav">
+      <a class="active">Dashboard</a><a>Analyzer</a><a>Research</a><a>Bots</a><a>Screener</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="theme-switch" id="themeSwitch">
+      <button data-t="aurora" class="active">Aurora</button>
+      <button data-t="terminal">Terminal</button>
+      <button data-t="daylight">Daylight</button>
+    </div>
+    <div class="bell" onclick="openWhatsNew()">What's New <span class="badge">3</span></div>
+  </div>
+
+  <!-- Market regime strip -->
+  <div class="regime">
+    <span class="pill"><span class="led" style="background:var(--pos)"></span> RISK-ON</span>
+    <span class="kv">Composite <b>72</b></span>
+    <span class="kv">VIX <b>14.2</b></span>
+    <span class="kv">SPY 5d <b class="up">+1.8%</b></span>
+    <span class="kv">Smart-money tilt <b>bullish</b> · P/C 0.81</span>
+    <div class="spacer"></div>
+    <span class="kv">Updated 09:32 ET · Sonnet 4.6</span>
+  </div>
+
+  <!-- Hero: Sector Radar + KPIs -->
+  <div class="grid hero" style="margin-bottom:16px">
+    <div class="card">
+      <h3>Sector Radar <span class="sub">— next hot sector · 6–12 month rotation</span></h3>
+      <div class="sr-hero">
+        <div class="sr-left">
+          <div class="sr-tag">NEXT HOT SECTOR</div>
+          <div class="sr-sector">Clean Energy <span class="sr-etf">TAN</span></div>
+          <p class="sr-thesis">Falling rates + a fresh wave of grid/storage capex are turning solar from a beaten-down trade into a leadership group. Relative strength flipped positive 3 weeks ago and volume is expanding into the breakout.</p>
+          <ul class="sr-why">
+            <li>+14.9% relative strength vs SPY over 3 months</li>
+            <li>Price stacked above the 50d & 200d moving averages</li>
+            <li>Trading at 60-day highs on a 1.6× volume surge</li>
+          </ul>
+          <div class="chips">
+            <span class="chip t">FSLR</span><span class="chip t">ENPH</span><span class="chip t">RUN</span>
+          </div>
+        </div>
+        <div style="text-align:center">
+          <div class="donut" style="--v:91"><div class="inner"><div><div class="num">91</div><div class="lbl">conviction</div></div></div></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:10px">Runner-up<br><b style="color:var(--text)">Uranium</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="k">Total P&L</div><div class="v up">+$413.71</div><div class="d up">+1.6% MTD</div>
+        <svg class="spark" viewBox="0 0 120 34" preserveAspectRatio="none"><polyline fill="none" stroke="var(--pos)" stroke-width="2" points="0,28 15,26 30,29 45,22 60,24 75,16 90,18 105,9 120,6"/></svg></div>
+      <div class="kpi"><div class="k">Win Rate</div><div class="v">66.7%</div><div class="d up">64W / 31L</div>
+        <svg class="spark" viewBox="0 0 120 34" preserveAspectRatio="none"><polyline fill="none" stroke="var(--accent)" stroke-width="2" points="0,20 15,18 30,19 45,15 60,17 75,14 90,15 105,12 120,11"/></svg></div>
+      <div class="kpi"><div class="k">Daily Goal</div><div class="v">$612 <span style="font-size:13px;color:var(--muted)">/ $1k</span></div>
+        <div class="bar" style="margin-top:10px"><i style="width:61%"></i><span>61%</span></div></div>
+      <div class="kpi"><div class="k">Active Bots</div><div class="v">3</div><div class="d">ThunderBot · Crypto · Stock</div>
+        <div class="minibars" style="margin-top:8px"><i style="height:40%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:90%"></i><i style="height:60%"></i><i style="height:80%"></i><i style="height:100%"></i></div></div>
+    </div>
+  </div>
+
+  <!-- Leaderboard + Bots -->
+  <div class="grid cols2">
+    <div class="card">
+      <h3>Sector Leaderboard <span class="sub">— composite momentum (RS · trend · breakout · volume)</span></h3>
+      <table>
+        <thead><tr><th>#</th><th>Sector</th><th>Score</th><th>RS 3m</th><th>Trend</th><th>Vol</th></tr></thead>
+        <tbody>
+          <tr class="top"><td class="rank">1</td><td class="sec"><b>Clean Energy</b> <span>TAN</span></td><td><div class="bar"><i style="width:91%"></i><span>91</span></div></td><td class="up">+14.9%</td><td><span class="badge2 on">MA-stack</span></td><td>1.6×</td></tr>
+          <tr><td class="rank">2</td><td class="sec"><b>Artificial Intelligence</b> <span>AIQ</span></td><td><div class="bar"><i style="width:88%"></i><span>88</span></div></td><td class="up">+19.6%</td><td><span class="badge2 on">MA-stack</span></td><td>0.9×</td></tr>
+          <tr><td class="rank">3</td><td class="sec"><b>Technology</b> <span>XLK</span></td><td><div class="bar"><i style="width:86%"></i><span>86</span></div></td><td class="up">+21.9%</td><td><span class="badge2 on">MA-stack</span></td><td>0.8×</td></tr>
+          <tr><td class="rank">4</td><td class="sec"><b>Uranium / Nuclear</b> <span>URA</span></td><td><div class="bar"><i style="width:83%"></i><span>83</span></div></td><td class="up">+11.2%</td><td><span class="badge2 on">MA-stack</span></td><td>1.3×</td></tr>
+          <tr><td class="rank">5</td><td class="sec"><b>Semiconductors</b> <span>SMH</span></td><td><div class="bar"><i style="width:79%"></i><span>79</span></div></td><td class="up">+8.4%</td><td><span class="badge2 on">MA-stack</span></td><td>1.1×</td></tr>
+          <tr><td class="rank">6</td><td class="sec"><b>Defense & Aerospace</b> <span>ITA</span></td><td><div class="bar"><i style="width:68%"></i><span>68</span></div></td><td class="up">+5.1%</td><td><span class="badge2">&gt;50d</span></td><td>1.0×</td></tr>
+          <tr><td class="rank">7</td><td class="sec"><b>Energy</b> <span>XLE</span></td><td><div class="bar"><i style="width:55%"></i><span>55</span></div></td><td class="down">-2.3%</td><td><span class="badge2">&gt;50d</span></td><td>0.9×</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Bot Performance <span class="sub">— last 30 days</span></h3>
+      <div class="botrow">
+        <div class="name">ThunderBot <small>Day trader · low/mid-cap</small></div>
+        <div class="minibars"><i style="height:30%"></i><i style="height:55%"></i><i style="height:45%"></i><i style="height:70%"></i><i style="height:85%"></i><i style="height:100%"></i></div>
+        <div style="text-align:right"><div class="up" style="font-weight:800">+$413</div><div style="font-size:11px;color:var(--muted)">66.7% win</div></div>
+      </div>
+      <div class="botrow">
+        <div class="name">Crypto Bot <small>BloFin · paper</small></div>
+        <div class="minibars"><i style="height:60%"></i><i style="height:40%"></i><i style="height:75%"></i><i style="height:55%"></i><i style="height:65%"></i><i style="height:80%"></i></div>
+        <div style="text-align:right"><div class="up" style="font-weight:800">+$1,204</div><div style="font-size:11px;color:var(--muted)">71% win</div></div>
+      </div>
+      <div class="botrow">
+        <div class="name">Stock Bot <small>Alpaca · paper</small></div>
+        <div class="minibars"><i style="height:50%"></i><i style="height:45%"></i><i style="height:35%"></i><i style="height:60%"></i><i style="height:40%"></i><i style="height:55%"></i></div>
+        <div style="text-align:right"><div class="down" style="font-weight:800">-$88</div><div style="font-size:11px;color:var(--muted)">58% win</div></div>
+      </div>
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; justify-content:space-between; font-size:13px">
+        <span style="color:var(--muted)">Combined 30d</span><b class="up">+$1,529</b>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- What's New drawer -->
+<div class="scrim" id="scrim" onclick="closeWhatsNew()"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div><h2>What's New</h2><div class="sub">Product updates & release notes</div></div>
+    <button onclick="closeWhatsNew()">✕</button>
+  </div>
+  <div class="releases">
+    <div class="rel">
+      <span class="vtag">v2.4</span><span class="date">May 28, 2026</span>
+      <h4>Sector Radar — Auto Research Analyst</h4>
+      <ul>
+        <li><span class="t new">NEW</span> Daily AI analyst that ranks every sector and calls the next 6–12 month leader, with conviction, catalysts, and leading tickers.</li>
+        <li><span class="t new">NEW</span> Sector leaderboard scoring relative strength, breakouts, and smart-money volume in one view.</li>
+        <li><span class="t imp">IMPROVED</span> Research tab now opens straight to your daily market read.</li>
+      </ul>
+    </div>
+    <div class="rel">
+      <span class="vtag">v2.3</span><span class="date">May 27, 2026</span>
+      <h4>ThunderBot — smarter exits</h4>
+      <ul>
+        <li><span class="t imp">IMPROVED</span> Trailing stops let winners run toward the 4–7% target instead of bailing at ~1%.</li>
+        <li><span class="t fix">FIX</span> Hard catastrophic-loss floor caps tail losses; no more overnight carry.</li>
+        <li><span class="t imp">IMPROVED</span> Capital now concentrates into the highest-conviction setups.</li>
+      </ul>
+    </div>
+    <div class="rel">
+      <span class="vtag">v2.2</span><span class="date">May 24, 2026</span>
+      <h4>Screener & mobile</h4>
+      <ul>
+        <li><span class="t new">NEW</span> Export any screener category to CSV / TXT / PDF with date ranges.</li>
+        <li><span class="t imp">IMPROVED</span> Full mobile sweep — every tab now fits iPhone & Android viewports.</li>
+      </ul>
+    </div>
+    <div class="note">Prototype — mock release notes. Real feed would be driven by a versioned changelog.</div>
+  </div>
+</aside>
+
+<script>
+/* Theme switching */
+document.getElementById('themeSwitch').addEventListener('click', function(e){
+  const b = e.target.closest('button'); if(!b) return;
+  document.body.setAttribute('data-theme', b.dataset.t);
+  document.documentElement.setAttribute('data-theme', b.dataset.t);
+  this.querySelectorAll('button').forEach(x=>x.classList.toggle('active', x===b));
+});
+/* What's New drawer */
+function openWhatsNew(){ document.getElementById('drawer').classList.add('open'); document.getElementById('scrim').classList.add('open'); }
+function closeWhatsNew(){ document.getElementById('drawer').classList.remove('open'); document.getElementById('scrim').classList.remove('open'); }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeWhatsNew(); });
+</script>
+</body>
+</html>

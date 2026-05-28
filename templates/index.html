@@ -1,26 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="aurora">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeWiz — Smart Market Intelligence</title>
+    <script>/* set theme before paint to avoid flash */(function(){try{var t=localStorage.getItem('tw_theme')||'aurora';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/core.css">
-    <link rel="stylesheet" href="/static/css/features/analysis/analysis.css">
-    <link rel="stylesheet" href="/static/css/features/screener/screener.css">
-    <link rel="stylesheet" href="/static/css/features/ipo/ipo.css">
-    <link rel="stylesheet" href="/static/css/features/tracker/tracker.css">
-    <link rel="stylesheet" href="/static/css/features/bot_crypto/bot_crypto.css">
+    <link rel="stylesheet" href="/static/css/core.css?v=aurora13">
+    <link rel="stylesheet" href="/static/css/features/analysis/analysis.css?v=aurora2">
+    <link rel="stylesheet" href="/static/css/features/screener/screener.css?v=aurora3">
+    <link rel="stylesheet" href="/static/css/features/ipo/ipo.css?v=aurora1">
+    <link rel="stylesheet" href="/static/css/features/tracker/tracker.css?v=aurora1">
+    <link rel="stylesheet" href="/static/css/features/bot_crypto/bot_crypto.css?v=aurora1">
     <link rel="stylesheet" href="/static/css/features/bot_stock/bot_stock.css">
     <link rel="stylesheet" href="/static/css/features/status/status.css">
-    <link rel="stylesheet" href="/static/css/features/research/research.css">
+    <link rel="stylesheet" href="/static/css/features/research/research.css?v=aurora1">
     <link rel="stylesheet" href="/static/css/features/user/settings.css">
     <link rel="stylesheet" href="/static/css/features/admin/admin.css">
-    <link rel="stylesheet" href="/static/css/features/predictions/predictions.css">
-    <link rel="stylesheet" href="/static/css/features/congress/congress.css">
-    <link rel="stylesheet" href="/static/css/features/watchdog/watchdog.css?v=1">
+    <link rel="stylesheet" href="/static/css/features/predictions/predictions.css?v=aurora1">
+    <link rel="stylesheet" href="/static/css/features/congress/congress.css?v=aurora1">
+    <link rel="stylesheet" href="/static/css/features/watchdog/watchdog.css?v=aurora1">
     <link rel="stylesheet" href="/static/css/mobile.css">
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -49,6 +50,11 @@
         <button type="submit" class="btn-analyze" id="btn-analyze">Analyze</button>
     </form>
     <div class="header-right">
+        <div class="theme-switch" id="theme-switch" title="Theme">
+            <button class="theme-switch-btn" data-theme="aurora" onclick="setTheme('aurora')">Aurora</button>
+            <button class="theme-switch-btn" data-theme="terminal" onclick="setTheme('terminal')">Terminal</button>
+            <button class="theme-switch-btn" data-theme="daylight" onclick="setTheme('daylight')">Daylight</button>
+        </div>
         <div class="font-size-toggle" id="font-size-toggle" title="Text size">
             <button class="font-size-btn" data-size="small">A</button>
             <button class="font-size-btn active" data-size="medium">A</button>
@@ -67,6 +73,19 @@
             Guide
         </button>
         <button class="btn-history" id="btn-history">History</button>
+        <button class="btn-whatsnew" id="btn-whatsnew" onclick="openWhatsNew()" title="What's New">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7.4L12 17l-6.3 4.4L8 14 2 9.4h7.6z"></path>
+            </svg>
+            What's New
+            <span class="wn-badge" id="wn-badge" style="display:none;"></span>
+        </button>
+        <button class="btn-guide" id="btn-feedback" onclick="openFeedback()" title="Send feedback">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Feedback
+        </button>
         <button class="btn-status-header" id="btn-status-header" data-role="admin" onclick="switchTab('status')" style="display:none;">Status</button>
         <button class="btn-settings-header" id="btn-settings" onclick="openSettings()" title="Settings">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -133,7 +152,8 @@
 
 <!-- Tab Bar -->
 <div class="tab-bar">
-    <button class="tab-btn active" data-tab="analyzer" onclick="switchTab('analyzer')">Analyzer</button>
+    <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="tab-btn" data-tab="analyzer" onclick="switchTab('analyzer')">Analyzer</button>
     <button class="tab-btn" data-tab="qullamaggie" onclick="switchTab('qullamaggie')">Breakout Scanner</button>
     <button class="tab-btn" data-tab="tracker" onclick="switchTab('tracker')">Tracker</button>
     <button class="tab-btn" data-tab="screener" onclick="switchTab('screener')">Screener</button>
@@ -151,8 +171,24 @@
     <button class="tab-btn" data-tab="admin" data-role="admin" onclick="switchTab('admin')" style="display:none;">Admin</button>
 </div>
 
+<!-- Dashboard View (showcase-style landing) -->
+<div class="dash-content" id="dashboard-content">
+    <div class="dash-regime" id="dash-regime"></div>
+    <div class="dash-hero-grid">
+        <div class="dash-card dash-sr-card" id="dash-sr"></div>
+        <div class="dash-kpis" id="dash-kpis"></div>
+    </div>
+    <div class="dash-grid2">
+        <div class="dash-card" id="dash-board"></div>
+        <div class="dash-card" id="dash-bots"></div>
+    </div>
+    <div class="dash-card" id="dash-opps" style="margin-top:16px;"></div>
+    <div class="dash-card" id="dash-oversold" style="margin-top:16px;"></div>
+    <div class="dash-card dash-mysectors-card" id="dash-mysectors" style="margin-top:16px;"></div>
+</div>
+
 <!-- Main -->
-<div class="main-content">
+<div class="main-content" style="display:none;">
     <!-- Chart Area -->
     <div class="chart-area" id="chart-area">
         <div class="chart-header" id="chart-header" style="display:none;">
@@ -447,6 +483,7 @@
             </div>
         </div>
     </div>
+    <div class="screener-scroll">
     <div class="screener-results" id="screener-results">
         <div style="padding:60px; color:#787b86; text-align:center;">
             <h2 style="color:#d1d4dc; margin-bottom:12px;">Multi-Cap Stock Screener</h2>
@@ -473,6 +510,7 @@
             </div>
         </div>
     </div>
+    </div><!-- /screener-scroll -->
 </div>
 
 <!-- Prediction Markets View -->
@@ -789,6 +827,31 @@
 
 <!-- Research View -->
 <div class="research-content" id="research-content" style="display:none;">
+  <!-- Sub-nav: Sector Radar (auto research analyst) | Research Skills -->
+  <div class="research-subnav">
+    <button class="research-subnav-btn active" data-sub="radar" onclick="switchResearchSub('radar')">Sector Radar</button>
+    <button class="research-subnav-btn" data-sub="skills" onclick="switchResearchSub('skills')">Research Skills</button>
+  </div>
+
+  <!-- Sector Radar sub-view (Auto Research Analyst) -->
+  <div id="research-sub-radar" class="research-sub">
+    <div class="sr-header">
+      <div>
+        <h2 class="sr-title">Sector Radar</h2>
+        <p class="sr-subtitle">Auto research analyst &mdash; the next hot sector for a 6&ndash;12 month rotation play</p>
+      </div>
+      <div class="sr-actions">
+        <span class="sr-meta" id="sr-meta"></span>
+        <button class="btn-analyze" id="sr-run-btn" onclick="sectorRadarRun()">Run now</button>
+      </div>
+    </div>
+    <div id="sr-body">
+      <div class="sr-loading">Loading latest research&hellip;</div>
+    </div>
+  </div>
+
+  <!-- Research Skills sub-view -->
+  <div id="research-sub-skills" class="research-sub" style="display:none;">
     <!-- Top: Catalog + Launcher side-by-side -->
     <div class="research-top">
         <!-- Left: Skill Catalog -->
@@ -833,6 +896,7 @@
             <div style="color:#787b86; padding:20px; text-align:center;">No jobs yet. Launch a skill to get started.</div>
         </div>
     </div>
+  </div><!-- /research-sub-skills -->
 </div>
 
 <!-- Fin Skills Hub -->
@@ -1559,6 +1623,116 @@
             </div>
         </div>
 
+        <!-- Ollama Cloud Configuration -->
+        <div class="admin-card" id="admin-ollama-config-card">
+            <div class="admin-card-title">Ollama Cloud
+                <span id="admin-ollama-platform-chip" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:8px;background:var(--bg-input);color:var(--text-secondary);"></span>
+            </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;">
+                Settings for the gating / limiter LLM tier. Edits take effect immediately —
+                no container restart needed. Persisted in <code>bot_config</code> (DB-backed,
+                SaaS / Cloud Run friendly). Resolution: <strong>DB → env → default</strong>.
+            </div>
+            <div class="settings-row">
+                <label>URL</label>
+                <input type="text" id="admin-ollama-url" class="settings-input" placeholder="https://ollama.com">
+                <span class="settings-source" id="admin-ollama-url-source"></span>
+            </div>
+            <div class="settings-row">
+                <label>API Key</label>
+                <input type="password" id="admin-ollama-api-key" class="settings-input" placeholder="(unchanged)">
+                <span class="settings-source" id="admin-ollama-api-key-source"></span>
+            </div>
+            <div class="settings-row">
+                <label>Default Model</label>
+                <input type="text" id="admin-ollama-model" class="settings-input" placeholder="gpt-oss:20b">
+                <span class="settings-source" id="admin-ollama-model-source"></span>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;align-items:center;">
+                <button class="btn-analyze" onclick="adminOllamaSave()" style="padding:6px 14px;font-size:12px;">Save</button>
+                <button onclick="adminOllamaTest()" style="padding:6px 14px;font-size:12px;background:none;border:1px solid var(--border-color);color:var(--text-bright);border-radius:4px;cursor:pointer;">Test Connection</button>
+                <button onclick="adminOllamaClear()" style="padding:6px 14px;font-size:12px;background:none;border:1px solid #ff8c42;color:#ff8c42;border-radius:4px;cursor:pointer;">Clear (use env)</button>
+                <span id="admin-ollama-status" style="font-size:11px;margin-left:8px;"></span>
+            </div>
+        </div>
+
+        <!-- Deployment Platform -->
+        <div class="admin-card" id="admin-platform-card">
+            <div class="admin-card-title">Deployment Platform</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;">
+                Tells the app whether it's running on Docker compose (self-hosted) or
+                GCP Cloud Run. Auto-detected from <code>K_SERVICE</code> env var; override
+                here if detection is wrong. Used by /healthz and future
+                platform-specific behavior (Secret Manager, Cloud SQL hints).
+            </div>
+            <div class="settings-row">
+                <label>Mode</label>
+                <select id="admin-platform-mode" class="settings-input" style="width:auto;">
+                    <option value="auto">Auto-detect</option>
+                    <option value="docker">Docker (self-hosted)</option>
+                    <option value="cloud_run">GCP Cloud Run</option>
+                </select>
+            </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">
+                Detected: <strong id="admin-platform-detected">—</strong> ·
+                Effective: <strong id="admin-platform-effective">—</strong>
+                <span id="admin-platform-kservice" style="margin-left:8px;color:var(--text-muted);"></span>
+            </div>
+            <div style="margin-top:12px;">
+                <button class="btn-analyze" onclick="adminPlatformSave()" style="padding:6px 14px;font-size:12px;">Save</button>
+                <span id="admin-platform-status" style="font-size:11px;margin-left:8px;"></span>
+            </div>
+        </div>
+
+        <!-- Per-User Usage Report -->
+        <div class="admin-card" id="admin-usage-report-card">
+            <div class="admin-card-title">User Usage Report</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;">
+                LLM call activity per user, aggregated from <code>llm_usage_log</code>. Click a row to drill down.
+                All times UTC. Sub-aggregates (24h / 7d / 30d) are absolute trailing windows; "in window" follows the date filter.
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
+                <div style="display:flex;gap:4px;">
+                    <button class="usage-range-chip" data-range="24h" onclick="setUsageRange('24h')">24h</button>
+                    <button class="usage-range-chip active" data-range="7d" onclick="setUsageRange('7d')">7d</button>
+                    <button class="usage-range-chip" data-range="30d" onclick="setUsageRange('30d')">30d</button>
+                    <button class="usage-range-chip" data-range="all" onclick="setUsageRange('all')">All</button>
+                </div>
+                <select id="usage-tier-filter" class="settings-input" style="width:auto;padding:5px 9px;font-size:11px;" onchange="loadAdminUsersUsage()">
+                    <option value="">All tiers</option>
+                    <option value="free">Free</option>
+                    <option value="basic">Basic / Starter</option>
+                    <option value="pro">Pro</option>
+                    <option value="admin">Admin</option>
+                </select>
+                <input type="text" id="usage-q" placeholder="Search email…" class="settings-input" style="flex:1;min-width:140px;padding:5px 9px;font-size:11px;" oninput="onUsageSearchInput()">
+                <label style="font-size:11px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;">
+                    <input type="checkbox" id="usage-include-bot" onchange="loadAdminUsersUsage()"> Include bot trades
+                </label>
+                <button onclick="adminUsageExportCSV()" style="padding:5px 12px;font-size:11px;background:none;border:1px solid var(--border-color);color:var(--text-bright);border-radius:4px;cursor:pointer;">Export CSV</button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border-color);color:var(--text-secondary);text-align:left;">
+                        <th style="padding:6px;cursor:pointer;" onclick="setUsageSort('email_asc')">Email</th>
+                        <th style="padding:6px;cursor:pointer;" onclick="setUsageSort('tier_desc')">Tier</th>
+                        <th style="padding:6px;cursor:pointer;text-align:right;" onclick="setUsageSort('calls_desc')">In&nbsp;window</th>
+                        <th style="padding:6px;text-align:right;">24h</th>
+                        <th style="padding:6px;text-align:right;">7d</th>
+                        <th style="padding:6px;cursor:pointer;text-align:right;" onclick="setUsageSort('calls_30d_desc')">30d</th>
+                        <th style="padding:6px;text-align:right;">Total</th>
+                        <th style="padding:6px;">Top model</th>
+                        <th style="padding:6px;cursor:pointer;" onclick="setUsageSort('last_seen_desc')">Last seen</th>
+                        <th class="usage-bot-col" style="padding:6px;text-align:right;display:none;">Bot trades</th>
+                        <th class="usage-bot-col" style="padding:6px;text-align:right;display:none;">Bot P/L</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-usage-body">
+                    <tr><td colspan="11" style="padding:12px;color:var(--text-secondary);">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+
         <!-- Data Export for Fine-Tuning -->
         <div class="admin-card">
             <div class="admin-card-title">Export Data (Fine-Tuning)</div>
@@ -1740,20 +1914,89 @@
         <button class="disclaimer-close-btn" onclick="closeDisclaimer()">I Understand</button>
     </div>
 </div>
+<!-- What's New drawer -->
+<div class="wn-scrim" id="wn-scrim" onclick="closeWhatsNew()"></div>
+<div class="wn-portal" id="wn-portal">
+<aside class="wn-drawer" id="wn-drawer" aria-hidden="true">
+    <div class="wn-head">
+        <div>
+            <h2>What's New</h2>
+            <div class="wn-sub">Product updates &amp; release notes</div>
+        </div>
+        <button class="wn-close" onclick="closeWhatsNew()" aria-label="Close">&times;</button>
+    </div>
+    <div class="wn-list" id="wn-list">
+        <div class="wn-loading">Loading&hellip;</div>
+    </div>
+</aside>
+</div><!-- /wn-portal -->
+
+<!-- Feedback modal -->
+<div class="fb-overlay" id="fb-overlay" onclick="if(event.target===this)closeFeedback()">
+  <div class="fb-modal" role="dialog" aria-modal="true">
+    <div class="fb-head">
+      <div><h2>Share your feedback</h2><div class="fb-sub">Takes ~30 seconds — helps us improve TradeWiz</div></div>
+      <button class="wn-close" onclick="closeFeedback()" aria-label="Close">&times;</button>
+    </div>
+    <div class="fb-body" id="fb-body">
+      <div class="fb-q">
+        <label>How likely are you to recommend TradeWiz to a friend or colleague?</label>
+        <div class="fb-nps" id="fb-nps">
+          <!-- 0-10 buttons injected by JS -->
+        </div>
+        <div class="fb-nps-legend"><span>Not likely</span><span>Extremely likely</span></div>
+      </div>
+      <div class="fb-q">
+        <label>Overall, how satisfied are you with TradeWiz?</label>
+        <div class="fb-scale" id="fb-csat" data-max="5"></div>
+      </div>
+      <div class="fb-q">
+        <label>How easy is TradeWiz to use?</label>
+        <div class="fb-scale" id="fb-ease" data-max="5"></div>
+      </div>
+      <div class="fb-q">
+        <label>Which feature is most valuable to you?</label>
+        <select id="fb-valuable">
+          <option value="">Select…</option>
+          <option>Dashboard</option><option>Analyzer</option><option>Sector Radar</option>
+          <option>Screener</option><option>Trading Bots</option><option>Breakout Scanner</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="fb-q">
+        <label>What would you improve, or what's missing?</label>
+        <textarea id="fb-improve" rows="3" placeholder="Your thoughts…"></textarea>
+      </div>
+      <div class="fb-q">
+        <label>Email (optional — if you'd like a follow-up)</label>
+        <input type="email" id="fb-email" placeholder="you@example.com">
+      </div>
+    </div>
+    <div class="fb-foot">
+      <span class="fb-msg" id="fb-msg"></span>
+      <button class="btn-analyze" id="fb-submit" onclick="submitFeedback()">Send feedback</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.display='none';sessionStorage.setItem('disclaimerClosed','1')}
 if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
 </script>
 
-<script src="/static/js/core.js?v=2"></script>
-<script src="/static/js/features/analysis/analysis.js"></script>
-<script src="/static/js/features/screener/screener.js?v=4"></script>
+<script src="/static/js/core.js?v=4"></script>
+<script src="/static/js/features/dashboard.js?v=5"></script>
+<script src="/static/js/features/analysis/analysis.js?v=2"></script>
+<script src="/static/js/features/screener/screener.js?v=5"></script>
 <script src="/static/js/features/ipo/ipo.js"></script>
 <script src="/static/js/features/tracker/tracker.js"></script>
 <script src="/static/js/features/bot_crypto/bot_crypto.js"></script>
 <script src="/static/js/features/bot_stock/bot_stock.js"></script>
 <script src="/static/js/features/status/status.js"></script>
 <script src="/static/js/features/research/research.js"></script>
+<script src="/static/js/features/research/sector_radar.js"></script>
+<script src="/static/js/features/release_notes.js"></script>
+<script src="/static/js/features/feedback.js"></script>
 <script src="/static/js/features/user/settings.js"></script>
 <script src="/static/js/features/admin/admin.js"></script>
 <script src="/static/js/features/predictions/predictions.js"></script>

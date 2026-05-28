@@ -138,6 +138,31 @@ def api_analyze():
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
+        # Yahoo rate-limited this server's IP — serve the most recent cached
+        # analysis for this ticker (any user; it's public market data) so the
+        # analyzer still works, flagged as stale. Otherwise a friendly 429.
+        from shared.yf_fetch import is_rate_limit_error
+        if is_rate_limit_error(e):
+            try:
+                from db import query_one
+                cached = query_one(
+                    f"SELECT result_json, created_at FROM searches WHERE ticker={P} "
+                    f"ORDER BY id DESC LIMIT 1", (ticker,),
+                )
+                if cached and cached.get("result_json"):
+                    payload = json.loads(cached["result_json"])
+                    payload["stale"] = True
+                    payload["stale_note"] = (
+                        "Yahoo Finance is rate-limiting this server right now — "
+                        f"showing the last cached analysis ({cached.get('created_at')}). "
+                        "Live data will return shortly."
+                    )
+                    return current_app.response_class(
+                        response=json.dumps(payload, cls=NumpyEncoder, default=str),
+                        status=200, mimetype="application/json")
+            except Exception:
+                pass
+            return jsonify({"error": "Market data is temporarily rate-limited by Yahoo Finance. Please try again in a few minutes."}), 429
         return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
 
 

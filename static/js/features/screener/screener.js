@@ -344,9 +344,58 @@ async function runScreener(force = false) {
     screenerRunning = false;
 }
 
+// ─── Column sorting ───────────────────────────────────────
+let _screenerSort = { field: 'confidence', dir: 'desc' };
+let _lastScreenerData = null;
+let _lastScreenerFromCache = false;
+
+function _screenerSortVal(c, field) {
+    if (field === 'ticker') return (c.ticker || '').toUpperCase();
+    if (field === 'price') return Number(c.price) || 0;
+    if (field === 'upside') return Number(c.upside_pct) || 0;
+    return Number(c.confidence) || 0;  // default: confidence
+}
+
+function _applyScreenerSort(arr) {
+    if (!Array.isArray(arr)) return;
+    const f = _screenerSort.field, dir = _screenerSort.dir === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+        const va = _screenerSortVal(a, f), vb = _screenerSortVal(b, f);
+        if (va < vb) return -1 * dir;
+        if (va > vb) return 1 * dir;
+        return 0;
+    });
+}
+
+function _screenerSortBar() {
+    const fields = [['confidence', 'Confidence'], ['price', 'Price'], ['upside', 'Upside'], ['ticker', 'Ticker']];
+    const btns = fields.map(([f, label]) => {
+        const active = _screenerSort.field === f;
+        const arrow = active ? (_screenerSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        return `<button class="screener-sort-btn${active ? ' active' : ''}" onclick="sortScreener('${f}')">${label}${arrow}</button>`;
+    }).join('');
+    return `<div class="screener-sort-bar"><span class="screener-sort-label">Sort by</span>${btns}</div>`;
+}
+
+function sortScreener(field) {
+    if (_screenerSort.field === field) {
+        _screenerSort.dir = _screenerSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _screenerSort.field = field;
+        _screenerSort.dir = field === 'ticker' ? 'asc' : 'desc';
+    }
+    if (_lastScreenerData) renderScreenerResults(_lastScreenerData, _lastScreenerFromCache);
+}
+
 function renderScreenerResults(data, fromCache = false) {
     const results = document.getElementById('screener-results');
     const cat = data.category || screenerCategory;
+    // Persist for re-sorting, then apply the current column sort to each section.
+    _lastScreenerData = data;
+    _lastScreenerFromCache = fromCache;
+    _applyScreenerSort(data.opportunities || []);
+    _applyScreenerSort(data.risky || []);
+    if (data.tracking) _applyScreenerSort(data.tracking);
 
     if (data.error && data.candidates_scanned === 0) {
         results.innerHTML = `
@@ -385,6 +434,11 @@ function renderScreenerResults(data, fromCache = false) {
             ${cacheIndicator}
         </div>
     `;
+
+    // Column sort control (shown when there are results to sort)
+    if (data.opportunities.length > 0 || data.risky.length > 0 || (data.tracking && data.tracking.length > 0)) {
+        html += _screenerSortBar();
+    }
 
     if (data.opportunities.length > 0) {
         html += `<div class="screener-section-title" style="color:#26a69a;">${positiveLabel}</div>`;

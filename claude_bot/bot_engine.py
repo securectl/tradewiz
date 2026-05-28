@@ -32,6 +32,7 @@ ASSET_TYPE = "claude"
 CB_DEFAULTS = {
     "cb_enabled": "0",
     "cb_kill_switch": "0",
+    "cb_kill_auto_date": "",            # date a daily-loss kill auto-fired (for self-heal); empty = manual/none
     "cb_broker": "alpaca",              # alpaca | webull
     "cb_mode": "paper",                 # paper | live (live blocked by CLAUDE.md rule #1)
     "cb_scan_interval": "300",          # 5 min
@@ -116,6 +117,30 @@ def _open_value(user_id):
         return float(row["val"]) if row else 0.0
     except Exception:
         return 0.0
+
+
+def _maybe_autoreset_kill(user_id):
+    """Self-heal: clear a daily-loss kill switch on a NEW trading day.
+
+    Only clears switches that fired automatically (cb_kill_auto_date set) —
+    a manual kill leaves that marker empty and is never auto-cleared. Won't
+    clear if today's realized loss has already breached the limit again.
+    Returns True if it cleared the switch. Prevents the bot from staying
+    dead for weeks after one bad day (the original bug).
+    """
+    auto_date = _cfg(user_id, "cb_kill_auto_date", "")
+    if not auto_date:
+        return False  # manual kill (or none) — leave it alone
+    today = datetime.now().strftime("%Y-%m-%d")
+    if auto_date >= today:
+        return False  # fired today — keep it until the next day
+    daily_limit = float(_cfg(user_id, "cb_daily_loss_limit", "500"))
+    if _daily_pnl(user_id) <= -daily_limit:
+        return False  # already breached again today
+    from shared.helpers import _upsert_bot_config
+    _upsert_bot_config(user_id, "cb_kill_switch", "0")
+    _upsert_bot_config(user_id, "cb_kill_auto_date", "")
+    return True
 
 
 def _daily_pnl(user_id):
@@ -391,27 +416,25 @@ def _evaluate(ticker, entry_style, composite_rsi=None):
 
 
 def _llm_validate(ticker, eval_data, screener_info, regime):
-    """LLM gating via OpenRouter. Falls back to rule-based approve.
+    """LLM gating. Routes to Ollama Cloud when the resolved model is prefixed
+    `ollama/`, otherwise OpenRouter. Falls back to rule-based approve.
 
     Model resolution (tiered):
-      1. OPENROUTER_MODEL_GATING — claude_bot specific override
-      2. OPENROUTER_MODEL_RESEARCH — codebase-wide research model
-      3. Hard default: deepseek/deepseek-chat (cheapest reliable option for JSON gates)
+      1. DB override / env / DEFAULTS via shared.llm_config.get_model("claude_gating")
+      2. Hard fallback env: OPENROUTER_MODEL_GATING or OPENROUTER_MODEL_RESEARCH
+      3. Final default: "ollama/gpt-oss:20b" (set in shared/llm_config DEFAULTS)
     """
     try:
         import os, re, requests
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
-        # DB override (admin UI) > env vars > hardcoded default
         env_model = (os.getenv("OPENROUTER_MODEL_GATING")
                      or os.getenv("OPENROUTER_MODEL_RESEARCH")
-                     or "deepseek/deepseek-chat")
+                     or "ollama/gpt-oss:20b")
         try:
             from shared.llm_config import get_model
             model = get_model("claude_gating", env_model)
         except Exception:
             model = env_model
-        if not api_key:
-            return eval_data.get("signal") == "BUY"
+
         prompt = (
             f"You are a swing trade analyst. Approve or reject this trade for a 1-3 day scalp.\n"
             f"TICKER: {ticker}\n"
@@ -423,6 +446,42 @@ def _llm_validate(ticker, eval_data, screener_info, regime):
             f"REGIME: {regime}\n"
             f'Respond JSON only: {{"approve": true/false, "confidence": 0-100, "reasoning": "one sentence"}}'
         )
+
+        # ── Ollama Cloud branch ───────────────────────────────────────────
+        if model.startswith("ollama/"):
+            from shared.runtime_config import get_setting as _rt_get
+            ollama_key = _rt_get("ollama_api_key", "", env_aliases=("OLLAMA_API_KEY",))
+            if not ollama_key:
+                return eval_data.get("signal") == "BUY"
+            ollama_url = _rt_get("ollama_url", "https://ollama.com", env_aliases=("OLLAMA_URL",))
+            bare_model = model[len("ollama/"):]
+            resp = requests.post(
+                f"{ollama_url}/api/chat",
+                headers={"Authorization": f"Bearer {ollama_key}",
+                         "Content-Type": "application/json"},
+                json={"model": bare_model,
+                      "messages": [{"role": "user", "content": prompt}],
+                      "stream": False, "format": "json",
+                      "options": {"temperature": 0.1, "num_predict": 200}},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                content = resp.json().get("message", {}).get("content", "")
+                m = re.search(r'\{[^}]+\}', content)
+                if m:
+                    r = json.loads(m.group())
+                    approved = bool(r.get("approve")) and r.get("confidence", 0) >= 60
+                    logger.info(f"[CB] LLM({model}) {ticker} → approve={approved} conf={r.get('confidence')}")
+                    return approved
+                logger.warning(f"[CB] LLM({model}) {ticker}: no JSON in response: {content[:120]}")
+            else:
+                logger.warning(f"[CB] LLM({model}) {ticker}: HTTP {resp.status_code}: {resp.text[:200]}")
+            return eval_data.get("signal") == "BUY"
+
+        # ── OpenRouter branch (unchanged) ─────────────────────────────────
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        if not api_key:
+            return eval_data.get("signal") == "BUY"
         resp = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -514,7 +573,10 @@ def _open_trade(user_id, ticker, eval_data, reason, size_factor=1.0):
     if _daily_pnl(user_id) <= -daily_limit:
         from shared.helpers import _upsert_bot_config
         _upsert_bot_config(user_id, "cb_kill_switch", "1")
-        _log(user_id, "error", f"BLOCKED {ticker}: daily loss limit breached, kill switch ON")
+        # Mark this as an AUTO (daily-loss) kill so it self-heals next trading
+        # day — manual kills leave cb_kill_auto_date empty and never auto-clear.
+        _upsert_bot_config(user_id, "cb_kill_auto_date", datetime.now().strftime("%Y-%m-%d"))
+        _log(user_id, "error", f"BLOCKED {ticker}: daily loss limit breached, kill switch ON (auto)")
         return False
     max_pos = int(_cfg(user_id, "cb_max_positions", "5"))
     if _open_count(user_id) >= max_pos:
@@ -760,8 +822,11 @@ def _scan_cycle(user_id):
         return False
 
     if _cfg(user_id, "cb_kill_switch") == "1":
-        _log(user_id, "warning", "Kill switch active — skipping cycle")
-        return True
+        if _maybe_autoreset_kill(user_id):
+            _log(user_id, "info", "Kill switch auto-reset (new trading day, loss within limit) — resuming")
+        else:
+            _log(user_id, "warning", "Kill switch active — skipping cycle")
+            return True
 
     # Always check exits first (preserve gains, scalp losers)
     _check_exits(user_id)

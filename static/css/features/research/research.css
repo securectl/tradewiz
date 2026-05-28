@@ -872,3 +872,115 @@
         align-items: stretch;
     }
 }
+
+/* ─── Sector Radar (Auto Research Analyst) ─────────────────── */
+.research-subnav { display:flex; gap:8px; padding:12px 16px 0; }
+.research-subnav-btn {
+    background:transparent; border:1px solid #2a2e39; color:#9aa0ac;
+    padding:7px 16px; border-radius:8px 8px 0 0; cursor:pointer; font-size:13px;
+    font-weight:600; transition:all .15s;
+}
+.research-subnav-btn:hover { color:#d1d4dc; }
+.research-subnav-btn.active { color:#fff; background:#1c2030; border-color:#2962ff; border-bottom-color:transparent; }
+.research-sub { padding:16px; overflow-y:auto; }
+
+.sr-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+.sr-title { margin:0; font-size:22px; color:#fff; }
+.sr-subtitle { margin:2px 0 0; color:#787b86; font-size:13px; }
+.sr-actions { display:flex; align-items:center; gap:12px; }
+.sr-meta { color:#787b86; font-size:12px; }
+
+.sr-loading, .sr-empty, .sr-error { color:#9aa0ac; padding:32px; text-align:center; }
+.sr-error { color:#ef5350; }
+.sr-empty .sr-sub { color:#787b86; }
+
+/* Hero */
+.sr-hero {
+    display:flex; gap:20px; background:linear-gradient(135deg,#161a26,#1c2233);
+    border:1px solid #2a2e39; border-radius:12px; padding:20px; flex-wrap:wrap;
+}
+.sr-hero-main { flex:1 1 420px; }
+.sr-hero-label { color:#2962ff; font-size:11px; font-weight:700; letter-spacing:.08em; }
+.sr-hero-sector { font-size:28px; font-weight:700; color:#fff; margin-top:4px; }
+.sr-hero-etf { font-size:14px; color:#787b86; background:#0d1017; padding:2px 8px; border-radius:6px; margin-left:8px; vertical-align:middle; }
+.sr-hero-thesis { color:#d1d4dc; font-size:14px; line-height:1.55; margin:12px 0; }
+.sr-h4 { color:#9aa0ac; font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px; }
+.sr-hero-why ul { margin:0 0 12px; padding-left:18px; color:#d1d4dc; font-size:13px; }
+.sr-hero-why li { margin-bottom:3px; }
+.sr-ticker-row { display:flex; flex-wrap:wrap; gap:6px; }
+.sr-ticker { background:#0d1017; border:1px solid #2a2e39; color:#26a69a; font-weight:700;
+    padding:4px 10px; border-radius:6px; cursor:pointer; font-size:13px; transition:all .15s; }
+.sr-ticker:hover { border-color:#26a69a; background:#13201d; }
+
+.sr-hero-side { flex:0 0 180px; display:flex; flex-direction:column; gap:12px; }
+.sr-conv { text-align:center; border-radius:12px; padding:14px; }
+.sr-conv-num { font-size:40px; font-weight:800; line-height:1; }
+.sr-conv-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.06em; opacity:.8; }
+.sr-conv-high { background:rgba(38,166,154,.15); color:#26a69a; }
+.sr-conv-med { background:rgba(255,200,55,.15); color:#ffc837; }
+.sr-conv-low { background:rgba(239,83,80,.15); color:#ef5350; }
+.sr-side-row { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:#787b86; align-items:center; }
+.sr-side-row b { color:#d1d4dc; }
+
+.sr-chip { display:inline-block; background:#0d1017; border:1px solid #2a2e39; color:#9aa0ac;
+    padding:2px 8px; border-radius:10px; font-size:11px; margin:2px 0; }
+.sr-chip-neg { color:#ef5350; border-color:#3a2326; }
+.sr-fallback { background:rgba(255,200,55,.1); border:1px solid #4a3f1e; color:#ffc837;
+    padding:8px 12px; border-radius:8px; font-size:12px; margin-top:12px; }
+.sr-context { display:flex; gap:16px; flex-wrap:wrap; margin:14px 0; color:#9aa0ac; font-size:12px; }
+.sr-ctx b { color:#d1d4dc; font-weight:600; }
+
+/* Risks */
+.sr-risks { background:#161a26; border:1px solid #2a2e39; border-radius:10px; padding:12px 16px; margin-bottom:16px; }
+.sr-risks ul { margin:0; padding-left:18px; color:#c5c8d0; font-size:13px; }
+.sr-risks li { margin-bottom:3px; }
+
+/* Leaderboard */
+.sr-board { margin-bottom:18px; }
+.sr-h3 { color:#fff; font-size:15px; font-weight:700; margin-bottom:10px; }
+.sr-h3 .sr-sub { color:#787b86; font-size:12px; font-weight:400; }
+.sr-table-wrap { overflow-x:auto; border:1px solid #2a2e39; border-radius:10px; }
+.sr-table { width:100%; border-collapse:collapse; font-size:13px; }
+.sr-table th { text-align:left; color:#787b86; font-weight:600; padding:10px 12px; background:#13161f;
+    border-bottom:1px solid #2a2e39; white-space:nowrap; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+.sr-table td { padding:10px 12px; border-bottom:1px solid #1c2030; color:#d1d4dc; vertical-align:top; }
+.sr-table tr:last-child td { border-bottom:none; }
+.sr-row-top { background:rgba(41,98,255,.08); }
+.sr-row-top .sr-sector-name { color:#fff; }
+.sr-rank { color:#787b86; font-weight:700; }
+.sr-sector-name { font-weight:600; }
+.sr-etf { color:#787b86; font-weight:400; font-size:11px; }
+.sr-row-cats { margin-top:4px; display:flex; flex-wrap:wrap; gap:4px; }
+.sr-pos { color:#26a69a; } .sr-neg { color:#ef5350; }
+.sr-scorebar { position:relative; background:#0d1017; border-radius:5px; height:18px; min-width:90px; overflow:hidden; }
+.sr-scorebar-fill { position:absolute; left:0; top:0; bottom:0; background:linear-gradient(90deg,#2962ff,#26a69a); }
+.sr-scorebar span { position:relative; z-index:1; color:#fff; font-size:11px; font-weight:700; padding-left:6px; line-height:18px; }
+.sr-badge { font-size:10px; padding:2px 6px; border-radius:5px; background:#0d1017; color:#9aa0ac; border:1px solid #2a2e39; }
+.sr-badge-on { color:#26a69a; border-color:#1e3a34; }
+.sr-badge-off { color:#ef5350; border-color:#3a2326; }
+
+/* History */
+.sr-history { background:#161a26; border:1px solid #2a2e39; border-radius:10px; padding:12px 16px; }
+.sr-hist-head, .sr-hist-row { display:grid; grid-template-columns:90px 1fr 70px 50px; gap:8px; font-size:12px; padding:5px 0; }
+.sr-hist-head { color:#787b86; font-weight:600; border-bottom:1px solid #2a2e39; }
+.sr-hist-row { color:#d1d4dc; border-bottom:1px solid #1c2030; }
+.sr-hist-sector { color:#fff; font-weight:600; }
+.sr-hist-mode { color:#787b86; }
+.sr-hist-conv { text-align:right; font-weight:700; }
+
+@media (max-width:640px) {
+    .sr-hero-side { flex-basis:100%; flex-direction:row; }
+    .sr-conv { flex:1; }
+}
+
+/* ─── Aurora pass — Research Skills UI (May 2026) ──────────── */
+.research-catalog, .research-launcher, .research-jobs,
+.skill-card, .skill-job-card, .finskills-domain-card, .finskill-card {
+    background: var(--surface-glass);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.skill-card, .finskill-card { transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition); }
+.skill-card:hover, .finskill-card:hover { transform: translateY(-2px); border-color: rgba(124,93,250,0.4); box-shadow: 0 10px 30px rgba(10,14,30,0.5); }
+.research-subnav-btn.active { background: var(--accent-grad-soft); border-color: transparent; color: var(--text-bright); box-shadow: inset 0 0 0 1px rgba(124,93,250,0.35); }
