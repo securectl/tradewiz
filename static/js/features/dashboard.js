@@ -213,6 +213,22 @@ let _oppsData = [];
 let _oppsSort = { field: 'confidence', dir: 'desc' };
 const _OPPS_NUM = new Set(['confidence', 'price']);
 
+/* Money-flow chip: are buyers accumulating or are sellers taking profit?
+   Shared visual contract with the Screener (same colors/labels). */
+const _MF_META = {
+    IN: { label: 'Money In', color: '#26a69a' },
+    OUT: { label: 'Money Out', color: '#ef5350' },
+    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800' },
+    NEUTRAL: { label: 'Neutral', color: '#787b86' },
+};
+function _mfChip(signal, cmf, mfi) {
+    const m = _MF_META[signal];
+    if (!m) return '<span class="dash-opp-flow" style="color:#555;">—</span>';
+    const tip = [cmf != null ? 'CMF ' + cmf : null, mfi != null ? 'MFI ' + Math.round(mfi) : null]
+        .filter(Boolean).join(' · ');
+    return `<span class="dash-opp-flow" title="${tip}" style="color:${m.color};border-color:${m.color}44;">${m.label}</span>`;
+}
+
 async function loadOpportunities() {
     const el = document.getElementById('dash-opps'); if (!el) return;
     el.innerHTML = '<h3 class="dash-h3">Opportunities <span class="dash-sub">oversold · breakout · momentum from the screener</span></h3><div class="dash-empty">Loading…</div>';
@@ -243,13 +259,14 @@ function renderOpps() {
             <span class="dash-opp-type" style="color:${_dOppColor(o.type)};border-color:${_dOppColor(o.type)}">${_dEsc(o.type)}</span>
             <span class="dash-opp-sec">${_dEsc(o.sector)}</span>
             <span class="dash-opp-verdict">${_dEsc(o.verdict || '')}</span>
+            ${_mfChip(o.mf_signal, o.cmf, o.mfi)}
             <span class="dash-opp-price">${o.price != null ? '$' + o.price : ''}</span>
             <span class="dash-opp-conf">${Math.round(o.confidence)}%</span>
         </div>`).join('');
     const asOf = _oppsData[0] && _oppsData[0].scan_date ? ` <span class="dash-sub">· scanned ${_dEsc(_oppsData[0].scan_date)}</span>` : '';
     const h = (f, label) => `<span class="dash-sortable" onclick="sortOpps('${f}')">${label}${_dArrow(_oppsSort, f)}</span>`;
     el.innerHTML = `<h3 class="dash-h3">Opportunities <span class="dash-sub">oversold · breakout · momentum</span>${asOf}</h3>
-        <div class="dash-opp-head">${h('ticker', 'Ticker')}${h('type', 'Type')}${h('sector', 'Sector')}${h('verdict', 'Verdict')}${h('price', 'Price')}${h('confidence', 'Conf')}</div>
+        <div class="dash-opp-head">${h('ticker', 'Ticker')}${h('type', 'Type')}${h('sector', 'Sector')}${h('verdict', 'Verdict')}${h('mf_signal', 'Flow')}${h('price', 'Price')}${h('confidence', 'Conf')}</div>
         ${rows}`;
 }
 

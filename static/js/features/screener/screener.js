@@ -344,8 +344,26 @@ async function runScreener(force = false) {
     screenerRunning = false;
 }
 
+// ─── Money-flow chip (shared visual contract with the Dashboard) ──
+// Is money flowing in (accumulation) or out (distribution / profit-taking)?
+const _SCR_MF_META = {
+    IN: { label: 'Money In', color: '#26a69a', rank: 3 },
+    OUT: { label: 'Money Out', color: '#ef5350', rank: 0 },
+    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800', rank: 1 },
+    NEUTRAL: { label: 'Neutral', color: '#787b86', rank: 2 },
+};
+function _mfChipHtml(sig, cmf, mfi) {
+    const m = _SCR_MF_META[sig];
+    if (!m) return '<span style="color:#555;">—</span>';
+    const tip = [cmf != null ? 'CMF ' + cmf : null, mfi != null ? 'MFI ' + Math.round(mfi) : null]
+        .filter(Boolean).join(' · ');
+    return `<span title="${tip}" style="background:${m.color}18; color:${m.color}; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:700; border:1px solid ${m.color}33; white-space:nowrap;">${m.label}</span>`;
+}
+function _mfRank(sig) { return _SCR_MF_META[sig] ? _SCR_MF_META[sig].rank : -1; }
+
 // ─── Column sorting ───────────────────────────────────────
 let _screenerSort = { field: 'confidence', dir: 'desc' };
+let _screenerMfFilter = 'all';   // money-flow filter: all | IN | OUT | PROFIT_TAKING | NEUTRAL
 let _lastScreenerData = null;
 let _lastScreenerFromCache = false;
 
@@ -357,6 +375,7 @@ function _screenerSortVal(c, field) {
     if (field === 'price') return Number(c.price) || 0;
     if (field === 'market_cap') return Number(c.market_cap) || 0;
     if (field === 'upside') return Number(c.upside_pct) || 0;
+    if (field === 'mf_signal') return _mfRank(c.mf_signal);
     if (field === 'summary') return (c.summary || '').toUpperCase();
     return Number(c.confidence) || 0;  // default: confidence
 }
@@ -391,6 +410,7 @@ function _screenerResultsTable(rows) {
             <td style="padding:8px 10px; color:#787b86; font-size:11px; white-space:nowrap;">${r.sector || '—'}</td>
             <td style="padding:8px 10px; white-space:nowrap;"><span style="background:${vc}18; color:${vc}; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; border:1px solid ${vc}33;">${r.verdict || '—'}</span></td>
             <td style="padding:8px 10px; text-align:center; font-weight:700; color:${cc}; font-size:13px;">${Math.round(r.confidence || 0)}%</td>
+            <td style="padding:8px 10px; text-align:center; white-space:nowrap;">${_mfChipHtml(r.mf_signal, r.cmf, r.mfi)}</td>
             <td style="padding:8px 10px; text-align:right; color:#d1d4dc; font-weight:600; font-size:13px;">$${(r.price || 0).toFixed(2)}</td>
             <td style="padding:8px 10px; text-align:right; color:#787b86; font-size:11px; white-space:nowrap;">${mc}</td>
             <td style="padding:8px 10px; color:#787b86; font-size:11px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sm}">${r.summary || '—'}</td>
@@ -398,7 +418,7 @@ function _screenerResultsTable(rows) {
     }).join('');
     return `<table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead><tr style="background:#2a2e39; border-bottom:2px solid #363a45;">
-            ${th('ticker', 'Ticker', 'left')}${th('name', 'Name', 'left')}${th('sector', 'Sector', 'left')}${th('verdict', 'Verdict', 'left')}${th('confidence', 'Conf', 'center')}${th('price', 'Price', 'right')}${th('market_cap', 'Mkt Cap', 'right')}${th('summary', 'Summary', 'left')}
+            ${th('ticker', 'Ticker', 'left')}${th('name', 'Name', 'left')}${th('sector', 'Sector', 'left')}${th('verdict', 'Verdict', 'left')}${th('confidence', 'Conf', 'center')}${th('mf_signal', 'Flow', 'center')}${th('price', 'Price', 'right')}${th('market_cap', 'Mkt Cap', 'right')}${th('summary', 'Summary', 'left')}
         </tr></thead>
         <tbody>${body}</tbody>
     </table>`;
@@ -457,25 +477,46 @@ function renderScreenerResults(data, fromCache = false) {
             <span style="color:#ff9800;">${data.risky.length} ${cautiousLabel}</span>${trackingHtml} |
             <span style="color:#ef5350;">${data.avoided} Avoided</span>
             ${cacheIndicator}
+            ${_screenerMfFilterHtml()}
         </div>
     `;
 
     // Single sortable table (Dashboard-style) across all vetted candidates.
     // The verdict chip + row color convey the tier (opportunity / tracking / risky).
-    const allRows = [
+    let allRows = [
         ...(data.opportunities || []),
         ...(cat === 'oversold' && data.tracking ? data.tracking : []),
         ...(data.risky || []),
     ];
+    if (_screenerMfFilter !== 'all') {
+        allRows = allRows.filter(r => (r.mf_signal || '') === _screenerMfFilter);
+    }
     _applyScreenerSort(allRows);
 
     if (allRows.length === 0) {
-        html += `<div style="text-align:center; padding:40px; color:#787b86;">No viable opportunities found. All candidates were filtered by AI vetting.</div>`;
+        const why = _screenerMfFilter !== 'all'
+            ? `No candidates with “${_SCR_MF_META[_screenerMfFilter] ? _SCR_MF_META[_screenerMfFilter].label : _screenerMfFilter}” money flow. <a href="#" onclick="setScreenerMfFilter('all'); return false;" style="color:#2962ff;">Clear filter</a>.`
+            : 'No viable opportunities found. All candidates were filtered by AI vetting.';
+        html += `<div style="text-align:center; padding:40px; color:#787b86;">${why}</div>`;
     } else {
         html += `<div style="overflow-x:auto;">${_screenerResultsTable(allRows)}</div>`;
     }
 
     results.innerHTML = html;
+}
+
+// Money-flow filter dropdown shown in the results summary bar.
+function _screenerMfFilterHtml() {
+    const opts = [['all', 'All flows'], ['IN', 'Money In'], ['OUT', 'Money Out'],
+                  ['PROFIT_TAKING', 'Profit-Taking'], ['NEUTRAL', 'Neutral']];
+    const sel = opts.map(([v, l]) => `<option value="${v}"${v === _screenerMfFilter ? ' selected' : ''}>${l}</option>`).join('');
+    return ` | <span style="color:#787b86;">Flow:</span>
+        <select onchange="setScreenerMfFilter(this.value)" style="background:#1e222d; color:#d1d4dc; border:1px solid #363a45; border-radius:6px; padding:2px 6px; font-size:12px; cursor:pointer;">${sel}</select>`;
+}
+
+function setScreenerMfFilter(v) {
+    _screenerMfFilter = v;
+    if (_lastScreenerData) renderScreenerResults(_lastScreenerData, _lastScreenerFromCache);
 }
 
 // Semi-circle gauge for numeric metrics. value is clamped to [0, max].

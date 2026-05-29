@@ -1352,7 +1352,7 @@ html[data-theme="terminal"] .theme-switch-btn.active { color: #00231d; }
 @media (max-width: 640px) { .dash-sec-row { grid-template-columns: 1fr 70px; } .dash-sec-bar { display: none; } }
 
 /* ─── Dashboard: Opportunities ─────────────────────────────── */
-.dash-opp-head, .dash-opp { display: grid; grid-template-columns: 80px 92px 1fr 130px 80px 50px; align-items: center; gap: 10px; }
+.dash-opp-head, .dash-opp { display: grid; grid-template-columns: 80px 92px 1fr 120px 100px 80px 50px; align-items: center; gap: 10px; }
 .dash-opp-head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
 .dash-opp { padding: 9px 8px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; transition: background var(--transition); font-size: 13px; }
 .dash-opp:last-child { border-bottom: 0; }
@@ -1361,12 +1361,13 @@ html[data-theme="terminal"] .theme-switch-btn.active { color: #00231d; }
 .dash-opp-type { font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 6px; border: 1px solid; text-align: center; }
 .dash-opp-sec { color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-opp-verdict { color: var(--text-primary); font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-opp-flow { font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 6px; border: 1px solid; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-opp-price { color: var(--text-bright); font-weight: 700; text-align: right; }
 .dash-opp-conf { color: var(--accent-green); font-weight: 800; text-align: right; }
 @media (max-width: 720px) {
     .dash-opp-head { display: none; }
     .dash-opp { grid-template-columns: 70px 80px 1fr 46px; }
-    .dash-opp-sec, .dash-opp-price { display: none; }
+    .dash-opp-sec, .dash-opp-price, .dash-opp-flow { display: none; }
 }
 
 /* ─── Dashboard: Most-Watched Oversold ─────────────────────── */

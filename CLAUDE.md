@@ -87,6 +87,7 @@ Frontend (Flask templates + vanilla JS) → Flask API (40+ routes) → Analysis 
     - **Unit test** in `tests/` covering the happy path + 1–2 edge cases (use `unittest.TestCase`, see `tests/test_routes.py` for the convention).
     - **Smoke check** that exercises the change end-to-end against the running container (e.g. `docker compose exec app python -c "..."` confirming the new module imports, the new route resolves, the data path round-trips). Smoke checks that already exist as one-off `docker compose exec` invocations should be promoted to `tests/test_<feature>.py` after they pass.
     - Run the full suite (`docker compose exec app python -m pytest tests/ -v`) before declaring a feature done. Do not mark a task `completed` if tests are red.
+12. **Net-new features ship on a branch + PR** — never commit a new feature directly to `main`. Cut a feature branch, commit there, push, and open a pull request against `main` for review. Trivial fixes (typos, one-line config) may go direct, but anything that adds a route, module, or behavior gets its own branch and PR.
 
 ## Running Locally
 
