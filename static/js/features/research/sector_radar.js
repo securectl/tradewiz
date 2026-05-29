@@ -15,12 +15,16 @@ function switchResearchSub(sub) {
         b.classList.toggle('active', b.dataset.sub === sub);
     });
     const radar = document.getElementById('research-sub-radar');
+    const reports = document.getElementById('research-sub-reports');
     const skills = document.getElementById('research-sub-skills');
     if (radar) radar.style.display = (sub === 'radar') ? 'block' : 'none';
+    if (reports) reports.style.display = (sub === 'reports') ? 'block' : 'none';
     if (skills) skills.style.display = (sub === 'skills') ? 'block' : 'none';
 
     if (sub === 'radar') {
         if (!_srLoaded) loadSectorRadar();
+    } else if (sub === 'reports') {
+        if (typeof loadImbalanceReport === 'function' && !_imbLoaded) loadImbalanceReport();
     } else if (sub === 'skills') {
         if (typeof loadSkillCatalog === 'function') loadSkillCatalog();
         if (typeof loadSkillJobs === 'function') loadSkillJobs();

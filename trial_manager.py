@@ -379,36 +379,9 @@ def _get_user_email(user_id):
 
 
 def _send_email(to_email, subject, html_body):
-    """Send an email via SMTP."""
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-
-    smtp_host = os.getenv("SMTP_HOST", "")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_pass = os.getenv("SMTP_PASS", "")
-
-    if not all([smtp_host, smtp_user, smtp_pass]):
-        logger.warning("SMTP not configured — email not sent")
-        return False
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = smtp_user
-    msg["To"] = to_email
-    msg.attach(MIMEText(html_body, "html"))
-
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(smtp_user, to_email, msg.as_string())
-        logger.info(f"Email sent to {to_email}: {subject}")
-        return True
-    except Exception as e:
-        logger.error(f"Email failed to {to_email}: {e}")
-        return False
+    """Send an email via the shared mailer (Resend → SMTP fallback)."""
+    from shared.mailer import send_email
+    return send_email(to_email, subject, html_body)
 
 
 def _send_trial_welcome(user_id, trial_end):

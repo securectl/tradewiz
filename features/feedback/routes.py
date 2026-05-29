@@ -5,6 +5,8 @@ GET  /api/admin/feedback  read responses + aggregates (admin_required)
 """
 
 import logging
+import os
+from html import escape
 
 from flask import Blueprint, jsonify, request
 
@@ -23,6 +25,61 @@ def _clamp_int(v, lo, hi):
     except (TypeError, ValueError):
         return None
     return max(lo, min(hi, n))
+
+
+def _feedback_recipients():
+    """Where feedback notifications go. FEEDBACK_EMAIL overrides ADMIN_EMAIL."""
+    raw = os.getenv("FEEDBACK_EMAIL") or os.getenv("ADMIN_EMAIL") or ""
+    return [e.strip() for e in raw.split(",") if e.strip()]
+
+
+def _user_email(user_id):
+    if not user_id:
+        return None
+    try:
+        rows = query(f"SELECT email FROM users WHERE id = {P}", (user_id,))
+        if rows:
+            return rows[0]["email"]
+    except Exception as e:
+        logger.warning(f"feedback user email lookup failed: {e}")
+    return None
+
+
+def _email_feedback(user_id, nps, csat, ease, valuable, improve, email, app_name="TradeWiz"):
+    """Best-effort: email a feedback summary to the admin. Never raises."""
+    try:
+        from shared.mailer import send_email, is_configured
+        if not is_configured():
+            return
+        recips = _feedback_recipients()
+        if not recips:
+            return
+
+        contact = email or _user_email(user_id) or "unknown"
+
+        def row(label, value):
+            if value is None or value == "":
+                return ""
+            return (f'<tr><td style="padding:4px 12px 4px 0;color:#888;">{escape(label)}</td>'
+                    f'<td style="padding:4px 0;">{escape(str(value))}</td></tr>')
+
+        html = (
+            f"<h2>New {escape(app_name)} feedback</h2>"
+            f'<table style="border-collapse:collapse;font-family:system-ui,sans-serif;">'
+            f"{row('NPS (0-10)', nps)}"
+            f"{row('CSAT (1-5)', csat)}"
+            f"{row('Ease (1-5)', ease)}"
+            f"{row('Most valuable', valuable)}"
+            f"{row('What to improve', improve)}"
+            f"{row('From', contact)}"
+            f"{row('User ID', user_id)}"
+            f"</table>"
+        )
+        subject = f"[{app_name}] New feedback from {contact}"
+        sent = sum(1 for to in recips if send_email(to, subject, html))
+        logger.info("feedback emailed to %d/%d recipients", sent, len(recips))
+    except Exception as e:
+        logger.warning(f"feedback email failed: {e}")
 
 
 @bp.route("/api/feedback", methods=["POST"])
@@ -49,6 +106,10 @@ def api_feedback_submit():
     except Exception as e:
         logger.error(f"feedback insert failed: {e}")
         return jsonify({"error": "Could not save feedback."}), 500
+
+    # Notify the admin by email — best-effort, never blocks the save.
+    _email_feedback(_uid(), nps, csat, ease, valuable, improve, email)
+
     return jsonify({"ok": True, "message": "Thanks for your feedback!"})
 
 

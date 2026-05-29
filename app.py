@@ -69,6 +69,8 @@ from features.sector_radar.routes import bp as sector_radar_bp
 from features.release_notes.routes import bp as release_notes_bp
 from features.dashboard.routes import bp as dashboard_bp
 from features.feedback.routes import bp as feedback_bp
+from features.research.routes import bp as research_bp
+from features.alerts.routes import bp as alerts_bp
 from claude_bot.routes import bp as claude_bot_bp
 
 app.register_blueprint(ipo_bp)
@@ -89,6 +91,8 @@ app.register_blueprint(sector_radar_bp)
 app.register_blueprint(release_notes_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(feedback_bp)
+app.register_blueprint(research_bp)
+app.register_blueprint(alerts_bp)
 app.register_blueprint(claude_bot_bp)
 
 # ─── Startup: log rotation + cleanup ────────────────────────────
@@ -214,6 +218,25 @@ def _init_scheduler():
             replace_existing=True,
         )
 
+        # Daily alert digest (volume spikes / persistent oversold / upcoming
+        # earnings) at 8:30 AM CST (13:30 UTC), before the open.
+        def _run_daily_alerts():
+            log = logging.getLogger("scheduler")
+            try:
+                from alerts import send_daily_alerts
+                result = send_daily_alerts()
+                log.info(f"[SCHEDULER] Daily alerts: {result.get('sent', 0)} sent "
+                         f"(skipped={result.get('skipped')})")
+            except Exception as e:
+                log.error(f"[SCHEDULER] Daily alerts failed: {e}")
+
+        scheduler.add_job(
+            _run_daily_alerts,
+            CronTrigger(hour=13, minute=30, timezone="UTC"),  # 8:30 AM CST
+            id="daily_alert_digest",
+            replace_existing=True,
+        )
+
         # Sector Radar auto research analyst at 9:30 AM CST (14:30 UTC), after
         # the screener pre-cache. Mondays run the deeper Opus weekly synthesis.
         scheduler.add_job(
@@ -224,7 +247,7 @@ def _init_scheduler():
         )
 
         scheduler.start()
-        logging.getLogger("scheduler").info("[SCHEDULER] Started — trials 8AM, oversold 9AM, screener 9:10AM, sector radar 9:30AM CST")
+        logging.getLogger("scheduler").info("[SCHEDULER] Started — trials 8AM, alerts 8:30AM, oversold 9AM, screener 9:10AM, sector radar 9:30AM CST")
     except Exception as e:
         import logging
         logging.getLogger("scheduler").warning(f"[SCHEDULER] Failed to start: {e}")
@@ -263,9 +286,11 @@ def feature_static(filename):
 @login_required
 def market_pulse():
     """Return VIX, SPY range, and Fear & Greed for header tiles."""
-    import yfinance as yf
     import requests as _req
     import time as _time
+    # Shared cache (shared/yf_fetch): same (symbol, period, interval) keys as the
+    # bots' market sensor, so the tiles reuse the bots' fetch and vice versa.
+    from shared.yf_fetch import get_history
 
     # Check cache (5 min TTL)
     now = _time.time()
@@ -276,9 +301,8 @@ def market_pulse():
 
     # SPY
     try:
-        spy = yf.Ticker("SPY")
-        spy_df = spy.history(period="2d", interval="1h")
-        if not spy_df.empty:
+        spy_df = get_history("SPY", period="5d", interval="1h")
+        if spy_df is not None and not spy_df.empty:
             price = float(spy_df["Close"].iloc[-1])
             day_high = float(spy_df["High"].iloc[-7:].max()) if len(spy_df) >= 7 else float(spy_df["High"].max())
             day_low = float(spy_df["Low"].iloc[-7:].min()) if len(spy_df) >= 7 else float(spy_df["Low"].min())
@@ -295,9 +319,8 @@ def market_pulse():
 
     # VIX
     try:
-        vix = yf.Ticker("^VIX")
-        vix_df = vix.history(period="5d")
-        if not vix_df.empty:
+        vix_df = get_history("^VIX", period="5d", interval="1d")
+        if vix_df is not None and not vix_df.empty:
             vix_val = float(vix_df["Close"].iloc[-1])
             vix_prev = float(vix_df["Close"].iloc[-2]) if len(vix_df) >= 2 else vix_val
             vix_change = ((vix_val - vix_prev) / vix_prev) * 100

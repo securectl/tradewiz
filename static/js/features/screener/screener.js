@@ -351,8 +351,13 @@ let _lastScreenerFromCache = false;
 
 function _screenerSortVal(c, field) {
     if (field === 'ticker') return (c.ticker || '').toUpperCase();
+    if (field === 'name') return (c.name || '').toUpperCase();
+    if (field === 'sector') return (c.sector || '').toUpperCase();
+    if (field === 'verdict') return _PAST_SCAN_VERDICT_RANK[_screenerVerdictTier(c.verdict)] || 0;
     if (field === 'price') return Number(c.price) || 0;
+    if (field === 'market_cap') return Number(c.market_cap) || 0;
     if (field === 'upside') return Number(c.upside_pct) || 0;
+    if (field === 'summary') return (c.summary || '').toUpperCase();
     return Number(c.confidence) || 0;  // default: confidence
 }
 
@@ -367,14 +372,36 @@ function _applyScreenerSort(arr) {
     });
 }
 
-function _screenerSortBar() {
-    const fields = [['confidence', 'Confidence'], ['price', 'Price'], ['upside', 'Upside'], ['ticker', 'Ticker']];
-    const btns = fields.map(([f, label]) => {
-        const active = _screenerSort.field === f;
+// Dashboard-style sortable results table (clickable column headers).
+function _screenerResultsTable(rows) {
+    const th = (field, label, align) => {
+        const active = _screenerSort.field === field;
         const arrow = active ? (_screenerSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-        return `<button class="screener-sort-btn${active ? ' active' : ''}" onclick="sortScreener('${f}')">${label}${arrow}</button>`;
+        const color = active ? '#d1d4dc' : '#787b86';
+        return `<th onclick="sortScreener('${field}')" title="Sort by ${label}" style="padding:8px 10px; text-align:${align}; color:${color}; font-size:11px; text-transform:uppercase; font-weight:700; cursor:pointer; user-select:none; white-space:nowrap;">${label}${arrow}</th>`;
+    };
+    const body = rows.map(r => {
+        const vc = _SCREENER_TIER_COLOR[_screenerVerdictTier(r.verdict)];
+        const cc = (r.confidence || 0) >= 75 ? '#26a69a' : (r.confidence || 0) >= 50 ? '#ff9800' : '#ef5350';
+        const mc = r.market_cap ? (r.market_cap >= 1e9 ? `$${(r.market_cap / 1e9).toFixed(1)}B` : r.market_cap >= 1e6 ? `$${(r.market_cap / 1e6).toFixed(0)}M` : '—') : '—';
+        const sm = (r.summary || '').replace(/"/g, '&quot;');
+        return `<tr style="border-bottom:1px solid #2a2e39; cursor:pointer;" onclick="analyzeFromScreener('${r.ticker}')" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background=''">
+            <td style="padding:8px 10px; color:${vc}; font-weight:700; font-size:13px; white-space:nowrap;">${r.ticker}</td>
+            <td style="padding:8px 10px; color:#a0a4b0; font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.name || '—'}</td>
+            <td style="padding:8px 10px; color:#787b86; font-size:11px; white-space:nowrap;">${r.sector || '—'}</td>
+            <td style="padding:8px 10px; white-space:nowrap;"><span style="background:${vc}18; color:${vc}; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; border:1px solid ${vc}33;">${r.verdict || '—'}</span></td>
+            <td style="padding:8px 10px; text-align:center; font-weight:700; color:${cc}; font-size:13px;">${Math.round(r.confidence || 0)}%</td>
+            <td style="padding:8px 10px; text-align:right; color:#d1d4dc; font-weight:600; font-size:13px;">$${(r.price || 0).toFixed(2)}</td>
+            <td style="padding:8px 10px; text-align:right; color:#787b86; font-size:11px; white-space:nowrap;">${mc}</td>
+            <td style="padding:8px 10px; color:#787b86; font-size:11px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sm}">${r.summary || '—'}</td>
+        </tr>`;
     }).join('');
-    return `<div class="screener-sort-bar"><span class="screener-sort-label">Sort by</span>${btns}</div>`;
+    return `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead><tr style="background:#2a2e39; border-bottom:2px solid #363a45;">
+            ${th('ticker', 'Ticker', 'left')}${th('name', 'Name', 'left')}${th('sector', 'Sector', 'left')}${th('verdict', 'Verdict', 'left')}${th('confidence', 'Conf', 'center')}${th('price', 'Price', 'right')}${th('market_cap', 'Mkt Cap', 'right')}${th('summary', 'Summary', 'left')}
+        </tr></thead>
+        <tbody>${body}</tbody>
+    </table>`;
 }
 
 function sortScreener(field) {
@@ -382,7 +409,8 @@ function sortScreener(field) {
         _screenerSort.dir = _screenerSort.dir === 'asc' ? 'desc' : 'asc';
     } else {
         _screenerSort.field = field;
-        _screenerSort.dir = field === 'ticker' ? 'asc' : 'desc';
+        // Text columns read best A→Z; metric columns best high→low.
+        _screenerSort.dir = (field === 'ticker' || field === 'name' || field === 'sector' || field === 'summary') ? 'asc' : 'desc';
     }
     if (_lastScreenerData) renderScreenerResults(_lastScreenerData, _lastScreenerFromCache);
 }
@@ -390,12 +418,9 @@ function sortScreener(field) {
 function renderScreenerResults(data, fromCache = false) {
     const results = document.getElementById('screener-results');
     const cat = data.category || screenerCategory;
-    // Persist for re-sorting, then apply the current column sort to each section.
+    // Persist for re-sorting on header clicks.
     _lastScreenerData = data;
     _lastScreenerFromCache = fromCache;
-    _applyScreenerSort(data.opportunities || []);
-    _applyScreenerSort(data.risky || []);
-    if (data.tracking) _applyScreenerSort(data.tracking);
 
     if (data.error && data.candidates_scanned === 0) {
         results.innerHTML = `
@@ -435,40 +460,19 @@ function renderScreenerResults(data, fromCache = false) {
         </div>
     `;
 
-    // Column sort control (shown when there are results to sort)
-    if (data.opportunities.length > 0 || data.risky.length > 0 || (data.tracking && data.tracking.length > 0)) {
-        html += _screenerSortBar();
-    }
+    // Single sortable table (Dashboard-style) across all vetted candidates.
+    // The verdict chip + row color convey the tier (opportunity / tracking / risky).
+    const allRows = [
+        ...(data.opportunities || []),
+        ...(cat === 'oversold' && data.tracking ? data.tracking : []),
+        ...(data.risky || []),
+    ];
+    _applyScreenerSort(allRows);
 
-    if (data.opportunities.length > 0) {
-        html += `<div class="screener-section-title" style="color:#26a69a;">${positiveLabel}</div>`;
-        if (cat === 'oversold') {
-            html += `<div style="color:#787b86; font-size:11px; margin:-8px 0 8px 4px;">Price consolidating after decline — potential bottom forming. Confirmed by 5-day history.</div>`;
-        }
-        html += '<div class="screener-grid">';
-        data.opportunities.forEach(c => { html += buildScreenerCard(c, 'opportunity', cat); });
-        html += '</div>';
-    }
-
-    // Oversold: show tracking section (stocks still falling — monitored but not recommended)
-    if (cat === 'oversold' && data.tracking && data.tracking.length > 0) {
-        html += `<div class="screener-section-title" style="color:#ff9800;">Tracking — Still Falling (${data.tracking.length})</div>`;
-        html += `<div style="color:#787b86; font-size:11px; margin:-8px 0 8px 4px;">Price still declining. Monitored daily — will be promoted to opportunities once consolidation is detected.</div>`;
-        html += '<div class="screener-grid">';
-        data.tracking.forEach(c => { html += buildScreenerCard(c, 'risky', cat); });
-        html += '</div>';
-    }
-
-    if (data.risky.length > 0) {
-        const cautiousSubtitle = cat === 'largecap' ? 'Steady — Moderate Growth' : cat === 'etf' ? 'Accumulate — Gradual Position' : cat === 'oversold' ? 'Watch — Needs More Data' : 'Risky — Proceed with Caution';
-        html += `<div class="screener-section-title" style="color:#ff9800;">${cautiousSubtitle}</div>`;
-        html += '<div class="screener-grid">';
-        data.risky.forEach(c => { html += buildScreenerCard(c, 'risky', cat); });
-        html += '</div>';
-    }
-
-    if (data.opportunities.length === 0 && data.risky.length === 0 && (!data.tracking || data.tracking.length === 0)) {
+    if (allRows.length === 0) {
         html += `<div style="text-align:center; padding:40px; color:#787b86;">No viable opportunities found. All candidates were filtered by AI vetting.</div>`;
+    } else {
+        html += `<div style="overflow-x:auto;">${_screenerResultsTable(allRows)}</div>`;
     }
 
     results.innerHTML = html;
@@ -1057,12 +1061,43 @@ function selectPastScanDay(date) {
     renderPastScanTable(date);
 }
 
+// ─── Past Scan table sorting (clickable column headers) ──────
+// Verdict ranks high→low so a descending sort surfaces the best setups first.
+const _PAST_SCAN_VERDICT_RANK = { strong: 5, momentum: 4, watch: 3, cautious: 2, avoid: 1 };
+let _pastScanSort = { field: 'confidence', dir: 'desc' };
+let _pastScanCurrentDate = null;
+
+function _pastScanSortVal(r, field) {
+    switch (field) {
+        case 'ticker': return (r.ticker || '').toUpperCase();
+        case 'name': return (r.name || '').toUpperCase();
+        case 'sector': return (r.sector || '').toUpperCase();
+        case 'verdict': return _PAST_SCAN_VERDICT_RANK[_screenerVerdictTier(r.verdict)] || 0;
+        case 'price': return Number(r.price) || 0;
+        case 'market_cap': return Number(r.market_cap) || 0;
+        case 'summary': return (r.summary || '').toUpperCase();
+        default: return Number(r.confidence) || 0;  // confidence
+    }
+}
+
+function sortPastScan(field) {
+    if (_pastScanSort.field === field) {
+        _pastScanSort.dir = _pastScanSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _pastScanSort.field = field;
+        // Text columns read best ascending (A→Z); metrics best descending.
+        _pastScanSort.dir = (field === 'ticker' || field === 'name' || field === 'sector' || field === 'summary') ? 'asc' : 'desc';
+    }
+    if (_pastScanCurrentDate) renderPastScanTable(_pastScanCurrentDate);
+}
+
 function renderPastScanTable(date) {
     const tableEl = document.getElementById('screener-history-table');
     if (!tableEl) return;
+    _pastScanCurrentDate = date;
 
-    const items = _pastScanData[date];
-    if (!items || items.length === 0) {
+    const items = (_pastScanData[date] || []).slice();
+    if (items.length === 0) {
         tableEl.innerHTML = '<div style="text-align:center; padding:20px; color:#787b86;">No results for this date.</div>';
         return;
     }
@@ -1070,6 +1105,23 @@ function renderPastScanTable(date) {
     const RISKY_VERDICTS = ['AVOID', 'RISKY', 'WATCH', 'FALLING KNIFE', 'SLOWING', 'BEARISH', 'NEUTRAL', 'STEADY'];
     const opps = items.filter(r => !RISKY_VERDICTS.includes(r.verdict));
     const catLabel = SCREENER_CATEGORY_CONFIG[screenerCategory]?.label || screenerCategory;
+
+    // Apply the active column sort
+    const sf = _pastScanSort.field, sdir = _pastScanSort.dir === 'asc' ? 1 : -1;
+    items.sort((a, b) => {
+        const va = _pastScanSortVal(a, sf), vb = _pastScanSortVal(b, sf);
+        if (va < vb) return -1 * sdir;
+        if (va > vb) return 1 * sdir;
+        return 0;
+    });
+
+    // Build a clickable, sort-aware header cell
+    const th = (field, label, align) => {
+        const active = _pastScanSort.field === field;
+        const arrow = active ? (_pastScanSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        const color = active ? '#d1d4dc' : '#787b86';
+        return `<th onclick="sortPastScan('${field}')" title="Sort by ${label}" style="padding:8px 10px; text-align:${align}; color:${color}; font-size:11px; text-transform:uppercase; font-weight:700; cursor:pointer; user-select:none; white-space:nowrap;">${label}${arrow}</th>`;
+    };
 
     const rows = items.map(r => {
         const verdictColor = _SCREENER_TIER_COLOR[_screenerVerdictTier(r.verdict)];
@@ -1097,14 +1149,14 @@ function renderPastScanTable(date) {
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
             <thead>
                 <tr style="background:#2a2e39; border-bottom:2px solid #363a45;">
-                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Ticker</th>
-                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Name</th>
-                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Sector</th>
-                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Verdict</th>
-                    <th style="padding:8px 10px; text-align:center; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Conf</th>
-                    <th style="padding:8px 10px; text-align:right; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Price</th>
-                    <th style="padding:8px 10px; text-align:right; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Mkt Cap</th>
-                    <th style="padding:8px 10px; text-align:left; color:#787b86; font-size:11px; text-transform:uppercase; font-weight:700;">Summary</th>
+                    ${th('ticker', 'Ticker', 'left')}
+                    ${th('name', 'Name', 'left')}
+                    ${th('sector', 'Sector', 'left')}
+                    ${th('verdict', 'Verdict', 'left')}
+                    ${th('confidence', 'Conf', 'center')}
+                    ${th('price', 'Price', 'right')}
+                    ${th('market_cap', 'Mkt Cap', 'right')}
+                    ${th('summary', 'Summary', 'left')}
                 </tr>
             </thead>
             <tbody>${rows}</tbody>

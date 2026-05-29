@@ -96,15 +96,16 @@ def _default_result(market_type: str, reasoning: str) -> dict:
 def _fetch_crypto_indicators() -> dict:
     """Fetch BTC + ETH price action and calculate key metrics."""
     try:
-        import yfinance as yf
+        from shared.yf_fetch import get_history
 
         indicators = {}
         for symbol, name in [("BTC-USD", "btc"), ("ETH-USD", "eth")]:
-            ticker = yf.Ticker(symbol)
-
-            # 5-day hourly data for short-term momentum
-            df_5d = ticker.history(period="5d", interval="1h")
-            if df_5d.empty or len(df_5d) < 10:
+            # 5-day hourly data for short-term momentum (shared cache)
+            try:
+                df_5d = get_history(symbol, period="5d", interval="1h")
+            except Exception:
+                df_5d = None
+            if df_5d is None or df_5d.empty or len(df_5d) < 10:
                 continue
 
             current = float(df_5d["Close"].iloc[-1])
@@ -148,13 +149,18 @@ def _fetch_crypto_indicators() -> dict:
 def _fetch_stock_indicators() -> dict:
     """Fetch SPY + QQQ + VIX price action and calculate key metrics."""
     try:
-        import yfinance as yf
+        # Shared cache (shared/yf_fetch): SPY/QQQ at 5d/1h and VIX at 5d/1d use
+        # the same cache keys as the header tiles, so both bots and the UI reuse
+        # one fetch per ticker instead of each hitting Yahoo independently.
+        from shared.yf_fetch import get_history
 
         indicators = {}
         for symbol, name in [("SPY", "spy"), ("QQQ", "qqq")]:
-            ticker = yf.Ticker(symbol)
-            df_5d = ticker.history(period="5d", interval="1h")
-            if df_5d.empty or len(df_5d) < 5:
+            try:
+                df_5d = get_history(symbol, period="5d", interval="1h")
+            except Exception:
+                df_5d = None
+            if df_5d is None or df_5d.empty or len(df_5d) < 5:
                 continue
 
             current = float(df_5d["Close"].iloc[-1])
@@ -170,9 +176,8 @@ def _fetch_stock_indicators() -> dict:
 
         # VIX
         try:
-            vix = yf.Ticker("^VIX")
-            vix_df = vix.history(period="5d")
-            if not vix_df.empty:
+            vix_df = get_history("^VIX", period="5d", interval="1d")
+            if vix_df is not None and not vix_df.empty:
                 indicators["vix"] = round(float(vix_df["Close"].iloc[-1]), 2)
                 vix_prev = float(vix_df["Close"].iloc[0])
                 indicators["vix_change_5d"] = round(((indicators["vix"] - vix_prev) / vix_prev) * 100, 2)

@@ -714,6 +714,123 @@ function filterFinSkills() {
     });
 }
 
+// ─── Market Pressure report (derived imbalance-style report) ──────
+let _imbLoaded = false;
+
+function _imbEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _imbDollars(v) {
+    v = Number(v) || 0;
+    if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
+    return '$' + v.toFixed(0);
+}
+
+function _imbShares(v) {
+    return (Number(v) || 0).toLocaleString('en-US');
+}
+
+async function loadImbalanceReport() {
+    const body = document.getElementById('imb-body');
+    const meta = document.getElementById('imb-meta');
+    const btn = document.getElementById('imb-run-btn');
+    const limit = (document.getElementById('imb-limit') || {}).value || '10';
+    if (body && !_imbLoaded) body.innerHTML = '<div class="sr-loading">Loading report&hellip;</div>';
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        const resp = await fetch(`/api/research/imbalances?limit=${encodeURIComponent(limit)}`);
+        const data = await resp.json();
+        _imbLoaded = true;
+        if (meta) meta.textContent = data.scan_date ? `as of ${data.scan_date}` : '';
+        renderImbalanceReport(data);
+    } catch (err) {
+        console.error('Imbalance report load failed', err);
+        if (body) body.innerHTML = '<div class="sr-error">Failed to load report. Try again shortly.</div>';
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+    }
+}
+
+function _imbTable(rows, side) {
+    const isBuy = side === 'buy';
+    const color = isBuy ? '#26a69a' : '#ef5350';
+    const arrow = isBuy ? '↑' : '↓';
+    const title = isBuy ? 'Top Buy Imbalances' : 'Top Sell Imbalances';
+    const headBg = isBuy ? 'rgba(38,166,154,0.10)' : 'rgba(239,83,80,0.10)';
+
+    if (!rows || !rows.length) {
+        return `<div class="imb-col">
+            <div class="imb-col-title" style="color:${color};">${arrow} ${title}</div>
+            <div style="padding:24px; text-align:center; color:#787b86; font-size:12px;">No ${isBuy ? 'buy' : 'sell'}-side signals in the latest scans.</div>
+        </div>`;
+    }
+
+    const body = rows.map(r => `
+        <tr style="border-bottom:1px solid #2a2e39;">
+            <td style="padding:7px 8px; font-weight:700; color:${color}; white-space:nowrap;">${yahooFinanceLink(r.symbol)}</td>
+            <td style="padding:7px 8px; color:#a0a4b0; font-size:11px;">${_imbEsc(r.sector)}</td>
+            <td style="padding:7px 8px; color:#787b86; font-size:11px;">${_imbEsc(r.industry)}</td>
+            <td style="padding:7px 8px; text-align:center; color:#787b86; font-size:11px;">${Math.round(r.confidence || 0)}%</td>
+            <td style="padding:7px 8px; text-align:right; color:#d1d4dc; font-weight:600; font-size:12px; white-space:nowrap;">${_imbDollars(r.dollar_volume)}</td>
+            <td style="padding:7px 8px; text-align:right; color:#787b86; font-size:11px; white-space:nowrap;">${_imbShares(r.volume)}</td>
+        </tr>`).join('');
+
+    return `<div class="imb-col">
+        <div class="imb-col-title" style="color:${color};">${arrow} ${title}</div>
+        <table class="imb-table">
+            <thead>
+                <tr style="background:${headBg};">
+                    <th style="text-align:left;">Symbol</th>
+                    <th style="text-align:left;">Sector</th>
+                    <th style="text-align:left;">Industry</th>
+                    <th style="text-align:center;">Conf</th>
+                    <th style="text-align:right;">$&nbsp;Vol</th>
+                    <th style="text-align:right;">#&nbsp;Vol</th>
+                </tr>
+            </thead>
+            <tbody>${body}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderImbalanceReport(data) {
+    const body = document.getElementById('imb-body');
+    if (!body) return;
+
+    if (data.error) {
+        body.innerHTML = `<div class="sr-error">${_imbEsc(data.error)}</div>`;
+        return;
+    }
+
+    const buys = data.buys || [];
+    const sells = data.sells || [];
+
+    if (!buys.length && !sells.length) {
+        const uni = data.total_universe || 0;
+        const lookback = data.lookback_days || 14;
+        const msg = uni === 0
+            ? `No screener data in the last ${lookback} days. Run a screener scan first — this report is built from vetted screener results.`
+            : `Scanned ${uni} symbols in the last ${lookback} days, but found no actionable buy/sell verdicts (or live volume was temporarily unavailable). Try <a href="#" onclick="loadImbalanceReport();return false;" style="color:#2962ff;">Refresh</a>, or run a fresh screener scan.`;
+        body.innerHTML = `<div style="padding:40px; text-align:center; color:#787b86; line-height:1.6;">${msg}</div>`;
+        return;
+    }
+
+    body.innerHTML = `
+        <div class="imb-banner">
+            Top Imbalances — ALL ${data.scan_date ? `· ${_imbEsc(data.scan_date)}` : ''}
+            <span style="color:#787b86; font-weight:400;"> · ${data.total_universe || 0} symbols scanned</span>
+        </div>
+        <div class="imb-grid">
+            ${_imbTable(buys, 'buy')}
+            ${_imbTable(sells, 'sell')}
+        </div>
+        <div class="imb-source">${_imbEsc(data.source || '')}</div>`;
+}
+
 function getFinSkillIcon(name, color) {
     const icons = {
         'chart-bar': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>`,
