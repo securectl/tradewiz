@@ -359,6 +359,65 @@ def _apply_alpaca_money_flow(candidates):
         logging.getLogger(__name__).debug(f"alpaca money-flow pass skipped: {e}")
 
 
+_options_cache = {}        # ticker -> (sentiment_dict|None, ts)
+_OPTIONS_TTL = 900         # 15 min
+
+
+def _options_sentiment(ticker):
+    """Cached premium-weighted options read for one ticker (sentiment, net
+    premium, P/C). None when unavailable. Caches misses too, so a throttled or
+    non-optionable name isn't retried every scan."""
+    import time
+    now = time.time()
+    c = _options_cache.get(ticker)
+    if c:
+        res_cached, ts = c
+        # Cache hits for the full TTL; cache misses only briefly so a transient
+        # Yahoo throttle during a scan recovers on the next scan instead of
+        # blanking options for 15 min.
+        ttl = _OPTIONS_TTL if res_cached else 120
+        if now - ts < ttl:
+            return res_cached
+    res = None
+    try:
+        from features.watchdog.options_flow import _fetch_options_flow
+        of = _fetch_options_flow(ticker)
+        if of and of.get("sentiment"):
+            res = {"sentiment": of.get("sentiment"), "net_premium": of.get("net_premium"),
+                   "pc_ratio": of.get("pc_ratio")}
+    except Exception:
+        res = None
+    _options_cache[ticker] = (res, now)
+    return res
+
+
+def _apply_options_overlay(rows, cap=20):
+    """Fuse options sentiment into the money-flow signal for the displayed rows
+    (options flow is a key money-in/out tell). Bounded by `cap` + cached to
+    limit options-chain pulls; skips crypto; degrades to equity flow on failure.
+    Upgrades mf_signal to the combined read (STRONG_IN/STRONG_OUT/TOP/DIVERGENCE)
+    and records options_sentiment/net_premium for display."""
+    try:
+        from analysis_engine import _combine_flow
+    except Exception:
+        return
+    attempts = 0
+    for r in rows:
+        if attempts >= cap:
+            break
+        tk = r.get("ticker") or ""
+        if not tk or tk.upper().endswith("-USD"):
+            continue
+        attempts += 1
+        opt = _options_sentiment(tk)
+        if not opt:
+            continue
+        sig, label, _note = _combine_flow(r.get("mf_signal"), opt)
+        r["mf_signal"], r["mf_label"] = sig, label
+        r["options_sentiment"] = opt.get("sentiment")
+        r["net_premium"] = opt.get("net_premium")
+
+
 def _mf_prompt_line(candidate):
     """One-line money-flow context appended to LLM vetting prompts so the model
     can weigh accumulation vs distribution / profit-taking. Empty when no
@@ -1758,6 +1817,8 @@ def _run_oversold_pipeline(limit: int = 20, sectors: list = None) -> dict:
     # Money flow from Alpaca (cached) — oversold_daily doesn't persist it, so
     # attach on read; feeds both this response and the screener_results store.
     _apply_alpaca_money_flow(all_results)
+    # Fuse options sentiment into the Flow signal for the displayed names.
+    _apply_options_overlay(all_results)
 
     # Ensure in screener_results for past scans UI
     _store_screener_results("oversold", all_results)
@@ -2019,6 +2080,10 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
             result["avoided"] += supervisor_vetoed
         except Exception:
             pass  # Graceful degradation
+
+    # Options-flow overlay on the displayed rows — fuse options sentiment into
+    # the Flow signal (bounded + cached). Equities only; crypto keeps equity flow.
+    _apply_options_overlay(result["opportunities"] + result["risky"])
 
     # ── Store results for history tracking (shared across all users) ──
     all_vetted = result["opportunities"] + result["risky"]

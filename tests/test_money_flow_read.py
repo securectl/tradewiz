@@ -79,3 +79,40 @@ class TestComputeMoneyFlowRead(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScreenerOptionsOverlay(unittest.TestCase):
+    def setUp(self):
+        import screener
+        screener._options_cache.clear()
+
+    def test_overlay_upgrades_signal_and_skips_crypto(self):
+        import screener
+        rows = [
+            {"ticker": "AAPL", "mf_signal": "IN"},
+            {"ticker": "BTC-USD", "mf_signal": "OUT"},   # crypto → skipped
+        ]
+        with mock.patch.object(screener, "_options_sentiment",
+                               return_value={"sentiment": "BULLISH", "net_premium": 1e6, "pc_ratio": 0.4}):
+            screener._apply_options_overlay(rows)
+        self.assertEqual(rows[0]["mf_signal"], "STRONG_IN")        # IN + bullish options
+        self.assertEqual(rows[0]["options_sentiment"], "BULLISH")
+        self.assertEqual(rows[1]["mf_signal"], "OUT")              # crypto untouched
+        self.assertNotIn("options_sentiment", rows[1])
+
+    def test_overlay_caps_attempts(self):
+        import screener
+        rows = [{"ticker": f"T{i}", "mf_signal": "NEUTRAL"} for i in range(30)]
+        calls = []
+        def fake(tk):
+            calls.append(tk); return None
+        with mock.patch.object(screener, "_options_sentiment", side_effect=fake):
+            screener._apply_options_overlay(rows, cap=5)
+        self.assertEqual(len(calls), 5)   # bounded
+
+    def test_options_sentiment_caches_misses(self):
+        import screener
+        with mock.patch("features.watchdog.options_flow._fetch_options_flow", return_value=None) as f:
+            screener._options_sentiment("XYZ")
+            screener._options_sentiment("XYZ")   # served from cache, no 2nd fetch
+        self.assertEqual(f.call_count, 1)

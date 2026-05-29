@@ -216,10 +216,14 @@ const _OPPS_NUM = new Set(['confidence', 'price']);
 /* Money-flow chip: are buyers accumulating or are sellers taking profit?
    Shared visual contract with the Screener (same colors/labels). */
 const _MF_META = {
+    STRONG_IN: { label: 'Strong In', color: '#26a69a' },
     IN: { label: 'Money In', color: '#26a69a' },
-    OUT: { label: 'Money Out', color: '#ef5350' },
-    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800' },
     NEUTRAL: { label: 'Neutral', color: '#787b86' },
+    DIVERGENCE: { label: 'Divergence', color: '#ff9800' },
+    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800' },
+    OUT: { label: 'Money Out', color: '#ef5350' },
+    TOP: { label: 'Topping', color: '#ef5350' },
+    STRONG_OUT: { label: 'Strong Out', color: '#ef5350' },
 };
 function _mfChip(signal, cmf, mfi) {
     const m = _MF_META[signal];
