@@ -35,8 +35,8 @@ initScreenerTimeframeButtons();
 // Focus ticker input on load
 document.getElementById('ticker-input').focus();
 
-// ─── Restore tab from URL hash ─────
+// ─── Restore tab from URL hash (default landing = Dashboard) ─────
 (function _restoreTab() {
     const hash = location.hash.replace('#', '');
-    if (hash && hash !== 'analyzer') switchTab(hash);
+    switchTab(hash || 'dashboard');
 })();

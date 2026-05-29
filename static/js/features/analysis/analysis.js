@@ -113,6 +113,7 @@ function renderAnalysis(data) {
     }
 
     // Right panel
+    renderRecommendation(data.recommendation);
     renderBreakoutStatus(data.breakout_status);
     renderPatternInfo(data.pattern);
     renderTrendlineTests(data.trendline_tests || []);
@@ -586,6 +587,34 @@ function drawPatternOverlay(data) {
 }
 
 // ─── Right Panel Renderers ───────────────────────────────────
+
+function renderRecommendation(rec) {
+    const panel = document.getElementById('right-panel');
+    if (!panel) return;
+    let box = document.getElementById('recommendation-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'recommendation-box';
+        box.className = 'panel-section';
+        panel.insertBefore(box, panel.firstChild);
+    }
+    if (!rec) { box.innerHTML = ''; return; }
+    const reasons = (rec.reasons || []).map(r => `<li>${r}</li>`).join('');
+    const sign = rec.score > 0 ? '+' : '';
+    box.innerHTML = `
+        <div class="panel-section-title">Recommendation</div>
+        <div class="reco-card reco-${(rec.action || 'HOLD').toLowerCase()}">
+            <div class="reco-top">
+                <span class="reco-action">${rec.label || rec.action}</span>
+                <span class="reco-conf">${rec.confidence || 0}% confidence</span>
+            </div>
+            <div class="reco-summary">${rec.summary || ''}</div>
+            <div class="reco-meter"><i style="width:${Math.min(100, Math.abs(rec.score || 0))}%"></i></div>
+            <div class="reco-score">Technical signal ${sign}${rec.score || 0} / 100</div>
+            ${reasons ? `<ul class="reco-reasons">${reasons}</ul>` : ''}
+            <div class="reco-disclaimer">Rule-based technical read — not financial advice.</div>
+        </div>`;
+}
 
 function renderBreakoutStatus(status) {
     const box = document.getElementById('breakout-status-box');

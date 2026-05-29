@@ -666,3 +666,279 @@ async function adminLlmClearAllOverrides() {
     }
 }
 
+
+// ─── Ollama Cloud Configuration (DB-backed, SaaS-friendly) ───────────────
+
+function _ollamaSrcLabel(src) {
+    if (src === 'db') return '· from DB';
+    if (src === 'env') return '· from env';
+    return '· default';
+}
+
+async function loadAdminOllamaConfig() {
+    try {
+        const resp = await fetch('/api/admin/ollama-config');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        document.getElementById('admin-ollama-url').value = data.ollama_url?.value || '';
+        document.getElementById('admin-ollama-url-source').textContent = _ollamaSrcLabel(data.ollama_url?.source);
+        document.getElementById('admin-ollama-model').value = data.ollama_model?.value || '';
+        document.getElementById('admin-ollama-model-source').textContent = _ollamaSrcLabel(data.ollama_model?.source);
+        // API key is masked — only show placeholder if set
+        const keyInput = document.getElementById('admin-ollama-api-key');
+        keyInput.placeholder = data.ollama_api_key?.is_set ? data.ollama_api_key.value_masked : '(not set)';
+        keyInput.value = '';
+        document.getElementById('admin-ollama-api-key-source').textContent = _ollamaSrcLabel(data.ollama_api_key?.source);
+    } catch (e) {
+        console.error('loadAdminOllamaConfig failed:', e);
+    }
+}
+
+async function adminOllamaSave() {
+    const url = document.getElementById('admin-ollama-url').value.trim();
+    const model = document.getElementById('admin-ollama-model').value.trim();
+    const apiKey = document.getElementById('admin-ollama-api-key').value;
+    const payload = { ollama_url: url, ollama_model: model };
+    // Only include key if the admin actually typed something (else preserve existing)
+    if (apiKey.length > 0) payload.ollama_api_key = apiKey;
+    const statusEl = document.getElementById('admin-ollama-status');
+    statusEl.textContent = 'Saving…';
+    try {
+        const resp = await fetch('/api/admin/ollama-config/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            statusEl.textContent = 'Saved';
+            statusEl.style.color = 'var(--accent-green)';
+            loadAdminOllamaConfig();
+        } else {
+            statusEl.textContent = data.error || 'Save failed';
+            statusEl.style.color = 'var(--accent-red)';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = 'var(--accent-red)';
+    }
+}
+
+async function adminOllamaTest() {
+    const statusEl = document.getElementById('admin-ollama-status');
+    statusEl.textContent = 'Testing…';
+    statusEl.style.color = 'var(--text-secondary)';
+    try {
+        const resp = await fetch('/api/admin/ollama-config/test', { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            statusEl.textContent = `OK (${data.latency_ms} ms)`;
+            statusEl.style.color = 'var(--accent-green)';
+        } else {
+            statusEl.textContent = `Fail: ${data.message}`;
+            statusEl.style.color = 'var(--accent-red)';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = 'var(--accent-red)';
+    }
+}
+
+async function adminOllamaClear() {
+    if (!confirm('Clear all DB-stored Ollama config? Settings will fall back to env vars / defaults.')) return;
+    try {
+        await fetch('/api/admin/ollama-config/clear', { method: 'POST' });
+        loadAdminOllamaConfig();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+
+// ─── Platform (Docker vs Cloud Run) ──────────────────────────────────────
+
+async function loadAdminPlatform() {
+    try {
+        const resp = await fetch('/api/admin/platform');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        document.getElementById('admin-platform-detected').textContent = data.detected;
+        document.getElementById('admin-platform-effective').textContent = data.effective;
+        document.getElementById('admin-platform-mode').value = data.override || 'auto';
+        const ksvc = document.getElementById('admin-platform-kservice');
+        if (data.k_service) {
+            ksvc.textContent = `(K_SERVICE=${data.k_service})`;
+        } else {
+            ksvc.textContent = '(K_SERVICE not set)';
+        }
+        const chip = document.getElementById('admin-ollama-platform-chip');
+        if (chip) {
+            chip.textContent = data.effective === 'cloud_run' ? 'CLOUD RUN' : 'DOCKER';
+            chip.style.background = data.effective === 'cloud_run' ? '#1a73e8' : 'var(--bg-input)';
+            chip.style.color = data.effective === 'cloud_run' ? '#fff' : 'var(--text-secondary)';
+        }
+    } catch (e) {
+        console.error('loadAdminPlatform failed:', e);
+    }
+}
+
+async function adminPlatformSave() {
+    const target = document.getElementById('admin-platform-mode').value;
+    const statusEl = document.getElementById('admin-platform-status');
+    statusEl.textContent = 'Saving…';
+    try {
+        const resp = await fetch('/api/admin/platform/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target }),
+        });
+        if (resp.ok) {
+            statusEl.textContent = 'Saved';
+            statusEl.style.color = 'var(--accent-green)';
+            loadAdminPlatform();
+        } else {
+            const d = await resp.json();
+            statusEl.textContent = d.error || 'Save failed';
+            statusEl.style.color = 'var(--accent-red)';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = 'var(--accent-red)';
+    }
+}
+
+
+// ─── Per-User Usage Report ───────────────────────────────────────────────
+
+let _usageState = {
+    range: '7d',
+    sort: 'calls_desc',
+    qDebounce: null,
+};
+
+function _rangeToDates(range) {
+    const now = new Date();
+    const to = now.toISOString().slice(0, 19);
+    let from;
+    if (range === '24h') from = new Date(now.getTime() - 24 * 3600e3);
+    else if (range === '7d') from = new Date(now.getTime() - 7 * 86400e3);
+    else if (range === '30d') from = new Date(now.getTime() - 30 * 86400e3);
+    else { // all
+        from = new Date('2020-01-01T00:00:00');
+    }
+    return { from: from.toISOString().slice(0, 19), to };
+}
+
+function setUsageRange(r) {
+    _usageState.range = r;
+    document.querySelectorAll('.usage-range-chip').forEach(b => {
+        b.classList.toggle('active', b.dataset.range === r);
+    });
+    loadAdminUsersUsage();
+}
+
+function setUsageSort(s) {
+    _usageState.sort = s;
+    loadAdminUsersUsage();
+}
+
+function onUsageSearchInput() {
+    if (_usageState.qDebounce) clearTimeout(_usageState.qDebounce);
+    _usageState.qDebounce = setTimeout(loadAdminUsersUsage, 300);
+}
+
+function _buildUsageQuery(extra) {
+    const { from, to } = _rangeToDates(_usageState.range);
+    const params = new URLSearchParams({ from, to, sort: _usageState.sort });
+    const tier = document.getElementById('usage-tier-filter')?.value || '';
+    const q = document.getElementById('usage-q')?.value || '';
+    const includeBot = document.getElementById('usage-include-bot')?.checked || false;
+    if (tier) params.set('tier', tier);
+    if (q) params.set('q', q);
+    if (includeBot) params.set('include_bot', '1');
+    if (extra) Object.entries(extra).forEach(([k, v]) => params.set(k, v));
+    return params;
+}
+
+async function loadAdminUsersUsage() {
+    const tbody = document.getElementById('admin-usage-body');
+    if (!tbody) return;
+    try {
+        const params = _buildUsageQuery();
+        const resp = await fetch('/api/admin/users/usage?' + params.toString());
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="11" style="padding:12px;color:var(--accent-red);">Failed to load</td></tr>';
+            return;
+        }
+        const data = await resp.json();
+        // Show/hide bot columns based on toggle
+        const includeBot = document.getElementById('usage-include-bot')?.checked;
+        document.querySelectorAll('.usage-bot-col').forEach(el => {
+            el.style.display = includeBot ? '' : 'none';
+        });
+        if (!data.rows.length) {
+            tbody.innerHTML = '<tr><td colspan="11" class="bot-empty">No usage in window</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.rows.map(r => {
+            const fmt = n => n == null ? '—' : Number(n).toLocaleString();
+            const last = r.last_seen ? r.last_seen.slice(0, 16).replace('T', ' ') : '—';
+            const tierBadge = r.is_admin ? 'admin' : r.tier;
+            const botCells = includeBot
+                ? `<td style="padding:6px;text-align:right;">${fmt(r.bot_trades_count)}</td>
+                   <td style="padding:6px;text-align:right;color:${r.bot_pnl_total >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};">${r.bot_pnl_total != null ? '$' + Number(r.bot_pnl_total).toFixed(2) : '—'}</td>`
+                : '';
+            return `
+                <tr style="border-bottom:1px solid var(--border-color);cursor:pointer;" onclick="openUsageDrilldown(${r.user_id})">
+                    <td style="padding:6px;">${r.email || '—'}</td>
+                    <td style="padding:6px;text-transform:capitalize;">${tierBadge}</td>
+                    <td style="padding:6px;text-align:right;font-weight:600;">${fmt(r.calls_window)}</td>
+                    <td style="padding:6px;text-align:right;">${fmt(r.calls_24h)}</td>
+                    <td style="padding:6px;text-align:right;">${fmt(r.calls_7d)}</td>
+                    <td style="padding:6px;text-align:right;">${fmt(r.calls_30d)}</td>
+                    <td style="padding:6px;text-align:right;color:var(--text-secondary);">${fmt(r.calls_total)}</td>
+                    <td style="padding:6px;font-family:monospace;font-size:10px;">${r.top_model || '—'}</td>
+                    <td style="padding:6px;color:var(--text-secondary);">${last}</td>
+                    ${botCells}
+                </tr>`;
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="11" style="padding:12px;color:var(--accent-red);">Error: ${e.message}</td></tr>`;
+    }
+}
+
+function adminUsageExportCSV() {
+    const params = _buildUsageQuery({ format: 'csv' });
+    window.location.href = '/api/admin/users/usage?' + params.toString();
+}
+
+async function openUsageDrilldown(userId) {
+    try {
+        const { from, to } = _rangeToDates(_usageState.range);
+        const resp = await fetch(`/api/admin/users/${userId}/usage?from=${from}&to=${to}`);
+        if (!resp.ok) {
+            alert('Failed to load detail');
+            return;
+        }
+        const data = await resp.json();
+        // Simple modal: render daily counts + by-model breakdown + recent events
+        const daily = data.daily.map(d => `${d.day}: ${d.cnt}`).join('\n');
+        const models = data.by_model.map(m => `  ${m.model}: ${m.cnt}`).join('\n');
+        const sources = data.by_source.map(s => `  ${s.source}: ${s.cnt}`).join('\n');
+        const recent = data.recent.slice(0, 20).map(e =>
+            `  ${(e.called_at || '').slice(0, 19)}  ${e.source || '—'}  ${e.model || '—'}`).join('\n');
+        const text =
+            `User: ${data.user.email} (${data.user.tier})\n` +
+            `Window: ${data.from.slice(0, 10)} → ${data.to.slice(0, 10)}\n\n` +
+            `Daily calls:\n${daily || '  (none)'}\n\n` +
+            `By model:\n${models || '  (none)'}\n\n` +
+            `By source:\n${sources || '  (none)'}\n\n` +
+            `Recent (last 20):\n${recent || '  (none)'}`;
+        // Render in a basic modal — reuse alert for now to keep this slice minimal.
+        // A richer chart can come next if you want a sparkline.
+        alert(text);
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+

@@ -138,3 +138,32 @@
         align-items: flex-start;
     }
 }
+
+/* ─── Aurora pass (May 2026) ───────────────────────────────── */
+.wd-panel {
+    background:
+        linear-gradient(180deg, var(--surface-glass), transparent 220px),
+        var(--bg-tertiary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.wd-panel-title {
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    opacity: 0.95;
+}
+.wd-regime-badge { text-shadow: 0 0 24px rgba(124,93,250,0.35); }
+.wd-table thead tr {
+    background: var(--accent-grad-soft);
+    border-bottom: 1px solid var(--border-color);
+}
+.wd-trade-form {
+    background: var(--surface-glass);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}

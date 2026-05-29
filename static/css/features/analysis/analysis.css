@@ -937,3 +937,68 @@
     text-align: center;
 }
 
+
+/* ─── Aurora pass (May 2026) ───────────────────────────────── */
+.right-panel {
+    background:
+        linear-gradient(180deg, rgba(124,93,250,0.05), transparent 240px),
+        var(--bg-secondary);
+}
+.chart-header {
+    background: var(--surface-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.panel-section-title {
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    opacity: 0.95;
+}
+.btn-ai-validate, .btn-prediction, .btn-earnings {
+    background: var(--accent-grad) !important;
+    border: none !important;
+    color: #fff !important;
+    box-shadow: 0 2px 10px rgba(124,93,250,0.25);
+    transition: transform var(--transition), box-shadow var(--transition);
+}
+.btn-ai-validate:hover, .btn-prediction:hover, .btn-earnings:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(124,93,250,0.4);
+}
+.ai-model-section {
+    background: var(--surface-glass);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+/* ─── Analyzer recommendation (Buy / Hold / Sell) ──────────── */
+.reco-card { border-radius: var(--radius-md); padding: 14px; border: 1px solid var(--border-color); background: var(--surface-glass); }
+.reco-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.reco-action { font-size: 22px; font-weight: 900; letter-spacing: .3px; }
+.reco-conf { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+.reco-summary { font-size: 12.5px; color: var(--text-primary); line-height: 1.5; }
+.reco-meter { height: 6px; border-radius: 4px; background: var(--bg-tertiary); overflow: hidden; margin: 10px 0 4px; }
+.reco-meter > i { display: block; height: 100%; }
+.reco-score { font-size: 10.5px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+.reco-reasons { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.reco-reasons li { font-size: 12px; color: var(--text-primary); padding-left: 16px; position: relative; }
+.reco-reasons li:before { content: "›"; position: absolute; left: 2px; color: var(--text-secondary); }
+.reco-disclaimer { font-size: 10px; color: var(--text-secondary); margin-top: 10px; opacity: .8; }
+/* action colors */
+.reco-buy   { border-left: 4px solid var(--accent-green); }
+.reco-buy .reco-action, .reco-accumulate .reco-action { color: var(--accent-green); }
+.reco-buy .reco-meter > i, .reco-accumulate .reco-meter > i { background: var(--accent-green); }
+.reco-accumulate { border-left: 4px solid var(--accent-green); }
+.reco-hold { border-left: 4px solid var(--accent-yellow); }
+.reco-hold .reco-action { color: var(--accent-yellow); }
+.reco-hold .reco-meter > i { background: var(--accent-yellow); }
+.reco-reduce { border-left: 4px solid var(--accent-orange); }
+.reco-reduce .reco-action { color: var(--accent-orange); }
+.reco-reduce .reco-meter > i { background: var(--accent-orange); }
+.reco-sell { border-left: 4px solid var(--accent-red); }
+.reco-sell .reco-action { color: var(--accent-red); }
+.reco-sell .reco-meter > i { background: var(--accent-red); }

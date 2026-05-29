@@ -961,3 +961,21 @@
     }
 }
 
+
+/* ─── Aurora pass (May 2026) — applies to crypto + stock bot ─── */
+.bot-panel, .bot-trades-panel {
+    background: linear-gradient(180deg, var(--surface-glass), transparent 220px), var(--bg-tertiary);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.bot-panel-title { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; opacity: .95; }
+.bot-stat { background: var(--surface-glass); border-radius: var(--radius-md); }
+.btn-bot-start, .btn-bot-save-config, .btn-bot-save-keys, .btn-bot-save-coins,
+.btn-bot-test-trade, .btn-bot-refresh-trending, .btn-bot-check-perms, .btn-bot-test-keys {
+    background: var(--accent-grad) !important; border: none !important; color: #fff !important;
+    box-shadow: 0 2px 10px rgba(124,93,250,0.25); transition: transform var(--transition), box-shadow var(--transition);
+}
+.btn-bot-start:hover, .btn-bot-save-config:hover, .btn-bot-save-keys:hover, .btn-bot-save-coins:hover,
+.btn-bot-test-trade:hover, .btn-bot-refresh-trending:hover, .btn-bot-check-perms:hover, .btn-bot-test-keys:hover {
+    transform: translateY(-1px); box-shadow: 0 6px 20px rgba(124,93,250,0.4);
+}

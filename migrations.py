@@ -633,6 +633,37 @@ def _run_postgres(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_screener_cat_date ON screener_results (category, scan_date DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_screener_ticker ON screener_results (ticker, scan_date DESC)")
 
+    # ── Sector Radar (Auto Research Analyst) ───────────────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sector_radar_reports (
+            id SERIAL PRIMARY KEY,
+            run_date TEXT NOT NULL,
+            mode TEXT,
+            regime TEXT,
+            top_sector TEXT,
+            conviction REAL,
+            report_json TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sector_radar_date ON sector_radar_reports (id DESC)")
+
+    # ── User feedback (NPS / CSAT / ease / open text) ──────────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_feedback (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            nps INTEGER,
+            csat INTEGER,
+            ease INTEGER,
+            valuable TEXT,
+            improve TEXT,
+            email TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_feedback_created ON user_feedback (created_at DESC)")
+
     # ── Institutional / Whale Tracker ──────────────────────────────
     cur.execute("""
         CREATE TABLE IF NOT EXISTS whale_entities (
@@ -1300,6 +1331,37 @@ def _run_sqlite(conn):
             UNIQUE(category, scan_date, ticker)
         )
     """)
+
+    # ── Sector Radar (Auto Research Analyst) ───────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sector_radar_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_date TEXT NOT NULL,
+            mode TEXT,
+            regime TEXT,
+            top_sector TEXT,
+            conviction REAL,
+            report_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sector_radar_date ON sector_radar_reports (id DESC)")
+
+    # ── User feedback (NPS / CSAT / ease / open text) ──────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            nps INTEGER,
+            csat INTEGER,
+            ease INTEGER,
+            valuable TEXT,
+            improve TEXT,
+            email TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_created ON user_feedback (created_at DESC)")
 
     # ── Institutional / Whale Tracker ──────────────────────────────
     conn.execute("""

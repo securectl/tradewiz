@@ -111,16 +111,22 @@
         padding: 6px 8px;
     }
 
-    /* Screener */
+    /* Screener — wrap categories onto multiple rows on mobile so all 10
+       are visible at once. The previous horizontal-scroll-only approach hid
+       half the categories behind an invisible scrollbar (scrollbar-width: none)
+       which users perceived as "view is cutting". */
     .screener-grid { grid-template-columns: 1fr !important; }
     .screener-category-bar {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        flex-wrap: nowrap;
-        scrollbar-width: none;
+        flex-wrap: wrap;
+        overflow-x: visible;
+        gap: 6px;
     }
-    .screener-category-bar::-webkit-scrollbar { display: none; }
-    .screener-category-btn { flex-shrink: 0; white-space: nowrap; }
+    .screener-category-btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        padding: 6px 12px;
+        font-size: 12px;
+    }
     .hot-sectors-grid { grid-template-columns: repeat(2, 1fr); }
     .qullamaggie-grid { grid-template-columns: repeat(2, 1fr); }
 

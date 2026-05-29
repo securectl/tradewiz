@@ -86,3 +86,11 @@
     .cong-stat { padding: 8px 10px; min-width: 60px; }
     .cong-stat-value { font-size: 18px; }
 }
+
+/* ─── Aurora pass (May 2026) ───────────────────────────────── */
+.cong-news-card, .cong-stat {
+    background: var(--surface-glass); border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.cong-news-card { transition: transform var(--transition), box-shadow var(--transition); }
+.cong-news-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(10,14,30,0.5); }

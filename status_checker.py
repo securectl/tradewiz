@@ -33,6 +33,10 @@ SERVICES = {
         "category": "AI Model",
         "model_id": "deepseek/deepseek-chat",
     },
+    "ollama_cloud": {
+        "name": "Ollama Cloud",
+        "category": "AI Model",
+    },
     "yahoo_finance": {
         "name": "Yahoo Finance",
         "category": "Data Feed",
@@ -87,6 +91,35 @@ def check_openrouter(service_key: str) -> dict:
                 "error_message": str(e)[:200]}
 
 
+def check_ollama_cloud() -> dict:
+    """Check Ollama Cloud by listing models with the configured API key."""
+    from shared.runtime_config import get_setting as _rt_get
+    start = time.time()
+    api_key = _rt_get("ollama_api_key", "", env_aliases=("OLLAMA_API_KEY",))
+    base_url = _rt_get("ollama_url", "https://ollama.com", env_aliases=("OLLAMA_URL",))
+    if not api_key:
+        return {"status": "degraded", "response_time_ms": 0,
+                "error_message": "OLLAMA_API_KEY not configured"}
+    try:
+        resp = requests.get(
+            f"{base_url}/api/tags",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        elapsed = int((time.time() - start) * 1000)
+        if resp.status_code == 200:
+            return {"status": "operational", "response_time_ms": elapsed}
+        if resp.status_code in (401, 403):
+            return {"status": "degraded", "response_time_ms": elapsed,
+                    "error_message": f"Auth failed (HTTP {resp.status_code})"}
+        return {"status": "outage", "response_time_ms": elapsed,
+                "error_message": f"HTTP {resp.status_code}: {resp.text[:160]}"}
+    except Exception as e:
+        elapsed = int((time.time() - start) * 1000)
+        return {"status": "outage", "response_time_ms": elapsed,
+                "error_message": str(e)[:200]}
+
+
 def check_yahoo_finance() -> dict:
     """Check Yahoo Finance by fetching AAPL price."""
     start = time.time()
@@ -135,6 +168,7 @@ def run_all_checks() -> dict:
     for key in ["openrouter_claude", "openrouter_gemini", "openrouter_deepseek"]:
         results[key] = check_openrouter(key)
 
+    results["ollama_cloud"] = check_ollama_cloud()
     results["yahoo_finance"] = check_yahoo_finance()
     results["flask_server"] = check_flask_server()
     results["database"] = check_database()

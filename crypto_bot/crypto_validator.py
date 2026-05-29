@@ -1,10 +1,10 @@
 """
 Multi-LLM Trade Validator — 2-layer consensus required before every trade.
 
-Gate 1: Ollama (local, fast, free) — first filter
+Gate 1: Ollama Cloud (https://ollama.com, paid subscription) — fast filter
 Gate 2: 2 OpenRouter models in parallel — sentiment + risk — both must agree
 
-Fallback: if Ollama is unreachable, OpenRouter-only (2/2 must agree)
+Fallback: if Ollama Cloud is unreachable / unconfigured, OpenRouter-only (2/2 must agree)
 """
 
 import os
@@ -18,9 +18,16 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Ollama config
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+# Ollama Cloud — resolved via runtime_config (DB > env > default) so admins
+# can edit URL / key / model from the UI without redeploying. The constants
+# below are kept for back-compat with modules that import them directly; the
+# actual call site (_call_ollama) re-reads through the resolver per-call.
+# See memory: project_ollama_cloud.md.
+from shared.runtime_config import get_setting as _rt_get
+
+OLLAMA_URL = _rt_get("ollama_url", "https://ollama.com", env_aliases=("OLLAMA_URL",))
+OLLAMA_API_KEY = _rt_get("ollama_api_key", "", env_aliases=("OLLAMA_API_KEY",))
+OLLAMA_MODEL = _rt_get("ollama_model", "gpt-oss:20b", env_aliases=("OLLAMA_MODEL",))
 
 # OpenRouter config (reuses existing pattern from ai_validator.py)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -36,13 +43,33 @@ HEADERS = {
 }
 
 
-def _call_ollama(prompt: str, timeout: int = 30) -> dict:
-    """Call local Ollama model for fast validation."""
+def _call_ollama(prompt: str, timeout: int = 30, model: str = None) -> dict:
+    """Call Ollama Cloud for fast validation (gate-1 / limiter filter).
+
+    Re-resolves URL/key/model via runtime_config on every call so admin UI
+    edits take effect immediately. Accepts model names with or without the
+    `ollama/` routing prefix. See memory: project_ollama_cloud.md.
+    """
+    url = _rt_get("ollama_url", "https://ollama.com", env_aliases=("OLLAMA_URL",))
+    api_key = _rt_get("ollama_api_key", "", env_aliases=("OLLAMA_API_KEY",))
+    if not api_key:
+        # Caller (consensus voter) treats this as an unavailable voter and
+        # falls through to OpenRouter.
+        return {"error": "ollama_cloud_unconfigured", "execute": None}
+
+    chosen = model or _rt_get("ollama_model", "gpt-oss:20b", env_aliases=("OLLAMA_MODEL",))
+    if chosen.startswith("ollama/"):
+        chosen = chosen[len("ollama/"):]
+
     try:
         resp = requests.post(
-            f"{OLLAMA_URL}/api/generate",
+            f"{url}/api/generate",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
             json={
-                "model": OLLAMA_MODEL,
+                "model": chosen,
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
@@ -54,10 +81,10 @@ def _call_ollama(prompt: str, timeout: int = 30) -> dict:
         text = resp.json().get("response", "")
         return _parse_json(text)
     except requests.exceptions.ConnectionError:
-        logger.warning("Ollama not reachable — will fall back to OpenRouter-only")
+        logger.warning("Ollama Cloud not reachable — will fall back to OpenRouter-only")
         return {"error": "ollama_unreachable", "execute": None}
     except Exception as e:
-        logger.warning(f"Ollama call failed: {e}")
+        logger.warning(f"Ollama Cloud call failed: {e}")
         return {"error": str(e), "execute": None}
 
 

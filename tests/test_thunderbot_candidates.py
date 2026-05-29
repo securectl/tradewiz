@@ -163,8 +163,10 @@ class TestCandidateScorer(unittest.TestCase):
     def test_rejects_missing_flag(self):
         from features.watchdog.engine import _score_thunderbot_candidate
         df_d = self._daily(rsi_target=55, rel_vol=2.0)
-        # 5m frame with no pole
-        df_5 = _make_5m_bull_flag_df(pole_pct=0.3)
+        # 5m frame with a too-weak pole. Wide flag_range keeps the intraday
+        # range above the 1.0% movement gate so the candidate reaches (and is
+        # rejected by) the bull-flag gate rather than the earlier range gate.
+        df_5 = _make_5m_bull_flag_df(pole_pct=0.3, flag_range_pct=2.0)
         result = _score_thunderbot_candidate("TEST", df_5, df_d, now_et=self._mid_day_et())
         self.assertTrue(result.get("reject"))
         self.assertEqual(result["stage"], "bull_flag")

@@ -67,7 +67,7 @@ Historical Performance (last 7 days):
 
 
 def _validate_stock_ollama(trade_context: str) -> dict:
-    """Gate 1: Local Ollama validation for stocks."""
+    """Gate 1: Ollama Cloud validation for stocks."""
     prompt = f"""You are a stock trading analyst evaluating swing trade signals for a paper trading bot. Evaluate this trade signal and decide if it should execute.
 
 {trade_context}
