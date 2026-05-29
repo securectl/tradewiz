@@ -1690,6 +1690,70 @@ def generate_recommendation(indicators: dict, breakout_status: dict, current_pri
     }
 
 
+def _combine_flow(eq_signal, options):
+    """Fuse the equity money-flow signal with options sentiment into one
+    money-in/out read. Options flow is a leading tell, so when it agrees it
+    strengthens the call and when it conflicts it's flagged as a divergence."""
+    eq_label = {
+        "IN": "Money In", "OUT": "Money Out", "PROFIT_TAKING": "Profit-Taking",
+        "NEUTRAL": "Neutral", None: "—",
+    }
+    if not options or not options.get("sentiment"):
+        return eq_signal, eq_label.get(eq_signal, "—"), "Equity flow only (no options data)."
+
+    sent = (options.get("sentiment") or "").upper()
+    opt_bull, opt_bear = sent == "BULLISH", sent == "BEARISH"
+    opt_txt = f"options {sent.lower()} (P/C {options.get('pc_ratio')}, net premium {options.get('net_premium')})"
+
+    if eq_signal == "IN" and opt_bull:
+        return "STRONG_IN", "Strong Money In", f"Accumulation confirmed by {opt_txt}."
+    if eq_signal in ("OUT", "PROFIT_TAKING") and opt_bear:
+        if eq_signal == "PROFIT_TAKING":
+            return "TOP", "Topping / Profit-Taking", f"Near highs, equity distributing, and {opt_txt} — likely top."
+        return "STRONG_OUT", "Strong Money Out", f"Distribution confirmed by {opt_txt}."
+    if eq_signal == "IN" and opt_bear:
+        return "DIVERGENCE", "Mixed — equity in, options out", f"Equity accumulation but {opt_txt}."
+    if eq_signal in ("OUT", "PROFIT_TAKING") and opt_bull:
+        return "DIVERGENCE", "Mixed — equity out, options in", f"Equity weak but {opt_txt}."
+    if eq_signal in (None, "NEUTRAL") and opt_bull:
+        return "IN", "Money In (options-led)", f"Flat equity flow but {opt_txt}."
+    if eq_signal in (None, "NEUTRAL") and opt_bear:
+        return "OUT", "Money Out (options-led)", f"Flat equity flow but {opt_txt}."
+    return eq_signal or "NEUTRAL", eq_label.get(eq_signal, "Neutral"), f"Equity {eq_label.get(eq_signal,'neutral').lower()}, {opt_txt}."
+
+
+def compute_money_flow_read(ticker, df, is_crypto=False):
+    """Combined money-in/out read for a single ticker: equity flow (Chaikin
+    Money Flow + Money Flow Index) fused with premium-weighted options flow.
+    Options is a key leading indicator of money moving in/out, so it's folded in
+    here. Degrades to equity-only when options data is unavailable (crypto,
+    non-optionable names, or a throttled chain). Never raises."""
+    try:
+        from shared.money_flow import compute_money_flow
+        equity = compute_money_flow(df)
+    except Exception:
+        equity = {"cmf": None, "mfi": None, "mf_signal": None, "mf_label": "—"}
+
+    options = None
+    if not is_crypto:
+        try:
+            from features.watchdog.options_flow import _fetch_options_flow
+            of = _fetch_options_flow(ticker)
+            if of:
+                options = {
+                    "sentiment": of.get("sentiment"),
+                    "net_premium": of.get("net_premium"),
+                    "pc_ratio": of.get("pc_ratio"),
+                    "call_value": of.get("call_value"),
+                    "put_value": of.get("put_value"),
+                }
+        except Exception:
+            options = None
+
+    signal, label, note = _combine_flow(equity.get("mf_signal"), options)
+    return {"equity": equity, "options": options, "signal": signal, "label": label, "note": note}
+
+
 def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> dict:
     """Full analysis pipeline for a ticker."""
     # Fetch data
@@ -1712,6 +1776,9 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
 
     # Calculate indicators
     indicators = calculate_indicators(df)
+
+    # Money-in/out read: equity flow (CMF/MFI) fused with options flow
+    money_flow = compute_money_flow_read(ticker, df, is_crypto)
 
     # Trendline tests (significant candles testing support/resistance)
     trendline_tests = detect_trendline_tests(df, pattern)
@@ -1841,6 +1908,7 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
         "volumes": volumes,
         "pattern": pattern,
         "indicators": indicators,
+        "money_flow": money_flow,
         "breakout_status": breakout_status,
         "trade_plan": trade_plan,
         "recommendation": generate_recommendation(indicators, breakout_status, current_price),

@@ -114,6 +114,7 @@ function renderAnalysis(data) {
 
     // Right panel
     renderRecommendation(data.recommendation);
+    renderMoneyFlow(data.money_flow);
     renderBreakoutStatus(data.breakout_status);
     renderPatternInfo(data.pattern);
     renderTrendlineTests(data.trendline_tests || []);
@@ -613,6 +614,49 @@ function renderRecommendation(rec) {
             <div class="reco-score">Technical signal ${sign}${rec.score || 0} / 100</div>
             ${reasons ? `<ul class="reco-reasons">${reasons}</ul>` : ''}
             <div class="reco-disclaimer">Rule-based technical read — not financial advice.</div>
+        </div>`;
+}
+
+// Money-in/out read: equity flow (CMF/MFI) fused with options premium flow.
+function renderMoneyFlow(mf) {
+    const panel = document.getElementById('right-panel');
+    if (!panel) return;
+    let box = document.getElementById('money-flow-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'money-flow-box';
+        box.className = 'panel-section';
+        const after = document.getElementById('recommendation-box');
+        if (after && after.nextSibling) panel.insertBefore(box, after.nextSibling);
+        else panel.appendChild(box);
+    }
+    if (!mf || !mf.label) { box.innerHTML = ''; return; }
+    const colorFor = (sig) => ({
+        STRONG_IN: '#26a69a', IN: '#26a69a',
+        STRONG_OUT: '#ef5350', OUT: '#ef5350', TOP: '#ef5350',
+        PROFIT_TAKING: '#ff9800', DIVERGENCE: '#ff9800',
+        NEUTRAL: '#787b86',
+    }[sig] || '#787b86');
+    const c = colorFor(mf.signal);
+    const eq = mf.equity || {};
+    const opt = mf.options;
+    const optHtml = opt
+        ? `<div class="mf-row"><span>Options</span><b style="color:${(opt.sentiment === 'BULLISH') ? '#26a69a' : (opt.sentiment === 'BEARISH') ? '#ef5350' : '#787b86'}">${opt.sentiment || '—'}</b></div>
+           <div class="mf-row"><span>Net premium</span><b>${opt.net_premium != null ? '$' + Number(opt.net_premium).toLocaleString() : '—'}</b></div>
+           <div class="mf-row"><span>Put/Call</span><b>${opt.pc_ratio != null ? opt.pc_ratio : '—'}</b></div>`
+        : `<div class="mf-row" style="color:#787b86;"><span>Options</span><b>no data</b></div>`;
+    box.innerHTML = `
+        <div class="panel-section-title">Money Flow</div>
+        <div class="reco-card" style="border-left:3px solid ${c};">
+            <div class="reco-top">
+                <span class="reco-action" style="color:${c};">${mf.label}</span>
+            </div>
+            <div class="reco-summary">${mf.note || ''}</div>
+            <div class="mf-grid" style="margin-top:8px; font-size:12px;">
+                <div class="mf-row"><span>Equity (CMF / MFI)</span><b>${eq.cmf != null ? eq.cmf : '—'} / ${eq.mfi != null ? Math.round(eq.mfi) : '—'}</b></div>
+                ${optHtml}
+            </div>
+            <div class="reco-disclaimer">Accumulation/distribution read — not financial advice.</div>
         </div>`;
 }
 

@@ -183,6 +183,17 @@ Change: {analysis['change']} ({analysis['change_pct']}%)""")
   ATR(14): {indicators.get('atr_14', 'N/A')} | ADR%: {indicators.get('adr_pct', 'N/A')}%
   Volume: {indicators.get('volume', 'N/A')} | Vol MA(10): {indicators.get('vol_ma_10', 'N/A')} | Rel Vol: {indicators.get('relative_volume', 'N/A')}x""")
 
+    # Money flow (equity CMF/MFI + options premium) — a key money-in/out tell.
+    mf = analysis.get("money_flow")
+    if mf and mf.get("label"):
+        eq = mf.get("equity") or {}
+        opt = mf.get("options")
+        opt_txt = (f" | Options: {opt.get('sentiment')} (P/C {opt.get('pc_ratio')}, "
+                   f"net premium ${opt.get('net_premium')})") if opt else " | Options: n/a"
+        parts.append(
+            f"MONEY FLOW: {mf.get('label')} — {mf.get('note')}\n"
+            f"  Equity: CMF {eq.get('cmf')} | MFI {eq.get('mfi')} ({eq.get('mf_label')}){opt_txt}")
+
     # Recent price action (only for pattern context)
     if context in ("pattern", "full"):
         ohlcv = analysis.get("ohlcv", [])

@@ -1362,6 +1362,11 @@ html[data-theme="terminal"] .theme-switch-btn.active { color: #00231d; }
 .dash-opp-sec { color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-opp-verdict { color: var(--text-primary); font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-opp-flow { font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 6px; border: 1px solid; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Analyzer money-flow tile rows */
+.mf-grid { display: flex; flex-direction: column; gap: 4px; }
+.mf-row { display: flex; justify-content: space-between; gap: 12px; }
+.mf-row span { color: var(--text-secondary); }
+.mf-row b { color: var(--text-primary); }
 .dash-opp-price { color: var(--text-bright); font-weight: 700; text-align: right; }
 .dash-opp-conf { color: var(--accent-green); font-weight: 800; text-align: right; }
 @media (max-width: 720px) {
