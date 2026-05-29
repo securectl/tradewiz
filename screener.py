@@ -655,103 +655,131 @@ def scan_top_movers(direction: str = "gainers", period: str = "1d",
         period: '1d', '1w', or '3mo'
         limit: max results to return (enriched with fundamentals)
     """
-    if not HAS_YFINANCE:
-        return []
-
-    period_map = {"1d": "2d", "1w": "5d", "3mo": "3mo"}
-    yf_period = period_map.get(period, "2d")
+    # Sessions of lookback for the pct-change window per timeframe.
+    lookback_map = {"1d": 1, "1w": 5, "3mo": 63}
+    lookback = lookback_map.get(period, 1)
 
     universe = _get_full_universe()
-    movers = []
-    batch_size = 100
 
-    try:
-        for i in range(0, len(universe), batch_size):
-            batch = universe[i:i + batch_size]
-            try:
-                tickers_str = " ".join(batch)
-                data = yf.download(tickers_str, period=yf_period, progress=False, threads=True)
-                if data.empty:
-                    continue
-
-                close_data = data.get("Close")
-                if close_data is None:
-                    continue
-                single = len(batch) == 1
-
-                if single:
-                    col = close_data.dropna()
-                    if len(col) >= 2:
-                        first_price = float(col.iloc[0])
-                        last_price = float(col.iloc[-1])
-                        if first_price > 0:
-                            pct_change = ((last_price - first_price) / first_price) * 100
-                            mf = _money_flow_from_download(data, batch[0], single)
-                            movers.append({
-                                "ticker": batch[0], "price": round(last_price, 2),
-                                "pct_change": round(pct_change, 2), **_money_flow_fields(mf),
-                            })
-                else:
-                    for ticker in batch:
-                        try:
-                            if ticker not in close_data.columns:
-                                continue
-                            col = close_data[ticker].dropna()
-                            if len(col) < 2:
-                                continue
-                            first_price = float(col.iloc[0])
-                            last_price = float(col.iloc[-1])
-                            if first_price > 0:
-                                pct_change = ((last_price - first_price) / first_price) * 100
-                                mf = _money_flow_from_download(data, ticker, single)
-                                movers.append({
-                                    "ticker": ticker, "price": round(last_price, 2),
-                                    "pct_change": round(pct_change, 2), **_money_flow_fields(mf),
-                                })
-                        except (KeyError, IndexError, TypeError):
-                            continue
-            except Exception:
-                continue
-    except Exception:
-        pass
+    # Discovery: prefer Alpaca (reliable, not IP-throttled like Yahoo's bulk
+    # download); fall back to yfinance when Alpaca is unconfigured.
+    movers = _alpaca_movers(universe, lookback)
+    if not movers:
+        if not HAS_YFINANCE:
+            return []
+        movers = _yf_movers(universe, period)
 
     # Sort: descending for gainers, ascending for losers
-    if direction == "gainers":
-        movers.sort(key=lambda x: x["pct_change"], reverse=True)
-    else:
-        movers.sort(key=lambda x: x["pct_change"])
+    movers.sort(key=lambda x: x["pct_change"], reverse=(direction == "gainers"))
 
     # Take top N*3 for enrichment, then trim to limit
     top_candidates = movers[:limit * 3]
 
-    # Enrich with fundamentals, filter out micro-caps < $100M
+    # Enrich with fundamentals. Tolerant of a throttled/empty yfinance .info:
+    # the universe is pre-curated, so when fundamentals are unavailable we keep
+    # the candidate (unknown market cap) rather than dropping the whole scan.
     enriched = []
     for c in top_candidates:
+        info = {}
         try:
-            t = yf.Ticker(c["ticker"])
-            info = t.info or {}
-            mkt_cap = info.get("marketCap", 0) or 0
-            if mkt_cap < 100_000_000:
-                continue
-            enriched.append({
-                **_money_flow_fields(c),
-                "ticker": c["ticker"],
-                "price": c["price"],
-                "pct_change": c["pct_change"],
-                "market_cap": mkt_cap,
-                "name": info.get("shortName", info.get("longName", c["ticker"])),
-                "sector": info.get("sector", "Unknown"),
-                "industry": info.get("industry", "Unknown"),
-                "volume": info.get("averageVolume", 0),
-                "forward_pe": info.get("forwardPE"),
-                "revenue_growth": info.get("revenueGrowth"),
-                "profit_margins": info.get("profitMargins"),
-            })
-            if len(enriched) >= limit:
-                break
+            info = yf.Ticker(c["ticker"]).info or {}
         except Exception:
+            info = {}
+        mkt_cap = info.get("marketCap", 0) or 0
+        if mkt_cap and mkt_cap < 100_000_000:   # known micro-cap → skip; unknown (0) → keep
             continue
+        enriched.append({
+            **_money_flow_fields(c),
+            "ticker": c["ticker"],
+            "price": c["price"],
+            "pct_change": c["pct_change"],
+            "market_cap": mkt_cap,
+            "name": info.get("shortName", info.get("longName", c["ticker"])),
+            "sector": info.get("sector", "Unknown"),
+            "industry": info.get("industry", "Unknown"),
+            "volume": info.get("averageVolume", 0),
+            "forward_pe": info.get("forwardPE"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "profit_margins": info.get("profitMargins"),
+        })
+        if len(enriched) >= limit:
+            break
     return enriched
+
+
+def _alpaca_movers(universe, lookback):
+    """Discover movers via Alpaca daily bars (one batched, cached fetch for the
+    whole universe). Returns [{ticker, price, pct_change, cmf, mfi, mf_signal}].
+    Empty list when Alpaca is unconfigured so the caller falls back to yfinance."""
+    try:
+        from shared.alpaca_data import is_configured, get_daily_bars
+        from shared.money_flow import compute_money_flow
+        if not is_configured():
+            return []
+        bars = get_daily_bars(universe, days=max(lookback + 5, 70))
+        movers = []
+        for ticker, df in bars.items():
+            try:
+                closes = df["Close"]
+                if len(closes) < 2:
+                    continue
+                last = float(closes.iloc[-1])
+                ref = float(closes.iloc[-(lookback + 1)]) if len(closes) > lookback else float(closes.iloc[0])
+                if ref <= 0:
+                    continue
+                pct = (last - ref) / ref * 100
+                mf = compute_money_flow(df)
+                movers.append({
+                    "ticker": ticker, "price": round(last, 2),
+                    "pct_change": round(pct, 2), **_money_flow_fields(mf),
+                })
+            except Exception:
+                continue
+        return movers
+    except Exception:
+        return []
+
+
+def _yf_movers(universe, period):
+    """Fallback movers discovery via yfinance bulk download (subject to Yahoo
+    rate limiting). Same shape as _alpaca_movers."""
+    period_map = {"1d": "2d", "1w": "5d", "3mo": "3mo"}
+    yf_period = period_map.get(period, "2d")
+    movers = []
+    batch_size = 100
+    try:
+        for i in range(0, len(universe), batch_size):
+            batch = universe[i:i + batch_size]
+            try:
+                data = yf.download(" ".join(batch), period=yf_period, progress=False, threads=True)
+                if data.empty:
+                    continue
+                close_data = data.get("Close")
+                if close_data is None:
+                    continue
+                single = len(batch) == 1
+                cols = [batch[0]] if single else [t for t in batch if t in close_data.columns]
+                for ticker in cols:
+                    try:
+                        col = (close_data if single else close_data[ticker]).dropna()
+                        if len(col) < 2:
+                            continue
+                        first_price, last_price = float(col.iloc[0]), float(col.iloc[-1])
+                        if first_price <= 0:
+                            continue
+                        mf = _money_flow_from_download(data, ticker, single)
+                        movers.append({
+                            "ticker": ticker, "price": round(last_price, 2),
+                            "pct_change": round(((last_price - first_price) / first_price) * 100, 2),
+                            **_money_flow_fields(mf),
+                        })
+                    except (KeyError, IndexError, TypeError):
+                        continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return movers
 
 
 def scan_oversold_candidates(limit: int = 30) -> list:

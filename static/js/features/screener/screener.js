@@ -346,20 +346,20 @@ async function runScreener(force = false) {
 
 // ─── Money-flow chip (shared visual contract with the Dashboard) ──
 // Is money flowing in (accumulation) or out (distribution / profit-taking)?
-const _MF_META = {
+const _SCR_MF_META = {
     IN: { label: 'Money In', color: '#26a69a', rank: 3 },
     OUT: { label: 'Money Out', color: '#ef5350', rank: 0 },
     PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800', rank: 1 },
     NEUTRAL: { label: 'Neutral', color: '#787b86', rank: 2 },
 };
 function _mfChipHtml(sig, cmf, mfi) {
-    const m = _MF_META[sig];
+    const m = _SCR_MF_META[sig];
     if (!m) return '<span style="color:#555;">—</span>';
     const tip = [cmf != null ? 'CMF ' + cmf : null, mfi != null ? 'MFI ' + Math.round(mfi) : null]
         .filter(Boolean).join(' · ');
     return `<span title="${tip}" style="background:${m.color}18; color:${m.color}; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:700; border:1px solid ${m.color}33; white-space:nowrap;">${m.label}</span>`;
 }
-function _mfRank(sig) { return _MF_META[sig] ? _MF_META[sig].rank : -1; }
+function _mfRank(sig) { return _SCR_MF_META[sig] ? _SCR_MF_META[sig].rank : -1; }
 
 // ─── Column sorting ───────────────────────────────────────
 let _screenerSort = { field: 'confidence', dir: 'desc' };
@@ -495,7 +495,7 @@ function renderScreenerResults(data, fromCache = false) {
 
     if (allRows.length === 0) {
         const why = _screenerMfFilter !== 'all'
-            ? `No candidates with “${_MF_META[_screenerMfFilter] ? _MF_META[_screenerMfFilter].label : _screenerMfFilter}” money flow. <a href="#" onclick="setScreenerMfFilter('all'); return false;" style="color:#2962ff;">Clear filter</a>.`
+            ? `No candidates with “${_SCR_MF_META[_screenerMfFilter] ? _SCR_MF_META[_screenerMfFilter].label : _screenerMfFilter}” money flow. <a href="#" onclick="setScreenerMfFilter('all'); return false;" style="color:#2962ff;">Clear filter</a>.`
             : 'No viable opportunities found. All candidates were filtered by AI vetting.';
         html += `<div style="text-align:center; padding:40px; color:#787b86;">${why}</div>`;
     } else {
