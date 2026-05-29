@@ -4,6 +4,7 @@ Powers the showcase-style home page. Sector Radar hero + leaderboard are
 fetched separately by the frontend from /api/sector-radar/latest.
 """
 
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -258,7 +259,7 @@ def api_opportunities():
             continue
         try:
             rows = query(
-                f"SELECT ticker, verdict, confidence, sector, price, summary "
+                f"SELECT ticker, verdict, confidence, sector, price, summary, data_json "
                 f"FROM screener_results WHERE category={P} AND scan_date={P}", (cat, md)
             ) or []
         except Exception:
@@ -270,6 +271,16 @@ def api_opportunities():
             existing = opps.get(r["ticker"])
             if existing and existing["confidence"] >= conf:
                 continue
+            # Money flow (cmf/mfi/mf_signal) is stored in the data_json blob.
+            mf_signal = cmf = mfi = None
+            if r.get("data_json"):
+                try:
+                    extra = json.loads(r["data_json"])
+                    mf_signal = extra.get("mf_signal")
+                    cmf = extra.get("cmf")
+                    mfi = extra.get("mfi")
+                except Exception:
+                    pass
             opps[r["ticker"]] = {
                 "ticker": r["ticker"], "type": _CAT_TYPE[cat],
                 "verdict": r.get("verdict"), "confidence": round(conf, 0),
@@ -277,6 +288,7 @@ def api_opportunities():
                 "price": round(float(r["price"]), 2) if r.get("price") else None,
                 "summary": (r.get("summary") or "")[:150],
                 "scan_date": str(md)[:10],
+                "mf_signal": mf_signal, "cmf": cmf, "mfi": mfi,
             }
     out = sorted(opps.values(), key=lambda x: -x["confidence"])[:15]
     return jsonify({"opportunities": out})

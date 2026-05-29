@@ -306,6 +306,60 @@ def _get_full_universe() -> list:
 
 # ─── Scan Functions ────────────────────────────────────────────
 
+def _money_flow_from_download(data, ticker, single):
+    """Compute money flow (CMF/MFI signal) for one ticker from a batched
+    yf.download frame. `single` is True when the batch held one ticker (columns
+    are flat Series rather than per-ticker DataFrames). Never raises — returns a
+    neutral/placeholder dict when OHLCV is missing or history is too short."""
+    from shared.money_flow import compute_money_flow
+    import pandas as pd
+
+    none_mf = {"cmf": None, "mfi": None, "mf_signal": None, "mf_label": "—"}
+    try:
+        cols = {}
+        for field in ("High", "Low", "Close", "Volume"):
+            block = data.get(field)
+            if block is None:
+                return none_mf
+            if single:
+                cols[field] = block
+            elif ticker in block.columns:
+                cols[field] = block[ticker]
+            else:
+                return none_mf
+        df = pd.DataFrame(cols).dropna()
+        return compute_money_flow(df)
+    except Exception:
+        return none_mf
+
+
+def _money_flow_fields(mf):
+    """Pick just the three persisted/displayed keys from a money-flow dict."""
+    return {"cmf": mf.get("cmf"), "mfi": mf.get("mfi"), "mf_signal": mf.get("mf_signal")}
+
+
+def _mf_prompt_line(candidate):
+    """One-line money-flow context appended to LLM vetting prompts so the model
+    can weigh accumulation vs distribution / profit-taking. Empty when no
+    signal (insufficient history) so the prompt is unchanged in that case."""
+    sig = candidate.get("mf_signal")
+    if not sig:
+        return ""
+    meaning = {
+        "IN": "money flowing in (accumulation)",
+        "OUT": "money flowing out (distribution / selling pressure)",
+        "PROFIT_TAKING": "money leaving while price is near its highs — possible top / profit-taking",
+        "NEUTRAL": "balanced money flow",
+    }.get(sig, "")
+    parts = []
+    if candidate.get("cmf") is not None:
+        parts.append(f"CMF {candidate['cmf']:+.2f}")
+    if candidate.get("mfi") is not None:
+        parts.append(f"MFI {candidate['mfi']:.0f}")
+    detail = f" ({', '.join(parts)})" if parts else ""
+    return f"\nMoney Flow: {meaning}{detail}."
+
+
 def _batch_scan_tickers(tickers: list, min_price: float = None, max_price: float = None,
                         limit: int = 30) -> list:
     """Generic batch price scanner. Optionally filters by price range."""
@@ -320,20 +374,25 @@ def _batch_scan_tickers(tickers: list, min_price: float = None, max_price: float
             batch = tickers[i:i + batch_size]
             try:
                 tickers_str = " ".join(batch)
-                data = yf.download(tickers_str, period="5d", progress=False, threads=True)
+                # 1mo (not 5d) so there are enough bars for the money-flow
+                # indicators; only the last close is used for price/filtering.
+                data = yf.download(tickers_str, period="1mo", progress=False, threads=True)
                 if data.empty:
                     continue
 
                 close_data = data.get("Close")
                 if close_data is None:
                     continue
+                single = len(batch) == 1
 
-                if len(batch) == 1:
+                if single:
                     last_price = close_data.dropna().iloc[-1] if not close_data.dropna().empty else None
                     if last_price:
                         price = float(last_price)
                         if (min_price is None or price >= min_price) and (max_price is None or price <= max_price):
-                            candidates.append({"ticker": batch[0], "price": round(price, 2)})
+                            mf = _money_flow_from_download(data, batch[0], single)
+                            candidates.append({"ticker": batch[0], "price": round(price, 2),
+                                               **_money_flow_fields(mf)})
                 else:
                     for ticker in batch:
                         try:
@@ -344,7 +403,9 @@ def _batch_scan_tickers(tickers: list, min_price: float = None, max_price: float
                                 continue
                             price = float(col.iloc[-1])
                             if (min_price is None or price >= min_price) and (max_price is None or price <= max_price):
-                                candidates.append({"ticker": ticker, "price": round(price, 2)})
+                                mf = _money_flow_from_download(data, ticker, single)
+                                candidates.append({"ticker": ticker, "price": round(price, 2),
+                                                   **_money_flow_fields(mf)})
                         except (KeyError, IndexError, TypeError):
                             continue
             except Exception:
@@ -373,6 +434,7 @@ def scan_lowcap_candidates(min_price: float = 2.0, max_price: float = 15.0,
             if mkt_cap > max_market_cap or mkt_cap < 50_000_000:
                 continue
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"], "market_cap": mkt_cap,
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
                 "sector": info.get("sector", "Unknown"),
@@ -400,6 +462,7 @@ def scan_midcap_candidates(min_price: float = 15.0, max_price: float = 100.0,
             if mkt_cap > 20e9 or mkt_cap < 2e9:
                 continue
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"], "market_cap": mkt_cap,
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
                 "sector": info.get("sector", "Unknown"),
@@ -429,6 +492,7 @@ def scan_largecap_candidates(limit: int = 30) -> list:
             if mkt_cap < 20e9:
                 continue
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"], "market_cap": mkt_cap,
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
                 "sector": info.get("sector", "Unknown"),
@@ -461,6 +525,7 @@ def scan_etf_candidates(limit: int = 30) -> list:
             t = yf.Ticker(c["ticker"])
             info = t.info or {}
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"],
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
                 "sector": info.get("category", info.get("sector", "ETF")),
@@ -488,6 +553,7 @@ def scan_metals_mining_candidates(limit: int = 30) -> list:
             t = yf.Ticker(c["ticker"])
             info = t.info or {}
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"],
                 "market_cap": info.get("marketCap", 0) or 0,
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
@@ -515,6 +581,7 @@ def scan_crypto_candidates(limit: int = 20) -> list:
             t = yf.Ticker(c["ticker"])
             info = t.info or {}
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"],
                 "market_cap": info.get("marketCap", 0) or 0,
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
@@ -539,6 +606,7 @@ def scan_ai_candidates(limit: int = 30) -> list:
             t = yf.Ticker(c["ticker"])
             info = t.info or {}
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"], "price": c["price"],
                 "market_cap": info.get("marketCap", 0) or 0,
                 "name": info.get("shortName", info.get("longName", c["ticker"])),
@@ -588,17 +656,19 @@ def scan_top_movers(direction: str = "gainers", period: str = "1d",
                 close_data = data.get("Close")
                 if close_data is None:
                     continue
+                single = len(batch) == 1
 
-                if len(batch) == 1:
+                if single:
                     col = close_data.dropna()
                     if len(col) >= 2:
                         first_price = float(col.iloc[0])
                         last_price = float(col.iloc[-1])
                         if first_price > 0:
                             pct_change = ((last_price - first_price) / first_price) * 100
+                            mf = _money_flow_from_download(data, batch[0], single)
                             movers.append({
                                 "ticker": batch[0], "price": round(last_price, 2),
-                                "pct_change": round(pct_change, 2),
+                                "pct_change": round(pct_change, 2), **_money_flow_fields(mf),
                             })
                 else:
                     for ticker in batch:
@@ -612,9 +682,10 @@ def scan_top_movers(direction: str = "gainers", period: str = "1d",
                             last_price = float(col.iloc[-1])
                             if first_price > 0:
                                 pct_change = ((last_price - first_price) / first_price) * 100
+                                mf = _money_flow_from_download(data, ticker, single)
                                 movers.append({
                                     "ticker": ticker, "price": round(last_price, 2),
-                                    "pct_change": round(pct_change, 2),
+                                    "pct_change": round(pct_change, 2), **_money_flow_fields(mf),
                                 })
                         except (KeyError, IndexError, TypeError):
                             continue
@@ -642,6 +713,7 @@ def scan_top_movers(direction: str = "gainers", period: str = "1d",
             if mkt_cap < 100_000_000:
                 continue
             enriched.append({
+                **_money_flow_fields(c),
                 "ticker": c["ticker"],
                 "price": c["price"],
                 "pct_change": c["pct_change"],
@@ -781,6 +853,8 @@ def scan_oversold_candidates(limit: int = 30) -> list:
                         sma_10 = float(np.mean(prices[-10:])) if len(prices) >= 10 else None
                         avg_vol = float(np.mean(vol_col.values[-14:])) if vol_col is not None and len(vol_col) >= 14 else 0
 
+                        mf = _money_flow_from_download(data, ticker, len(batch) == 1)
+
                         oversold.append({
                             "ticker": ticker,
                             "price": float(round(last_price, 2)),
@@ -789,6 +863,7 @@ def scan_oversold_candidates(limit: int = 30) -> list:
                             "sma_20": float(round(sma_20, 2)) if sma_20 else None,
                             "sma_10": float(round(sma_10, 2)) if sma_10 else None,
                             "avg_volume": int(avg_vol),
+                            **_money_flow_fields(mf),
                         })
                     except (KeyError, IndexError, TypeError, ValueError):
                         continue
@@ -882,7 +957,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
 
     messages = [
         {"role": "system", "content": LOWCAP_SYSTEM},
-        {"role": "user", "content": LOWCAP_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": LOWCAP_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -929,7 +1004,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
 
     messages = [
         {"role": "system", "content": MIDCAP_SYSTEM},
-        {"role": "user", "content": MIDCAP_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": MIDCAP_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -978,7 +1053,7 @@ Recommendation: {info.get('recommendationKey', 'N/A')}"""
 
     messages = [
         {"role": "system", "content": LARGECAP_SYSTEM},
-        {"role": "user", "content": LARGECAP_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": LARGECAP_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -1017,7 +1092,7 @@ YTD Return: {ytd_str}
 
     messages = [
         {"role": "system", "content": ETF_SYSTEM},
-        {"role": "user", "content": ETF_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": ETF_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -1061,7 +1136,7 @@ Debt/Equity: {info.get('debtToEquity', 'N/A')}
 
     messages = [
         {"role": "system", "content": METALS_MINING_SYSTEM},
-        {"role": "user", "content": METALS_MINING_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": METALS_MINING_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -1089,7 +1164,7 @@ Avg Volume: {candidate.get('volume', 0):,.0f}"""
 
     messages = [
         {"role": "system", "content": CRYPTO_SYSTEM},
-        {"role": "user", "content": CRYPTO_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": CRYPTO_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -1134,7 +1209,7 @@ ROE: {info.get('returnOnEquity', 'N/A')}
 
     messages = [
         {"role": "system", "content": AI_SYSTEM},
-        {"role": "user", "content": AI_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": AI_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw = _call_openrouter(LLM_SCREENER, messages, max_tokens=768, timeout=20, role="screener")
@@ -1188,7 +1263,7 @@ Inst Ownership: {info.get('heldPercentInstitutions', 'N/A')}"""
     # ── LLM #1: Tag / Identify bottom signals ──
     messages_tag = [
         {"role": "system", "content": OVERSOLD_SYSTEM},
-        {"role": "user", "content": OVERSOLD_USER_TEMPLATE.format(summary=summary)},
+        {"role": "user", "content": OVERSOLD_USER_TEMPLATE.format(summary=summary + _mf_prompt_line(candidate))},
     ]
 
     raw_tag = _call_openrouter(LLM_SCREENER, messages_tag, max_tokens=768, timeout=20, role="screener")
@@ -1291,6 +1366,7 @@ Analyst Target: ${info.get('targetMeanPrice', 'N/A')}"""
     except Exception:
         pass
 
+    summary += _mf_prompt_line(candidate)
     if direction == "gainers":
         system_msg = GAINERS_SYSTEM
         user_msg = GAINERS_USER_TEMPLATE.format(pct_change=pct_change, period_label=period_label, summary=summary)
@@ -1328,7 +1404,15 @@ def _parallel_vet(candidates: list, vet_fn, batch_size: int = 5) -> list:
     def _run_with_context(c):
         if _ctx_uid:
             set_llm_user(_ctx_uid, _ctx_src)
-        return vet_fn(c)
+        result = vet_fn(c)
+        # vet_fn returns only the LLM verdict; carry the money-flow fields
+        # computed during scanning through to the vetted result (for storage +
+        # frontend) for every category.
+        if isinstance(result, dict) and isinstance(c, dict):
+            for k in ("cmf", "mfi", "mf_signal"):
+                if result.get(k) is None and c.get(k) is not None:
+                    result[k] = c.get(k)
+        return result
 
     vetted = []
     for i in range(0, len(candidates), batch_size):
