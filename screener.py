@@ -338,6 +338,27 @@ def _money_flow_fields(mf):
     return {"cmf": mf.get("cmf"), "mfi": mf.get("mfi"), "mf_signal": mf.get("mf_signal")}
 
 
+def _apply_alpaca_money_flow(candidates):
+    """Fill/override each candidate's money-flow fields from Alpaca daily bars.
+    No-op when Alpaca is unconfigured or for symbols it can't serve (the
+    yfinance-derived values computed during scanning remain). Never raises."""
+    try:
+        from shared.alpaca_data import is_configured, money_flow_map
+        if not is_configured():
+            return
+        tickers = [c.get("ticker") for c in candidates if c.get("ticker")]
+        mf_by_sym = money_flow_map(tickers)
+        if not mf_by_sym:
+            return
+        for c in candidates:
+            mf = mf_by_sym.get((c.get("ticker") or "").upper())
+            if mf and mf.get("mf_signal") is not None:
+                c.update(_money_flow_fields(mf))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"alpaca money-flow pass skipped: {e}")
+
+
 def _mf_prompt_line(candidate):
     """One-line money-flow context appended to LLM vetting prompts so the model
     can weigh accumulation vs distribution / profit-taking. Empty when no
@@ -1506,6 +1527,7 @@ def _oversold_background_scan(limit=20):
             log.info("[OVERSOLD-BG] No candidates found")
             return
 
+        _apply_alpaca_money_flow(candidates)
         vetted = _parallel_vet(candidates, vet_oversold_candidate)
 
         for v in vetted:
@@ -1704,6 +1726,10 @@ def _run_oversold_pipeline(limit: int = 20, sectors: list = None) -> dict:
 
     if sectors:
         all_results = [r for r in all_results if r.get("sector", "") in sectors]
+
+    # Money flow from Alpaca (cached) — oversold_daily doesn't persist it, so
+    # attach on read; feeds both this response and the screener_results store.
+    _apply_alpaca_money_flow(all_results)
 
     # Ensure in screener_results for past scans UI
     _store_screener_results("oversold", all_results)
@@ -1934,6 +1960,11 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
             "category": category,
             "error": "No candidates found. Try adjusting filters.",
         }
+
+    # Money flow: prefer Alpaca (reliable, not IP-throttled like Yahoo). Override
+    # the yfinance-derived values from scanning where Alpaca has a signal; leave
+    # the yfinance fallback in place for symbols Alpaca can't serve / unconfigured.
+    _apply_alpaca_money_flow(candidates)
 
     vetted = _parallel_vet(candidates, vet_fn)
     result = _categorize_results(vetted, positive, cautious)
