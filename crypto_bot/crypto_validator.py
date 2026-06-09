@@ -101,10 +101,15 @@ def _call_openrouter(model: str, messages: list, timeout: int = 60, role: str = 
             model = get_model(role, model)
         except Exception:
             pass
+    try:
+        from ai_validator import _with_prompt_cache
+        messages = _with_prompt_cache(model, messages)
+    except Exception:
+        pass  # caching helper unavailable — send messages as-is
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": 1024,
+        "max_tokens": 512,
         "temperature": 0.1,
     }
     try:

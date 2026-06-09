@@ -28,6 +28,12 @@ from ai_validator import (
     is_configured, _call_openrouter, _parse_json_response,
     LLM_SCREENER, LLM_SUPERVISOR,
 )
+import os as _os
+# Screener verdicts are memoized per (category, ticker, day). 6h default caps
+# intraday staleness while letting repeat scans of the same category reuse the
+# vetting. Key embeds the date so it naturally rolls at midnight.
+VET_CACHE_TTL = int(_os.getenv("VET_CACHE_TTL", "21600"))  # 6 hours
+
 from shared.prompts.screener import (
     LOWCAP_SYSTEM, LOWCAP_USER_TEMPLATE,
     MIDCAP_SYSTEM, MIDCAP_USER_TEMPLATE,
@@ -1512,7 +1518,15 @@ def _parallel_vet(candidates: list, vet_fn, batch_size: int = 5) -> list:
     def _run_with_context(c):
         if _ctx_uid:
             set_llm_user(_ctx_uid, _ctx_src)
-        result = vet_fn(c)
+        # Memoize the LLM verdict per (category, ticker, day): re-running the
+        # same screener category the same day reuses the verdict instead of
+        # re-vetting every candidate. Money-flow fields are re-merged below, so
+        # only the (slow, token-heavy) LLM verdict is cached.
+        from datetime import date as _date
+        from shared.llm_cache import cached_call
+        _tkr = (c.get("ticker") if isinstance(c, dict) else None) or "?"
+        _key = f"vet:{getattr(vet_fn, '__name__', 'vet')}:{_tkr}:{_date.today().isoformat()}"
+        result = cached_call(_key, VET_CACHE_TTL, lambda: vet_fn(c))
         # vet_fn returns only the LLM verdict; carry the money-flow fields
         # computed during scanning through to the vetted result (for storage +
         # frontend) for every category.
