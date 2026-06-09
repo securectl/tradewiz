@@ -324,6 +324,8 @@ function renderMarketPulse(d) {
     if (regimeTile) {
         regimeTile.style.borderLeftColor = regimeColor;
     }
+    // Meter: regime score -6 (bear, red) → +6 (bull, green).
+    _meterMark('pulse-regime-marker', regimeScore, -6, 6);
 
     // ── Dynamic logo color based on market regime ──
     const logoEl = document.querySelector('.logo');
@@ -353,6 +355,8 @@ function renderMarketPulse(d) {
             polyDesc.style.color = d.poly_sentiment.color;
         }
         if (polyTile) polyTile.style.borderLeftColor = d.poly_sentiment.color;
+        // Meter: net sentiment score (bearish → bullish); clamp to ±10 band.
+        _meterMark('pulse-poly-marker', d.poly_sentiment.score || 0, -10, 10);
     }
 
     // ── Trump Mood ──
@@ -384,6 +388,8 @@ function renderMarketPulse(d) {
                 trumpTile.className = 'pulse-tile tile-yellow';
             }
         }
+        // Meter: mood -100 (aggressive, red) → +100 (market-friendly, green).
+        _meterMark('pulse-trump-marker', tm.mood || 0, -100, 100);
     }
 }
 

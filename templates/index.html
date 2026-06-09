@@ -145,16 +145,19 @@
     <div class="pulse-tile" id="pulse-regime" style="border-left:1px solid var(--border-color);padding-left:12px;">
         <span class="pulse-label">Market Regime</span>
         <span class="pulse-value" id="pulse-regime-value" style="font-size:12px;font-weight:700;letter-spacing:0.3px;">—</span>
+        <div class="pulse-meter meter-bullish" id="pulse-regime-meter"><i id="pulse-regime-marker"></i></div>
         <span class="pulse-sub" id="pulse-regime-sub" style="font-size:9px;"></span>
     </div>
     <div class="pulse-tile" id="pulse-poly" style="border-left:1px solid var(--border-color);padding-left:12px;cursor:pointer;" onclick="switchTab('predictions')">
         <span class="pulse-label">Poly/Kalshi</span>
         <span class="pulse-value" id="pulse-poly-mood" style="font-size:12px;font-weight:700;">—</span>
+        <div class="pulse-meter meter-bullish" id="pulse-poly-meter"><i id="pulse-poly-marker"></i></div>
         <span class="pulse-sub" id="pulse-poly-desc" style="font-size:9px;"></span>
     </div>
     <div class="pulse-tile" id="pulse-trump" style="border-left:1px solid var(--border-color);padding-left:12px;cursor:pointer;" onclick="if(currentUser && (currentUser.tier==='pro'||currentUser.tier==='admin'||currentUser.is_admin)){switchTab('trump')}else{showPricingModal()}">
         <span class="pulse-label">Trump Mood</span>
         <span class="pulse-value" id="pulse-trump-mood" style="font-size:12px;font-weight:700;">—</span>
+        <div class="pulse-meter meter-bullish" id="pulse-trump-meter"><i id="pulse-trump-marker"></i></div>
         <span class="pulse-sub" id="pulse-trump-pattern" style="font-size:9px;"></span>
     </div>
 </div>
@@ -2065,7 +2068,7 @@ function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.d
 if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
 </script>
 
-<script src="/static/js/core.js?v=7"></script>
+<script src="/static/js/core.js?v=8"></script>
 <script src="/static/js/features/dashboard.js?v=7"></script>
 <script src="/static/js/features/analysis/analysis.js?v=5"></script>
 <script src="/static/js/features/screener/screener.js?v=10"></script>
