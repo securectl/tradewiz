@@ -19,7 +19,9 @@ and ``shared/llm_cache``).
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+
+RETENTION_DAYS = 30   # how long the daily snapshots are kept
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +128,15 @@ def _classify(symbol, price, calls):
         key=lambda c: -c["open_interest"],
     )[:TOP_N]
 
+    # "Most interest" = the single most-actively-traded call (highest volume).
+    # Flag it in-place so it renders bold/highlighted wherever it appears, and
+    # surface a copy at the top level for the highlight banner.
+    top_contract = None
+    if enriched:
+        top = max(enriched, key=lambda c: c["volume"])
+        top["top"] = True
+        top_contract = dict(top)
+
     agg_ratio = (total_vol / total_oi) if total_oi > 0 else 0.0
     if agg_ratio >= ACCUMULATE_RATIO:
         read, color = "ACCUMULATING", "#00c896"
@@ -135,6 +146,7 @@ def _classify(symbol, price, calls):
         read, color = "NEUTRAL", "#ffc837"
 
     return {
+        "top_contract": top_contract,
         "symbol": symbol.upper(),
         "price": round(float(price or 0), 2),
         "totals": {
@@ -151,6 +163,75 @@ def _classify(symbol, price, calls):
         "decreasing": decreasing,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+def _record_snapshot(result, source):
+    """Upsert one daily snapshot for this symbol and purge rows older than
+    RETENTION_DAYS. One row per (symbol, day); intra-day refetches update it.
+    Never raises — tracking is best-effort and must not break the request."""
+    try:
+        from db import execute, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+        sym = result["symbol"]
+        day = datetime.utcnow().strftime("%Y-%m-%d")
+        t = result.get("totals") or {}
+        tc = result.get("top_contract") or {}
+        now_iso = datetime.utcnow().isoformat()
+        execute(
+            f"INSERT INTO options_call_snapshots "
+            f"(symbol, snap_date, price, call_volume, call_oi, vol_oi_ratio, read, "
+            f"top_strike, top_expiry, top_volume, contracts, increasing_count, "
+            f"decreasing_count, source, updated_at) "
+            f"VALUES ({P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P},{P}) "
+            f"ON CONFLICT(symbol, snap_date) DO UPDATE SET "
+            f"price=excluded.price, call_volume=excluded.call_volume, call_oi=excluded.call_oi, "
+            f"vol_oi_ratio=excluded.vol_oi_ratio, read=excluded.read, top_strike=excluded.top_strike, "
+            f"top_expiry=excluded.top_expiry, top_volume=excluded.top_volume, "
+            f"contracts=excluded.contracts, increasing_count=excluded.increasing_count, "
+            f"decreasing_count=excluded.decreasing_count, source=excluded.source, "
+            f"updated_at=excluded.updated_at",
+            (sym, day, result.get("price", 0), t.get("call_volume", 0), t.get("call_oi", 0),
+             t.get("vol_oi_ratio", 0), result.get("read"), tc.get("strike"), tc.get("expiry"),
+             tc.get("volume", 0), t.get("contracts", 0), t.get("increasing_count", 0),
+             t.get("decreasing_count", 0), source, now_iso),
+        )
+        cutoff = (datetime.utcnow() - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d")
+        execute(
+            f"DELETE FROM options_call_snapshots WHERE symbol={P} AND snap_date < {P}",
+            (sym, cutoff),
+        )
+    except Exception as e:
+        logger.debug(f"snapshot record skipped for {result.get('symbol')}: {e}")
+
+
+def get_call_history(symbol, days=RETENTION_DAYS):
+    """Return the last ``days`` of daily snapshots for ``symbol`` (oldest first).
+    Empty list on any failure so the view degrades gracefully."""
+    try:
+        from db import query, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+        sym = (symbol or "").strip().upper()
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = query(
+            f"SELECT snap_date, price, call_volume, call_oi, vol_oi_ratio, read, "
+            f"top_strike, top_expiry, top_volume "
+            f"FROM options_call_snapshots WHERE symbol={P} AND snap_date >= {P} "
+            f"ORDER BY snap_date", (sym, cutoff),
+        ) or []
+        return [{
+            "date": str(r["snap_date"])[:10],
+            "price": round(float(r["price"] or 0), 2),
+            "call_volume": int(r["call_volume"] or 0),
+            "call_oi": int(r["call_oi"] or 0),
+            "vol_oi_ratio": round(float(r["vol_oi_ratio"] or 0), 3),
+            "read": r.get("read"),
+            "top_strike": float(r["top_strike"]) if r.get("top_strike") is not None else None,
+            "top_expiry": str(r.get("top_expiry") or "")[:10],
+            "top_volume": int(r["top_volume"] or 0),
+        } for r in rows]
+    except Exception as e:
+        logger.debug(f"history fetch failed for {symbol}: {e}")
+        return []
 
 
 def get_call_activity(symbol, force_refresh=False):
@@ -192,6 +273,9 @@ def get_call_activity(symbol, force_refresh=False):
     else:
         result = _classify(sym, price, calls)
         result["source"] = source
+        # Persist today's snapshot (daily dedupe) then attach the 30-day trend.
+        _record_snapshot(result, source)
+        result["history"] = get_call_history(sym)
 
     with _LOCK:
         _CACHE[sym] = (result, now)

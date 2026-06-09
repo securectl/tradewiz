@@ -348,6 +348,32 @@ def _run_postgres(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
+    # Daily call-option activity snapshots (one row per symbol per day) — powers
+    # the 30-day trend on the Option Calls tab. Rows older than 30 days are
+    # purged on write (see features/options_calls/engine._record_snapshot).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS options_call_snapshots (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            snap_date TEXT NOT NULL,
+            price REAL DEFAULT 0,
+            call_volume INTEGER DEFAULT 0,
+            call_oi INTEGER DEFAULT 0,
+            vol_oi_ratio REAL DEFAULT 0,
+            read TEXT,
+            top_strike REAL,
+            top_expiry TEXT,
+            top_volume INTEGER DEFAULT 0,
+            contracts INTEGER DEFAULT 0,
+            increasing_count INTEGER DEFAULT 0,
+            decreasing_count INTEGER DEFAULT 0,
+            source TEXT,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(symbol, snap_date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_optsnap_symbol_date ON options_call_snapshots(symbol, snap_date)")
+
     # LLM model snapshots — admin-saved point-in-time captures of which models
     # are wired to which roles. Used by the "revert to previous version"
     # button in the admin UI when a cheaper-model swap turns out worse.
@@ -1050,6 +1076,31 @@ def _run_sqlite(conn):
     _sqlite_add_column(conn, "llm_usage_log", "cost_usd", "REAL DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
+
+    # Daily call-option activity snapshots (one row per symbol per day) for the
+    # 30-day trend on the Option Calls tab. Old rows purged on write.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS options_call_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            snap_date TEXT NOT NULL,
+            price REAL DEFAULT 0,
+            call_volume INTEGER DEFAULT 0,
+            call_oi INTEGER DEFAULT 0,
+            vol_oi_ratio REAL DEFAULT 0,
+            read TEXT,
+            top_strike REAL,
+            top_expiry TEXT,
+            top_volume INTEGER DEFAULT 0,
+            contracts INTEGER DEFAULT 0,
+            increasing_count INTEGER DEFAULT 0,
+            decreasing_count INTEGER DEFAULT 0,
+            source TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(symbol, snap_date)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_optsnap_symbol_date ON options_call_snapshots(symbol, snap_date)")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_snapshots (

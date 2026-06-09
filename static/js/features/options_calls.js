@@ -68,6 +68,17 @@ function renderOptionCalls(d) {
         ' · ' + (t.increasing_count || 0) + ' increasing · ' +
         (t.decreasing_count || 0) + ' decreasing</div>';
 
+    // Most-interest contract — the single most actively traded call.
+    if (d.top_contract) {
+        const c = d.top_contract;
+        html += '<div class="oc-top-banner">' +
+            '<span class="oc-top-flag">🔥 Most active call</span>' +
+            '<span class="oc-top-detail"><b>$' + c.strike + ' ' + c.moneyness + '</b> · ' +
+            c.expiry + ' · <b>' + _ocFmt(c.volume) + '</b> vol · ' +
+            _ocFmt(c.open_interest) + ' OI · ' + c.vol_oi.toFixed(2) + ' vol/OI · $' + c.last +
+            '</span></div>';
+    }
+
     // Two tables side by side
     html += '<div class="oc-tables">';
     html += _ocTable('▲ Increasing volume', 'Fresh buying — volume large vs open interest',
@@ -75,7 +86,37 @@ function renderOptionCalls(d) {
     html += _ocTable('▼ Decreasing volume', 'Waning interest — large OI, little new volume',
         d.decreasing, 'oc-down');
     html += '</div>';
+
+    // 30-day trend (one daily snapshot per day)
+    html += renderOcTrend(d.history || []);
     return html;
+}
+
+function renderOcTrend(history) {
+    if (!history || history.length < 2) {
+        return '<div class="oc-trend"><div class="oc-trend-title">30-Day Trend</div>' +
+            '<div class="oc-empty">Tracking builds over time — check back after a few days of activity.</div></div>';
+    }
+    const vols = history.map(h => h.call_volume);
+    const max = Math.max.apply(null, vols) || 1;
+    let bars = '';
+    history.forEach(h => {
+        const pct = Math.max(2, Math.round((h.call_volume / max) * 100));
+        const title = h.date + ': ' + _ocFmt(h.call_volume) + ' call vol · ' +
+            h.vol_oi_ratio.toFixed(2) + ' vol/OI' + (h.read ? ' · ' + h.read : '');
+        bars += '<div class="oc-bar" style="height:' + pct + '%" title="' + title + '"></div>';
+    });
+    const first = history[0], last = history[history.length - 1];
+    const delta = last.call_volume - first.call_volume;
+    const arrow = delta > 0 ? '▲' : (delta < 0 ? '▼' : '–');
+    const cls = delta > 0 ? 'oc-up-txt' : (delta < 0 ? 'oc-down-txt' : '');
+    return '<div class="oc-trend">' +
+        '<div class="oc-trend-title">30-Day Trend · daily call volume ' +
+        '<span class="' + cls + '">' + arrow + ' ' + _ocFmt(Math.abs(delta)) +
+        ' vs ' + first.date + '</span></div>' +
+        '<div class="oc-bars">' + bars + '</div>' +
+        '<div class="oc-trend-note">' + history.length + ' day(s) tracked · hover a bar for detail</div>' +
+        '</div>';
 }
 
 function _ocTile(label, value, color) {
@@ -96,8 +137,9 @@ function _ocTable(title, subtitle, rows, cls) {
         '<th>Strike</th><th>Expiry</th><th>Vol</th><th>OI</th><th>Vol/OI</th><th>Last</th>' +
         '</tr></thead><tbody>';
     rows.forEach(r => {
-        html += '<tr>' +
-            '<td>$' + r.strike + ' <span class="oc-tag ' + _ocMoneyClass(r.moneyness) + '">' +
+        html += '<tr' + (r.top ? ' class="oc-top-row"' : '') + '>' +
+            '<td>' + (r.top ? '🔥 ' : '') + '$' + r.strike +
+                ' <span class="oc-tag ' + _ocMoneyClass(r.moneyness) + '">' +
                 r.moneyness + '</span></td>' +
             '<td>' + r.expiry + '</td>' +
             '<td>' + _ocFmt(r.volume) + '</td>' +
