@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/core.css?v=aurora14">
+    <link rel="stylesheet" href="/static/css/core.css?v=aurora15">
     <link rel="stylesheet" href="/static/css/features/analysis/analysis.css?v=aurora3">
     <link rel="stylesheet" href="/static/css/features/screener/screener.css?v=aurora3">
     <link rel="stylesheet" href="/static/css/features/options_calls/options_calls.css?v=3">
@@ -120,7 +120,7 @@
     <div class="pulse-tile" id="pulse-gauge" style="cursor:help;" title="Market risk gauge — BUY/HOLD/SELL from SPY, Nasdaq, VIX, Fear &amp; Greed and volume direction. Helps limit risk.">
         <span class="pulse-label">Signal</span>
         <span class="pulse-value" id="pulse-gauge-stance" style="font-weight:800;letter-spacing:0.3px;">—</span>
-        <span class="pulse-sub" id="pulse-gauge-sub" style="font-size:9px;"></span>
+        <div class="gauge-meter" id="pulse-gauge-meter"><i id="pulse-gauge-marker"></i></div>
     </div>
     <div class="pulse-tile" id="pulse-spy">
         <span class="pulse-label">SPY</span>
@@ -2062,7 +2062,7 @@ function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.d
 if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
 </script>
 
-<script src="/static/js/core.js?v=5"></script>
+<script src="/static/js/core.js?v=6"></script>
 <script src="/static/js/features/dashboard.js?v=7"></script>
 <script src="/static/js/features/analysis/analysis.js?v=4"></script>
 <script src="/static/js/features/screener/screener.js?v=10"></script>

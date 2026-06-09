@@ -1415,3 +1415,29 @@ html[data-theme="daylight"] .fb-modal { background: #fff; }
 .fb-msg { font-size: 12px; color: var(--text-secondary); } .fb-msg.fb-err { color: var(--accent-red); }
 .fb-thanks { text-align: center; padding: 40px 10px; font-size: 18px; font-weight: 700; color: var(--text-bright); line-height: 1.6; }
 .fb-thanks span { font-size: 13px; font-weight: 400; color: var(--text-secondary); }
+
+/* Market signal meter (header pulse tile) — red→orange→yellow→green */
+#pulse-gauge .gauge-meter {
+    position: relative;
+    width: 88px;
+    height: 6px;
+    margin-top: 5px;
+    border-radius: 3px;
+    background: linear-gradient(90deg,
+        #ff4757 0%,     /* SELL / risk-off */
+        #ff8c42 33%,    /* defensive */
+        #ffc837 60%,    /* neutral / hold */
+        #00c896 100%);  /* BUY / risk-on */
+}
+#pulse-gauge .gauge-meter i {
+    position: absolute;
+    top: -3px;
+    left: 50%;
+    width: 3px;
+    height: 12px;
+    background: #fff;
+    border-radius: 1px;
+    box-shadow: 0 0 3px rgba(0,0,0,.7);
+    transform: translateX(-50%);
+    transition: left .4s ease;
+}

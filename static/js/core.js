@@ -158,17 +158,24 @@ async function loadMarketGauge() {
         const resp = await fetch('/api/market/gauge');
         if (!resp.ok) return;
         const g = await resp.json();
-        const sub = document.getElementById('pulse-gauge-sub');
+        const meter = document.getElementById('pulse-gauge-meter');
+        const marker = document.getElementById('pulse-gauge-marker');
         const tile = document.getElementById('pulse-gauge');
         if (!g.available) {
             stance.textContent = '—';
-            if (sub) sub.textContent = 'unavailable';
+            if (meter) meter.style.display = 'none';
             return;
         }
         stance.textContent = g.stance;            // BUY / HOLD / SELL
         stance.style.color = g.color;
-        if (sub) sub.textContent = (g.score > 0 ? '+' : '') + g.score + ' · ' + g.label;
-        if (tile && g.reasons && g.reasons.length) tile.title = g.reasons.join('  •  ');
+        // Meter: red→orange→yellow→green band, marker at the score position.
+        if (meter) meter.style.display = 'block';
+        if (marker) {
+            const pos = Math.max(0, Math.min(100, (g.score + 100) / 2));  // -100..100 → 0..100%
+            marker.style.left = pos + '%';
+        }
+        if (tile) tile.title = (g.label || '') +
+            (g.reasons && g.reasons.length ? '  —  ' + g.reasons.join('  •  ') : '');
     } catch (e) {
         console.error('Market gauge error:', e);
     }
