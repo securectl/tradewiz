@@ -181,6 +181,14 @@ async function loadMarketGauge() {
     }
 }
 
+// Position a header meter marker: where `val` sits in [lo, hi] as 0-100%.
+function _meterMark(markerId, val, lo, hi) {
+    const m = document.getElementById(markerId);
+    if (!m) return;
+    if (hi == null || lo == null || hi <= lo) { m.style.left = '50%'; return; }
+    m.style.left = Math.max(0, Math.min(100, (val - lo) / (hi - lo) * 100)) + '%';
+}
+
 function renderMarketPulse(d) {
     // Track signals for regime synthesis
     let spyBull = 0;  // -2 to +2
@@ -207,6 +215,8 @@ function renderMarketPulse(d) {
             else if (pct <= -0.3) spyBull = -1;
         }
         if (rng) rng.textContent = 'L ' + d.spy.day_low.toFixed(2) + ' — H ' + d.spy.day_high.toFixed(2);
+        // Meter: where price sits in the day range (low → high, red → green).
+        _meterMark('pulse-spy-marker', d.spy.price, d.spy.day_low, d.spy.day_high);
     }
 
     // ── VIX ── (inverted: high VIX = bearish)
@@ -227,6 +237,12 @@ function renderMarketPulse(d) {
         if (el) { el.textContent = v.toFixed(2); el.className = 'pulse-value pulse-' + color; }
         if (tile) tile.className = 'pulse-tile tile-' + color;
         if (sub) sub.textContent = vixLabel;
+        // Meter: VIX in its 5-day range (low → high, green → red = calm → fear).
+        if (d.vix.day_low != null && d.vix.day_high != null) {
+            _meterMark('pulse-vix-marker', v, d.vix.day_low, d.vix.day_high);
+        } else {
+            _meterMark('pulse-vix-marker', v, 10, 40);  // fallback scale
+        }
         if (chg) {
             const pct = d.vix.change_pct;
             chg.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
@@ -253,6 +269,8 @@ function renderMarketPulse(d) {
         if (el) { el.textContent = s; el.className = 'pulse-value pulse-' + color; }
         if (tile) tile.className = 'pulse-tile tile-' + color;
         if (sub) sub.textContent = d.fear_greed.rating;
+        // Meter: 0 (extreme fear, red) → 100 (extreme greed, green).
+        _meterMark('pulse-fg-marker', s, 0, 100);
     }
 
     // ── Market Regime Synthesis ──

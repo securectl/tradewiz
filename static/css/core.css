@@ -1416,25 +1416,26 @@ html[data-theme="daylight"] .fb-modal { background: #fff; }
 .fb-thanks { text-align: center; padding: 40px 10px; font-size: 18px; font-weight: 700; color: var(--text-bright); line-height: 1.6; }
 .fb-thanks span { font-size: 13px; font-weight: 400; color: var(--text-secondary); }
 
-/* Market signal meter (header pulse tile) — red→orange→yellow→green */
-#pulse-gauge .gauge-meter {
+/* Header pulse meters (Signal / SPY / VIX / Fear & Greed) */
+.pulse-meter {
     position: relative;
-    width: 88px;
-    height: 6px;
-    margin-top: 5px;
+    width: 84px;
+    height: 5px;
+    margin-top: 4px;
     border-radius: 3px;
-    background: linear-gradient(90deg,
-        #ff4757 0%,     /* SELL / risk-off */
-        #ff8c42 33%,    /* defensive */
-        #ffc837 60%,    /* neutral / hold */
-        #00c896 100%);  /* BUY / risk-on */
 }
-#pulse-gauge .gauge-meter i {
+.pulse-meter.meter-bullish {  /* low = bad/red, high = good/green */
+    background: linear-gradient(90deg, #ff4757 0%, #ff8c42 35%, #ffc837 60%, #00c896 100%);
+}
+.pulse-meter.meter-bearish {  /* low = good/green, high = bad/red (VIX) */
+    background: linear-gradient(90deg, #00c896 0%, #ffc837 40%, #ff8c42 65%, #ff4757 100%);
+}
+.pulse-meter i {
     position: absolute;
     top: -3px;
     left: 50%;
     width: 3px;
-    height: 12px;
+    height: 11px;
     background: #fff;
     border-radius: 1px;
     box-shadow: 0 0 3px rgba(0,0,0,.7);

@@ -147,8 +147,8 @@ function _ocTile(label, value, color) {
 
 function _ocTable(title, subtitle, rows, cls) {
     let html = '<div class="oc-table-wrap ' + cls + '">';
-    html += '<div class="oc-table-title">' + title + '</div>';
-    html += '<div class="oc-table-sub">' + subtitle + '</div>';
+    html += '<div class="oc-table-title" title="' + subtitle + '">' + title +
+        ' <span class="oc-hint" title="' + subtitle + '">ⓘ</span></div>';
     if (!rows || !rows.length) {
         html += '<div class="oc-empty">No contracts in this bucket.</div></div>';
         return html;

@@ -165,3 +165,6 @@
 .oc-xv-warn { color: #ffc837; font-weight: 700; }
 .oc-xv-single { color: #8b95a7; }
 .oc-divergent { background: rgba(255,200,55,.18); color: #ffc837; }
+
+/* Hover hint on table titles (detail-on-hover) */
+.oc-hint { font-size: 11px; color: var(--text-muted, #8b95a7); cursor: help; }

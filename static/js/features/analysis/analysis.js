@@ -621,9 +621,12 @@ function renderMarketGauge(mc) {
                 <span class="mg-label">${mc.label}</span>
             </div>
             <div class="mg-score">Market risk score ${sign}${mc.score} / 100</div>
-            <div class="mg-chips">${chips.join('')}</div>
-            ${volFlags.length ? `<div class="mg-vol">⚡ ${volFlags.join(' · ')}</div>` : ''}
-            <div class="mg-note">Verdict below is risk-adjusted for this backdrop.</div>
+            <details class="info-more">
+                <summary>Components${volFlags.length ? ' · ⚡ volume surge' : ''}</summary>
+                <div class="mg-chips">${chips.join('')}</div>
+                ${volFlags.length ? `<div class="mg-vol">⚡ ${volFlags.join(' · ')}</div>` : ''}
+                <div class="mg-note">Verdict below is risk-adjusted for this backdrop.</div>
+            </details>
         </div>`;
 }
 
@@ -649,9 +652,12 @@ function renderRecommendation(rec) {
             </div>
             <div class="reco-summary">${rec.summary || ''}</div>
             <div class="reco-meter"><i style="width:${Math.min(100, Math.abs(rec.score || 0))}%"></i></div>
-            <div class="reco-score">Technical signal ${sign}${rec.score || 0} / 100</div>
-            ${reasons ? `<ul class="reco-reasons">${reasons}</ul>` : ''}
-            <div class="reco-disclaimer">Rule-based technical read — not financial advice.</div>
+            <details class="info-more">
+                <summary>Why this call${rec.reasons && rec.reasons.length ? ' · ' + rec.reasons.length + ' factors' : ''}</summary>
+                <div class="reco-score">Technical signal ${sign}${rec.score || 0} / 100</div>
+                ${reasons ? `<ul class="reco-reasons">${reasons}</ul>` : ''}
+                <div class="reco-disclaimer">Rule-based technical read — not financial advice.</div>
+            </details>
         </div>`;
 }
 
@@ -1626,7 +1632,7 @@ function buildResearchSection(r) {
             <span class="ai-model-title">Research & Fundamentals</span>
             <span class="ai-model-badge ai-tag ${verdictClass}">${r.verdict} ${r.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${r.summary || ''}</div>
             ${r.sector_analysis ? `<div class="indicator-row"><span class="indicator-label">Sector</span><span class="indicator-value" style="font-size:11px;">${r.sector_analysis}</span></div>` : ''}
             ${r.earnings_risk ? `<div class="indicator-row"><span class="indicator-label">Earnings Risk</span><span class="indicator-value" style="font-size:11px;">${r.earnings_risk}</span></div>` : ''}
@@ -1656,7 +1662,7 @@ function buildPatternSection(p) {
             <span class="ai-model-title">Pattern Validation</span>
             <span class="ai-model-badge ai-tag ${validClass}">${validText} ${p.pattern_confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${p.summary || ''}</div>
             <div class="indicator-row"><span class="indicator-label">AI Detected</span><span class="indicator-value" style="font-size:11px;">${p.detected_pattern || 'N/A'}</span></div>
             <div class="indicator-row"><span class="indicator-label">Agrees with Algo</span><span class="indicator-value" style="font-size:11px; color:${p.algo_agreement ? '#26a69a' : '#ef5350'};">${p.algo_agreement ? 'Yes' : 'No'}</span></div>
@@ -1701,7 +1707,7 @@ function buildPredictionSection(pr) {
             <span class="ai-model-title">Prediction & Risk</span>
             <span class="ai-model-badge ai-tag ${verdictClass}">${pr.trade_verdict} ${pr.overall_probability}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${pr.summary || ''}</div>
 
             ${targets.conservative ? `
@@ -1978,7 +1984,7 @@ function buildFactGathererSection(fg) {
             <span class="ai-model-title">Fact Gatherer</span>
             <span class="ai-model-badge ai-tag ${vClass}">${fg.verdict} ${fg.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${fg.fact_summary || ''}</div>
             ${fg.competitive_position ? `<div class="indicator-row"><span class="indicator-label">Competitive Position</span><span class="indicator-value" style="font-size:11px;">${fg.competitive_position}</span></div>` : ''}
             ${fg.bull_case ? `<div style="margin-top:8px; padding:6px 8px; background:rgba(38,166,154,0.1); border-radius:4px; font-size:11px;"><b style="color:#26a69a;">Bull:</b> ${fg.bull_case}</div>` : ''}
@@ -2007,7 +2013,7 @@ function buildCompanyHealthSection(h) {
             <span class="ai-model-title">Company Health</span>
             <span class="ai-model-badge ai-tag ${vClass}">${h.verdict} ${h.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${h.summary || ''}</div>
             ${h.financial_grade ? `<div class="indicator-row"><span class="indicator-label">Financial Grade</span><span class="indicator-value" style="font-size:11px;">${h.financial_grade}</span></div>` : ''}
             ${h.survival_probability ? `<div class="indicator-row"><span class="indicator-label">Survival (12mo)</span><span class="indicator-value" style="font-size:11px; color:${h.survival_probability >= 80 ? '#26a69a' : h.survival_probability >= 60 ? '#ff9800' : '#ef5350'};">${h.survival_probability}%</span></div>` : ''}
@@ -2042,7 +2048,7 @@ function buildPriceActionSection(pa) {
             <span class="ai-model-title">Price Action & Valuation</span>
             <span class="ai-model-badge ai-tag ${vClass}">${pa.verdict} ${pa.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${pa.summary || ''}</div>
             ${pa.trend_assessment ? `<div class="indicator-row"><span class="indicator-label">Trend</span><span class="indicator-value" style="font-size:11px;">${pa.trend_assessment}</span></div>` : ''}
             ${pa.momentum_signal ? `<div class="indicator-row"><span class="indicator-label">Momentum</span><span class="indicator-value" style="font-size:11px;">${pa.momentum_signal}</span></div>` : ''}
@@ -2082,7 +2088,7 @@ function buildSupervisorSection(sup) {
             <span class="ai-model-title">Supervisor Review</span>
             <span class="ai-model-badge ai-tag ${vClass}">${sup.verdict} ${sup.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${sup.reasoning || sup.summary || ''}</div>
             <div class="indicator-row"><span class="indicator-label">Agrees w/ Health</span><span class="indicator-value" style="font-size:11px; color:${sup.agrees_with_health ? '#26a69a' : '#ef5350'};">${sup.agrees_with_health ? 'Yes' : 'No'}</span></div>
             <div class="indicator-row"><span class="indicator-label">Agrees w/ Price Action</span><span class="indicator-value" style="font-size:11px; color:${sup.agrees_with_price_action ? '#26a69a' : '#ef5350'};">${sup.agrees_with_price_action ? 'Yes' : 'No'}</span></div>

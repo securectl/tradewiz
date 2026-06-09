@@ -329,6 +329,9 @@ def market_pulse():
             data["vix"] = {
                 "value": round(vix_val, 2),
                 "change_pct": round(vix_change, 2),
+                # 5-day low/high so the header meter can place the current VIX.
+                "day_high": round(float(vix_df["High"].max()), 2),
+                "day_low": round(float(vix_df["Low"].min()), 2),
             }
     except Exception:
         pass
