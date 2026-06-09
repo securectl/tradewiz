@@ -147,6 +147,31 @@ async function loadMarketPulse() {
     } catch (e) {
         console.error('Market pulse error:', e);
     }
+    loadMarketGauge();  // BUY/HOLD/SELL signal tile — same cadence as the pulse
+}
+
+// ─── Market Gauge signal tile (BUY / HOLD / SELL) ───────────
+async function loadMarketGauge() {
+    const stance = document.getElementById('pulse-gauge-stance');
+    if (!stance) return;
+    try {
+        const resp = await fetch('/api/market/gauge');
+        if (!resp.ok) return;
+        const g = await resp.json();
+        const sub = document.getElementById('pulse-gauge-sub');
+        const tile = document.getElementById('pulse-gauge');
+        if (!g.available) {
+            stance.textContent = '—';
+            if (sub) sub.textContent = 'unavailable';
+            return;
+        }
+        stance.textContent = g.stance;            // BUY / HOLD / SELL
+        stance.style.color = g.color;
+        if (sub) sub.textContent = (g.score > 0 ? '+' : '') + g.score + ' · ' + g.label;
+        if (tile && g.reasons && g.reasons.length) tile.title = g.reasons.join('  •  ');
+    } catch (e) {
+        console.error('Market gauge error:', e);
+    }
 }
 
 function renderMarketPulse(d) {

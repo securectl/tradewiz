@@ -117,6 +117,11 @@
 
 <!-- Market Pulse Strip -->
 <div class="market-pulse-strip" id="market-pulse-strip">
+    <div class="pulse-tile" id="pulse-gauge" style="cursor:help;" title="Market risk gauge — BUY/HOLD/SELL from SPY, Nasdaq, VIX, Fear &amp; Greed and volume direction. Helps limit risk.">
+        <span class="pulse-label">Signal</span>
+        <span class="pulse-value" id="pulse-gauge-stance" style="font-weight:800;letter-spacing:0.3px;">—</span>
+        <span class="pulse-sub" id="pulse-gauge-sub" style="font-size:9px;"></span>
+    </div>
     <div class="pulse-tile" id="pulse-spy">
         <span class="pulse-label">SPY</span>
         <span class="pulse-value" id="pulse-spy-price">—</span>
@@ -2057,7 +2062,7 @@ function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.d
 if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
 </script>
 
-<script src="/static/js/core.js?v=4"></script>
+<script src="/static/js/core.js?v=5"></script>
 <script src="/static/js/features/dashboard.js?v=7"></script>
 <script src="/static/js/features/analysis/analysis.js?v=4"></script>
 <script src="/static/js/features/screener/screener.js?v=10"></script>
