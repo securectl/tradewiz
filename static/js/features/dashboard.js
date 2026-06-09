@@ -30,14 +30,17 @@ function _dMiniBars(spark) {
 
 async function loadDashboard() {
     try {
-        const [sumR, srR] = await Promise.all([
+        const [sumR, srR, gaugeR] = await Promise.all([
             fetch('/api/dashboard/summary'),
             fetch('/api/sector-radar/latest').catch(() => null),
+            fetch('/api/market/gauge').catch(() => null),
         ]);
         const summary = await sumR.json();
         let report = null;
         if (srR) { const sr = await srR.json().catch(() => ({})); report = (sr && sr.report) || null; }
-        renderDashRegime(report);
+        let gauge = null;
+        if (gaugeR) { gauge = await gaugeR.json().catch(() => null); }
+        renderDashRegime(report, gauge);
         renderDashHero(report);
         renderDashKpis(summary.kpis || {});
         renderDashBoard(report);
@@ -52,17 +55,31 @@ async function loadDashboard() {
     }
 }
 
-function renderDashRegime(report) {
+function renderDashRegime(report, gauge) {
     const el = document.getElementById('dash-regime'); if (!el) return;
     const ctx = (report && report.context) || {};
     const r = ctx.macro || {}, sm = ctx.smart_money || {};
+
+    // Prefer the live market gauge (always available, cached) for the macro
+    // read; fall back to the sector-radar report's macro context.
+    let regime = r.regime || 'UNKNOWN';
+    let composite = r.composite_score;
+    let vix = r.vix;
+    let spy5d = r.spy_5d;
+    if (gauge && gauge.available) {
+        regime = gauge.stance === 'BUY' ? 'RISK-ON' : gauge.stance === 'SELL' ? 'RISK-OFF' : 'NEUTRAL';
+        composite = gauge.score;
+        const c = gauge.components || {};
+        if (c.vix && c.vix.value != null) vix = c.vix.value;
+        if (c.spy && c.spy.change_5d != null) spy5d = c.spy.change_5d;
+    }
     el.innerHTML = `
-        <span class="dash-pill"><span class="dash-led" style="background:${_dRegimeColor(r.regime)}"></span>${_dEsc(r.regime || 'UNKNOWN')}</span>
-        <span class="dash-kv">Composite <b>${r.composite_score != null ? r.composite_score : '—'}</b></span>
-        <span class="dash-kv">VIX <b>${r.vix != null ? r.vix : '—'}</b></span>
-        <span class="dash-kv">SPY 5d <b>${_dPct(r.spy_5d)}</b></span>
+        <span class="dash-pill"><span class="dash-led" style="background:${_dRegimeColor(regime)}"></span>${_dEsc(regime)}</span>
+        <span class="dash-kv">Composite <b>${composite != null ? composite : '—'}</b></span>
+        <span class="dash-kv">VIX <b>${vix != null ? vix : '—'}</b></span>
+        <span class="dash-kv">SPY 5d <b>${_dPct(spy5d)}</b></span>
         <span class="dash-kv">Smart-money <b>${_dEsc(sm.tilt || 'n/a')}</b>${sm.avg_put_call != null ? ' · P/C ' + sm.avg_put_call : ''}</span>
-        <span class="dash-kv dash-kv-right">Auto research analyst</span>`;
+        <span class="dash-kv dash-kv-right">Live market gauge</span>`;
 }
 
 function renderDashHero(report) {
