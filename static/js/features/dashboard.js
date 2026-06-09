@@ -45,6 +45,7 @@ async function loadDashboard() {
         renderDashKpis(summary.kpis || {});
         renderDashBoard(report);
         renderDashBots(summary.bots || []);
+        loadDashSectorFlow(); // sector options money flow — non-blocking
         loadOpportunities();  // market opportunities (screener) — non-blocking
         loadOversold();       // most-watched oversold — non-blocking
         loadMySectors();      // sector resolution may hit network — non-blocking
@@ -333,4 +334,45 @@ function renderOversold() {
     el.innerHTML = `<h3 class="dash-h3">Most-Watched Oversold <span class="dash-sub">days in the daily oversold scan — longer = stronger bottom signal</span></h3>
         <div class="dash-ov-head">${h('ticker', 'Ticker')}${h('days', 'Days oversold')}${h('sector', 'Sector')}${h('verdict', 'Status')}${h('price', 'Price')}</div>
         ${body}`;
+}
+
+// ─── Sector options money flow (dashboard card) ─────────────
+let _dashSfPoll = null;
+function _sfMoneyDash(v) {
+    const n = Math.abs(Number(v) || 0);
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+    return '$' + n.toFixed(0);
+}
+async function loadDashSectorFlow() {
+    const el = document.getElementById('dash-sectorflow'); if (!el) return;
+    el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">Loading…</div>';
+    try {
+        const d = await (await fetch('/api/smart-money/sector-flow')).json();
+        if (d.computing && (!d.sectors || !d.sectors.length)) {
+            el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">Computing sector flow…</div>';
+            clearTimeout(_dashSfPoll);
+            _dashSfPoll = setTimeout(loadDashSectorFlow, 6000);
+            return;
+        }
+        if (!d.sectors || !d.sectors.length) {
+            el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">No sector options data.</div>';
+            return;
+        }
+        const tiltColor = d.tilt === 'RISK-ON' ? 'var(--accent-green)' : d.tilt === 'RISK-OFF' ? 'var(--accent-red)' : 'var(--accent-yellow)';
+        const row = (s) => `<div class="dash-sf-row">
+            <span class="dash-sf-name">${_dEsc(s.sector)} <span class="dash-sf-etf">${_dEsc(s.etf)}</span></span>
+            <span class="dash-sf-net" style="color:${s.color}">${s.net_premium >= 0 ? '+' : ''}${_sfMoneyDash(s.net_premium)}</span>
+            <span class="dash-sf-sig" style="color:${s.color}">${_dEsc(s.flow_signal)}</span></div>`;
+        const ins = (d.money_in || []).slice(0, 4).map(row).join('') || '<div class="dash-empty">None</div>';
+        const outs = (d.selling || []).slice(0, 4).map(row).join('') || '<div class="dash-empty">None</div>';
+        el.innerHTML = `<h3 class="dash-h3">Sector Options Flow
+                <span class="dash-sub">tilt <b style="color:${tiltColor}">${_dEsc(d.tilt)}</b> · calls vs puts</span></h3>
+            <div class="dash-sf-cols">
+              <div><div class="dash-sf-h dash-sf-in">▲ Money flowing in</div>${ins}</div>
+              <div><div class="dash-sf-h dash-sf-out">▼ Being sold</div>${outs}</div>
+            </div>`;
+    } catch (e) {
+        el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">Failed to load.</div>';
+    }
 }

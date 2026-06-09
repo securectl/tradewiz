@@ -423,3 +423,108 @@ async function _smRefreshData() {
         alert('Failed to start refresh: ' + e.message);
     }
 }
+
+// ─── Sector Options Flow sub-tab ────────────────────────────
+let _sfPollTimer = null;
+
+function switchSmartMoneySub(sub) {
+    document.querySelectorAll('.sm-subnav-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.smsub === sub));
+    const inst = document.getElementById('smart-money-dashboard');
+    const sect = document.getElementById('smart-money-sectorflow');
+    if (sub === 'sectorflow') {
+        if (inst) inst.style.display = 'none';
+        if (sect) sect.style.display = 'block';
+        loadSectorFlow();
+    } else {
+        if (sect) sect.style.display = 'none';
+        if (inst) inst.style.display = 'block';
+        clearTimeout(_sfPollTimer);
+    }
+}
+
+function _sfMoney(v) {
+    const n = Math.abs(Number(v) || 0);
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+    return '$' + n.toFixed(0);
+}
+
+async function loadSectorFlow(force) {
+    const c = document.getElementById('smart-money-sectorflow');
+    if (!c) return;
+    if (!c.dataset.loaded) {
+        c.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">Loading sector options flow…</div>';
+    }
+    try {
+        const resp = await fetch('/api/smart-money/sector-flow' + (force ? '?refresh=1' : ''));
+        const d = await resp.json();
+        if (d.computing && (!d.sectors || !d.sectors.length)) {
+            c.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">'
+                + 'Computing sector options flow…<div style="margin-top:8px;font-size:11px;">'
+                + 'First load reads 11 sector option chains — refreshes automatically.</div></div>';
+            clearTimeout(_sfPollTimer);
+            _sfPollTimer = setTimeout(() => loadSectorFlow(), 5000);
+            return;
+        }
+        c.dataset.loaded = '1';
+        c.innerHTML = renderSectorFlow(d);
+    } catch (e) {
+        c.innerHTML = '<div style="color:#ef5350;padding:20px;">Failed to load sector flow: ' + e.message + '</div>';
+    }
+}
+
+function renderSectorFlow(d) {
+    if (!d.sectors || !d.sectors.length) {
+        return '<div style="padding:40px;text-align:center;color:var(--text-secondary);">No sector options data available right now.</div>';
+    }
+    const tiltColor = d.tilt === 'RISK-ON' ? '#00c896' : d.tilt === 'RISK-OFF' ? '#ff4757' : '#ffc837';
+    // Scale net-premium meters against the largest absolute net across sectors.
+    const maxAbs = Math.max(1, ...d.sectors.map(s => Math.abs(s.net_premium || 0)));
+
+    let html = '<div class="sf-wrap">';
+    html += '<div class="sf-top">'
+        + '<span>Market tilt: <b style="color:' + tiltColor + '">' + d.tilt + '</b></span>'
+        + '<span>Net call premium ' + (d.total_net_premium >= 0 ? '+' : '') + _sfMoney(d.total_net_premium) + '</span>'
+        + '<span style="color:var(--text-secondary);">' + (d.count || 0) + ' sectors · '
+        + (d.stale ? 'updating…' : 'live') + ' · <a href="#" onclick="loadSectorFlow(true);return false;">refresh</a></span>'
+        + '</div>';
+
+    // Two groups: money in / being sold
+    const grp = (title, list, cls) => {
+        let h = '<div class="sf-col"><div class="sf-col-title ' + cls + '">' + title + '</div>';
+        if (!list.length) { h += '<div class="sf-empty">None</div></div>'; return h; }
+        list.forEach(s => {
+            h += '<div class="sf-row"><span class="sf-sector">' + s.sector + ' <span class="sf-etf">' + s.etf + '</span></span>'
+                + '<span class="sf-net" style="color:' + s.color + '">' + (s.net_premium >= 0 ? '+' : '') + _sfMoney(s.net_premium) + '</span></div>';
+        });
+        return h + '</div>';
+    };
+    html += '<div class="sf-cols">'
+        + grp('▲ Money flowing in', d.money_in, 'sf-in')
+        + grp('▼ Being sold', d.selling, 'sf-out')
+        + '</div>';
+
+    // Full ranked table with a centered net-premium meter per sector
+    html += '<table class="sf-table"><thead><tr><th>Sector</th><th>Flow</th><th>Calls$</th><th>Puts$</th><th>Net premium</th><th>P/C</th></tr></thead><tbody>';
+    d.sectors.forEach(s => {
+        const pct = Math.min(50, Math.round(Math.abs(s.net_premium) / maxAbs * 50));
+        const bar = s.net_premium >= 0
+            ? '<span class="sf-bar-pos" style="width:' + pct + '%"></span>'
+            : '<span class="sf-bar-neg" style="width:' + pct + '%;margin-left:' + (50 - pct) + '%"></span>';
+        html += '<tr>'
+            + '<td>' + s.sector + ' <span class="sf-etf">' + s.etf + '</span></td>'
+            + '<td><span class="sf-badge" style="color:' + s.color + '">' + s.flow_signal + '</span></td>'
+            + '<td>' + _sfMoney(s.call_value) + '</td>'
+            + '<td>' + _sfMoney(s.put_value) + '</td>'
+            + '<td><div class="sf-meter"><span class="sf-mid"></span>' + bar + '</div>'
+            + '<span class="sf-net" style="color:' + s.color + '">' + (s.net_premium >= 0 ? '+' : '') + _sfMoney(s.net_premium) + '</span></td>'
+            + '<td>' + (s.pc_ratio != null ? Number(s.pc_ratio).toFixed(2) : '—')
+            + (s.pc_divergent ? ' <span class="sf-warn" title="Dollar flow and volume put/call disagree — read with caution">⚠</span>' : '') + '</td>'
+            + '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="sf-note">Source: ' + (d.source || 'options chains') + ' · premium-weighted call vs put dollar flow per SPDR sector ETF.</div>';
+    html += '</div>';
+    return html;
+}

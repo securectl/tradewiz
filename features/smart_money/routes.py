@@ -22,6 +22,17 @@ def api_smart_money_summary():
     return jsonify(get_whale_summary(days=days))
 
 
+@bp.route("/api/smart-money/sector-flow")
+@login_required
+def api_sector_flow():
+    """Sector-level options money flow (calls vs puts) across the 11 SPDR sector
+    ETFs — which sectors have money flowing in vs being sold. Market data, so
+    login-gated (not pro-gated) since the dashboard surfaces it to all users."""
+    from features.smart_money.sector_flow import get_sector_options_flow
+    force = request.args.get("refresh") in ("1", "true", "yes")
+    return jsonify(get_sector_options_flow(force_refresh=force))
+
+
 @bp.route("/api/smart-money/holdings/<int:entity_id>")
 @login_required
 @subscription_required("pro")

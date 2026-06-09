@@ -1442,3 +1442,54 @@ html[data-theme="daylight"] .fb-modal { background: #fff; }
     transform: translateX(-50%);
     transition: left .4s ease;
 }
+
+/* ── Header pulse strip: keep meters/tiles fitting the page ── */
+.market-pulse-strip { overflow-x: auto; flex-wrap: nowrap; }
+.pulse-meter { width: 100%; max-width: 92px; min-width: 56px; }
+
+/* ── Smart Money sub-nav ── */
+.sm-subnav { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
+.sm-subnav-btn {
+    padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+    background: var(--bg-tertiary, #1a1f2e); color: var(--text-secondary, #8b95a7);
+    border: 1px solid var(--border-color, #2a3142); border-radius: 7px;
+}
+.sm-subnav-btn.active { background: #26a69a; color: #fff; border-color: #26a69a; }
+
+/* ── Sector Options Flow (Smart Money tab) ── */
+.sf-wrap { max-width: 100%; }
+.sf-top { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; font-size: 13px; margin-bottom: 16px; }
+.sf-top a { color: #26a69a; }
+.sf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+@media (max-width: 720px) { .sf-cols { grid-template-columns: 1fr; } }
+.sf-col { background: var(--bg-tertiary, #131722); border: 1px solid var(--border-color, #2a3142); border-radius: 10px; padding: 12px; }
+.sf-col-title { font-size: 12px; font-weight: 800; margin-bottom: 8px; }
+.sf-col-title.sf-in { color: #00c896; } .sf-col-title.sf-out { color: #ff4757; }
+.sf-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.04); font-size: 13px; }
+.sf-sector { color: var(--text, #e6e9ef); }
+.sf-etf { font-size: 10px; color: var(--text-secondary, #8b95a7); }
+.sf-net { font-weight: 700; font-variant-numeric: tabular-nums; }
+.sf-empty { color: var(--text-secondary, #8b95a7); font-size: 12px; padding: 6px 0; }
+.sf-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.sf-table th { text-align: left; font-size: 10px; text-transform: uppercase; color: var(--text-secondary, #8b95a7); padding: 6px 6px; border-bottom: 1px solid var(--border-color, #2a3142); }
+.sf-table td { padding: 6px 6px; border-bottom: 1px solid rgba(255,255,255,.04); overflow: hidden; text-overflow: ellipsis; }
+.sf-badge { font-weight: 700; font-size: 11px; }
+.sf-meter { position: relative; width: 100%; max-width: 120px; height: 6px; background: rgba(255,255,255,.06); border-radius: 3px; margin-bottom: 3px; }
+.sf-meter .sf-mid { position: absolute; left: 50%; top: -1px; width: 1px; height: 8px; background: rgba(255,255,255,.3); }
+.sf-bar-pos { position: absolute; left: 50%; height: 6px; background: #00c896; border-radius: 0 3px 3px 0; }
+.sf-bar-neg { position: absolute; height: 6px; background: #ff4757; border-radius: 3px 0 0 3px; }
+.sf-note { margin-top: 12px; font-size: 11px; color: var(--text-secondary, #8b95a7); }
+
+/* ── Sector flow card (dashboard) ── */
+.dash-sf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
+@media (max-width: 640px) { .dash-sf-cols { grid-template-columns: 1fr; } }
+.dash-sf-h { font-size: 11px; font-weight: 800; margin-bottom: 6px; }
+.dash-sf-h.dash-sf-in { color: var(--accent-green, #00c896); }
+.dash-sf-h.dash-sf-out { color: var(--accent-red, #ff4757); }
+.dash-sf-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.04); }
+.dash-sf-name { color: var(--text, #e6e9ef); }
+.dash-sf-etf { font-size: 10px; color: var(--text-secondary, #8b95a7); }
+.dash-sf-net { font-weight: 700; font-variant-numeric: tabular-nums; }
+.dash-sf-sig { font-size: 10px; font-weight: 700; text-align: right; }
+
+.sf-warn { color: #ffc837; cursor: help; }

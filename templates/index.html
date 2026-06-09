@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/core.css?v=aurora16">
+    <link rel="stylesheet" href="/static/css/core.css?v=aurora17">
     <link rel="stylesheet" href="/static/css/features/analysis/analysis.css?v=aurora4">
     <link rel="stylesheet" href="/static/css/features/screener/screener.css?v=aurora3">
     <link rel="stylesheet" href="/static/css/features/options_calls/options_calls.css?v=3">
@@ -195,6 +195,7 @@
         <div class="dash-card" id="dash-board"></div>
         <div class="dash-card" id="dash-bots"></div>
     </div>
+    <div class="dash-card" id="dash-sectorflow" style="margin-top:16px;"></div>
     <div class="dash-card" id="dash-opps" style="margin-top:16px;"></div>
     <div class="dash-card" id="dash-oversold" style="margin-top:16px;"></div>
     <div class="dash-card dash-mysectors-card" id="dash-mysectors" style="margin-top:16px;"></div>
@@ -630,7 +631,12 @@
             <button onclick="_smRefreshData()" class="btn-analyze" style="padding:8px 18px;font-size:12px;background:var(--bg-tertiary);border:1px solid var(--border-color);">Fetch Latest 13F</button>
         </div>
     </div>
+    <div class="sm-subnav">
+        <button class="sm-subnav-btn active" data-smsub="institutions" onclick="switchSmartMoneySub('institutions')">Institutions</button>
+        <button class="sm-subnav-btn" data-smsub="sectorflow" onclick="switchSmartMoneySub('sectorflow')">Sector Options Flow</button>
+    </div>
     <div id="smart-money-dashboard" style="font-size:12px;color:var(--text-secondary);">Loading...</div>
+    <div id="smart-money-sectorflow" style="display:none;font-size:12px;color:var(--text-secondary);">Loading...</div>
 </div>
 
 <!-- Trump Indicator -->
@@ -2069,7 +2075,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 </script>
 
 <script src="/static/js/core.js?v=8"></script>
-<script src="/static/js/features/dashboard.js?v=8"></script>
+<script src="/static/js/features/dashboard.js?v=9"></script>
 <script src="/static/js/features/analysis/analysis.js?v=5"></script>
 <script src="/static/js/features/screener/screener.js?v=10"></script>
 <script src="/static/js/features/options_calls.js?v=4"></script>
@@ -2086,7 +2092,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 <script src="/static/js/features/admin/admin.js"></script>
 <script src="/static/js/features/predictions/predictions.js"></script>
 <script src="/static/js/features/congress/congress.js"></script>
-<script src="/static/js/features/smart_money/smart_money.js"></script>
+<script src="/static/js/features/smart_money/smart_money.js?v=3"></script>
 <script src="/static/js/features/watchdog/watchdog.js?v=1"></script>
 <script src="/static/js/features/claude_bot/claude_bot.js?v=1"></script>
 <script src="/static/js/init.js"></script>
