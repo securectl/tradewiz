@@ -1880,6 +1880,7 @@ function switchTab(tab, skipHash) {
     const watchdogContent = document.getElementById('watchdog-content');
     const claudeBotContent = document.getElementById('claude-bot-content');
     const dashboardContent = document.getElementById('dashboard-content');
+    const optionCallsContent = document.getElementById('option-calls-content');
 
     mainContent.style.display = 'none';
     if (dashboardContent) dashboardContent.style.display = 'none';
@@ -1896,6 +1897,7 @@ function switchTab(tab, skipHash) {
     if (trumpContent) trumpContent.style.display = 'none';
     if (watchdogContent) watchdogContent.style.display = 'none';
     if (claudeBotContent) claudeBotContent.style.display = 'none';
+    if (optionCallsContent) optionCallsContent.style.display = 'none';
     if (autotradingContent) autotradingContent.style.display = 'none';
     if (stocktradingContent) stocktradingContent.style.display = 'none';
     if (adminContent) adminContent.style.display = 'none';
@@ -1974,6 +1976,9 @@ function switchTab(tab, skipHash) {
             loadSkillCatalog();
             loadSkillJobs();
         }
+    } else if (tab === 'option-calls') {
+        if (optionCallsContent) optionCallsContent.style.display = 'block';
+        if (typeof initOptionCalls === 'function') initOptionCalls();
     } else if (tab === 'finskills') {
         finskillsContent.style.display = 'block';
         loadFinSkills();
@@ -2017,6 +2022,7 @@ function switchTab(tab, skipHash) {
         if (typeof loadAdminOllamaConfig === 'function') loadAdminOllamaConfig();
         if (typeof loadAdminPlatform === 'function') loadAdminPlatform();
         if (typeof loadAdminUsersUsage === 'function') loadAdminUsersUsage();
+        if (typeof loadAdminAiUsage === 'function') loadAdminAiUsage();
     } else {
         mainContent.style.display = 'grid';
     }

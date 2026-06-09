@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/static/css/core.css?v=aurora14">
     <link rel="stylesheet" href="/static/css/features/analysis/analysis.css?v=aurora2">
     <link rel="stylesheet" href="/static/css/features/screener/screener.css?v=aurora3">
+    <link rel="stylesheet" href="/static/css/features/options_calls/options_calls.css?v=1">
     <link rel="stylesheet" href="/static/css/features/ipo/ipo.css?v=aurora1">
     <link rel="stylesheet" href="/static/css/features/tracker/tracker.css?v=aurora1">
     <link rel="stylesheet" href="/static/css/features/bot_crypto/bot_crypto.css?v=aurora1">
@@ -157,6 +158,7 @@
     <button class="tab-btn" data-tab="qullamaggie" onclick="switchTab('qullamaggie')">Breakout Scanner</button>
     <button class="tab-btn" data-tab="tracker" onclick="switchTab('tracker')">Tracker</button>
     <button class="tab-btn" data-tab="screener" onclick="switchTab('screener')">Screener</button>
+    <button class="tab-btn" data-tab="option-calls" onclick="switchTab('option-calls')">Option Calls</button>
     <button class="tab-btn" data-tab="research" onclick="switchTab('research')">Research</button>
     <button class="tab-btn" data-tab="finskills" onclick="switchTab('finskills')">Fin Skills</button>
     <button class="tab-btn" data-tab="ipos" onclick="switchTab('ipos')">IPOs</button>
@@ -823,6 +825,21 @@
             <div>Loading service status...</div>
         </div>
     </div>
+</div>
+
+<!-- Option Calls View — which call contracts are gaining vs losing volume -->
+<div class="option-calls-content" id="option-calls-content" style="display:none;padding:20px;">
+  <div class="oc-header">
+    <div>
+      <h2 class="oc-title">Option Calls</h2>
+      <div class="oc-sub">Call contracts with rising vs falling volume (volume ÷ open interest). Source: Webull → yfinance fallback.</div>
+    </div>
+    <form class="oc-search" onsubmit="loadOptionCalls(); return false;">
+      <input type="text" id="oc-symbol" class="oc-input" placeholder="Ticker e.g. AAPL" autocomplete="off">
+      <button type="submit" class="oc-btn">Show Calls</button>
+    </form>
+  </div>
+  <div id="oc-body"><div class="oc-empty">Enter a stock ticker to see its call-option activity.</div></div>
 </div>
 
 <!-- Research View -->
@@ -1521,6 +1538,39 @@
 <!-- Admin Panel -->
 <div class="admin-content" id="admin-content" style="display:none;">
     <div class="admin-grid">
+        <!-- Token & AI Usage -->
+        <div class="admin-card admin-card-wide" id="admin-ai-usage-card">
+            <div class="admin-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                <span>Token &amp; AI Usage</span>
+                <span class="ai-usage-range">
+                    <select id="ai-usage-range" class="settings-input" style="width:auto;font-size:12px;" onchange="loadAdminAiUsage()">
+                        <option value="1">Last 24h</option>
+                        <option value="7">Last 7 days</option>
+                        <option value="30" selected>Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                    </select>
+                </span>
+            </div>
+            <div id="ai-usage-tiles" class="ai-usage-tiles"></div>
+            <div class="ai-usage-tables">
+                <div class="ai-usage-tblwrap">
+                    <div class="ai-usage-tbl-title">By model</div>
+                    <table class="ai-usage-table"><thead><tr><th>Model</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+                        <tbody id="ai-usage-by-model"></tbody></table>
+                </div>
+                <div class="ai-usage-tblwrap">
+                    <div class="ai-usage-tbl-title">By source</div>
+                    <table class="ai-usage-table"><thead><tr><th>Source</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+                        <tbody id="ai-usage-by-source"></tbody></table>
+                </div>
+                <div class="ai-usage-tblwrap">
+                    <div class="ai-usage-tbl-title">Top users</div>
+                    <table class="ai-usage-table"><thead><tr><th>User</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+                        <tbody id="ai-usage-top-users"></tbody></table>
+                </div>
+            </div>
+            <div class="ai-usage-note">Cost is an estimate from per-model rates (see shared/llm_pricing.py); calls logged before token tracking show 0 tokens.</div>
+        </div>
         <!-- Invite Users -->
         <div class="admin-card">
             <div class="admin-card-title">Invite Users</div>
@@ -2011,6 +2061,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 <script src="/static/js/features/dashboard.js?v=7"></script>
 <script src="/static/js/features/analysis/analysis.js?v=3"></script>
 <script src="/static/js/features/screener/screener.js?v=10"></script>
+<script src="/static/js/features/options_calls.js?v=1"></script>
 <script src="/static/js/features/ipo/ipo.js"></script>
 <script src="/static/js/features/tracker/tracker.js"></script>
 <script src="/static/js/features/bot_crypto/bot_crypto.js"></script>

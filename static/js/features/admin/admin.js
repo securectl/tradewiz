@@ -942,3 +942,67 @@ async function openUsageDrilldown(userId) {
     }
 }
 
+// ─── Token & AI Usage dashboard ─────────────────────────────
+function _aiFmt(n) {
+    if (n === null || n === undefined) return '0';
+    return Number(n).toLocaleString('en-US');
+}
+function _aiCost(n) {
+    const v = Number(n || 0);
+    if (v === 0) return '$0';
+    if (v < 0.01) return '$' + v.toFixed(4);
+    return '$' + v.toFixed(2);
+}
+
+async function loadAdminAiUsage() {
+    const tiles = document.getElementById('ai-usage-tiles');
+    if (!tiles) return;
+    const days = parseInt((document.getElementById('ai-usage-range') || {}).value || '30', 10);
+    const to = new Date();
+    const from = new Date(to.getTime() - days * 86400000);
+    const qs = 'from=' + from.toISOString().slice(0, 10) + '&to=' + to.toISOString().slice(0, 10);
+    tiles.innerHTML = '<div class="ai-usage-empty">Loading…</div>';
+    try {
+        const resp = await fetch('/api/admin/ai-usage?' + qs);
+        if (!resp.ok) {
+            tiles.innerHTML = '<div class="ai-usage-empty">Could not load usage.</div>';
+            return;
+        }
+        const d = await resp.json();
+        const t = d.totals || {};
+        tiles.innerHTML =
+            _aiTile('Total cost (est.)', _aiCost(t.cost_usd)) +
+            _aiTile('LLM calls', _aiFmt(t.calls)) +
+            _aiTile('Total tokens', _aiFmt(t.total_tokens)) +
+            _aiTile('Prompt tokens', _aiFmt(t.prompt_tokens)) +
+            _aiTile('Completion tokens', _aiFmt(t.completion_tokens));
+
+        _aiFillTable('ai-usage-by-model', (d.by_model || []).map(r =>
+            [r.model, _aiFmt(r.calls), _aiFmt(r.total_tokens), _aiCost(r.cost_usd)]));
+        _aiFillTable('ai-usage-by-source', (d.by_source || []).map(r =>
+            [r.source, _aiFmt(r.calls), _aiFmt(r.total_tokens), _aiCost(r.cost_usd)]));
+        _aiFillTable('ai-usage-top-users', (d.top_users || []).map(r =>
+            [r.email || r.name || '—', _aiFmt(r.calls), _aiFmt(r.total_tokens), _aiCost(r.cost_usd)]));
+    } catch (e) {
+        tiles.innerHTML = '<div class="ai-usage-empty">Error loading usage.</div>';
+    }
+}
+
+function _aiTile(label, value) {
+    return '<div class="ai-usage-tile"><div class="ai-usage-tile-label">' + label +
+        '</div><div class="ai-usage-tile-value">' + value + '</div></div>';
+}
+
+function _aiFillTable(id, rows) {
+    const tb = document.getElementById(id);
+    if (!tb) return;
+    if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="4" class="ai-usage-empty">No data</td></tr>';
+        return;
+    }
+    tb.innerHTML = rows.map(cells =>
+        '<tr>' + cells.map((c, i) =>
+            '<td' + (i === 0 ? ' class="ai-usage-name"' : '') + '>' + c + '</td>').join('') + '</tr>'
+    ).join('');
+}
+

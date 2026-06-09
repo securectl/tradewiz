@@ -332,10 +332,21 @@ def _run_postgres(conn):
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             call_source TEXT,
             model TEXT,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
             called_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    # Token/cost columns (added for the admin AI-usage dashboard; backfill 0 on
+    # rows logged before this migration).
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cost_usd REAL DEFAULT 0")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
     # LLM model snapshots — admin-saved point-in-time captures of which models
     # are wired to which roles. Used by the "revert to previous version"
@@ -1025,10 +1036,20 @@ def _run_sqlite(conn):
             user_id INTEGER,
             call_source TEXT,
             model TEXT,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
             called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Token/cost columns for the admin AI-usage dashboard (pre-existing rows -> 0).
+    _sqlite_add_column(conn, "llm_usage_log", "prompt_tokens", "INTEGER DEFAULT 0")
+    _sqlite_add_column(conn, "llm_usage_log", "completion_tokens", "INTEGER DEFAULT 0")
+    _sqlite_add_column(conn, "llm_usage_log", "total_tokens", "INTEGER DEFAULT 0")
+    _sqlite_add_column(conn, "llm_usage_log", "cost_usd", "REAL DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_snapshots (

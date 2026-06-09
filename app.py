@@ -71,6 +71,7 @@ from features.dashboard.routes import bp as dashboard_bp
 from features.feedback.routes import bp as feedback_bp
 from features.research.routes import bp as research_bp
 from features.alerts.routes import bp as alerts_bp
+from features.options_calls.routes import bp as options_calls_bp
 from claude_bot.routes import bp as claude_bot_bp
 
 app.register_blueprint(ipo_bp)
@@ -93,6 +94,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(feedback_bp)
 app.register_blueprint(research_bp)
 app.register_blueprint(alerts_bp)
+app.register_blueprint(options_calls_bp)
 app.register_blueprint(claude_bot_bp)
 
 # ─── Startup: log rotation + cleanup ────────────────────────────

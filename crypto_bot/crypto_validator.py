@@ -78,7 +78,19 @@ def _call_ollama(prompt: str, timeout: int = 30, model: str = None) -> dict:
             timeout=timeout,
         )
         resp.raise_for_status()
-        text = resp.json().get("response", "")
+        rj = resp.json()
+        text = rj.get("response", "")
+        # Record Ollama usage (Ollama returns prompt_eval_count / eval_count)
+        try:
+            from rate_limiter import get_llm_user, record_llm_call
+            uid, source = get_llm_user()
+            if uid:
+                pt = int(rj.get("prompt_eval_count", 0) or 0)
+                ct = int(rj.get("eval_count", 0) or 0)
+                record_llm_call(uid, source or "bot", f"ollama/{chosen}",
+                                prompt_tokens=pt, completion_tokens=ct)
+        except Exception:
+            pass
         return _parse_json(text)
     except requests.exceptions.ConnectionError:
         logger.warning("Ollama Cloud not reachable — will fall back to OpenRouter-only")
@@ -115,13 +127,20 @@ def _call_openrouter(model: str, messages: list, timeout: int = 60, role: str = 
     try:
         resp = requests.post(OPENROUTER_URL, headers=HEADERS, json=payload, timeout=timeout)
         resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        # Record LLM usage
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        # Record LLM usage (with token counts from the response when present)
         try:
             from rate_limiter import get_llm_user, record_llm_call
             uid, source = get_llm_user()
             if uid:
-                record_llm_call(uid, source, model)
+                u = data.get("usage") or {}
+                record_llm_call(
+                    uid, source, model,
+                    prompt_tokens=u.get("prompt_tokens", 0),
+                    completion_tokens=u.get("completion_tokens", 0),
+                    total_tokens=u.get("total_tokens", 0),
+                )
         except Exception:
             pass
         return content

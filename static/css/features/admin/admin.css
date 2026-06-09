@@ -304,3 +304,50 @@
 .usage-range-chip:hover:not(.active) {
     color: var(--text-bright);
 }
+
+/* Token & AI Usage dashboard */
+.admin-card-wide { grid-column: 1 / -1; }
+.ai-usage-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 12px 0 18px;
+}
+.ai-usage-tile {
+    background: var(--bg-elev, #131722);
+    border: 1px solid var(--border, #2a3142);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+.ai-usage-tile-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-muted, #8b95a7);
+    margin-bottom: 6px;
+}
+.ai-usage-tile-value { font-size: 19px; font-weight: 800; }
+.ai-usage-tables {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+}
+.ai-usage-tbl-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+.ai-usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ai-usage-table th {
+    text-align: right;
+    font-size: 9px;
+    text-transform: uppercase;
+    color: var(--text-muted, #8b95a7);
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border, #2a3142);
+}
+.ai-usage-table th:first-child, .ai-usage-table td.ai-usage-name { text-align: left; }
+.ai-usage-table td {
+    padding: 6px 8px;
+    text-align: right;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.ai-usage-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-usage-empty { padding: 16px; text-align: center; color: var(--text-muted, #8b95a7); font-size: 12px; }
+.ai-usage-note { margin-top: 14px; font-size: 11px; color: var(--text-muted, #8b95a7); }

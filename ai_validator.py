@@ -159,14 +159,20 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        # Record LLM usage
+        # Record LLM usage (with token counts from the response when present)
         try:
             from rate_limiter import get_llm_user, record_llm_call
             uid, source = _user_id, _source
             if not uid:
                 uid, source = get_llm_user()
             if uid:
-                record_llm_call(uid, source or "api", model)
+                u = data.get("usage") or {}
+                record_llm_call(
+                    uid, source or "api", model,
+                    prompt_tokens=u.get("prompt_tokens", 0),
+                    completion_tokens=u.get("completion_tokens", 0),
+                    total_tokens=u.get("total_tokens", 0),
+                )
         except Exception:
             pass
         return content

@@ -118,13 +118,32 @@ def check_headroom(user_id, call_count=1):
     }
 
 
-def record_llm_call(user_id, call_source="api", model="unknown"):
-    """Record an LLM call in the usage log."""
+def record_llm_call(user_id, call_source="api", model="unknown",
+                    prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                    cost_usd=None):
+    """Record an LLM call in the usage log.
+
+    Token/cost args are optional and default to 0 so existing call sites keep
+    working (rate limiting only counts rows). When token counts are supplied
+    and ``cost_usd`` is None, the cost is estimated from ``shared.llm_pricing``.
+    Powers the admin AI-usage dashboard.
+    """
     try:
         now = datetime.utcnow().isoformat()
+        pt = int(prompt_tokens or 0)
+        ct = int(completion_tokens or 0)
+        tt = int(total_tokens or 0) or (pt + ct)
+        if cost_usd is None:
+            try:
+                from shared.llm_pricing import estimate_cost
+                cost_usd = estimate_cost(model, pt, ct)
+            except Exception:
+                cost_usd = 0.0
         execute(
-            f"INSERT INTO llm_usage_log (user_id, call_source, model, called_at) VALUES ({P}, {P}, {P}, {P})",
-            (user_id, call_source, model, now),
+            f"INSERT INTO llm_usage_log (user_id, call_source, model, "
+            f"prompt_tokens, completion_tokens, total_tokens, cost_usd, called_at) "
+            f"VALUES ({P}, {P}, {P}, {P}, {P}, {P}, {P}, {P})",
+            (user_id, call_source, model, pt, ct, tt, float(cost_usd or 0.0), now),
         )
     except Exception as e:
         logger.warning(f"Failed to record LLM call: {e}")

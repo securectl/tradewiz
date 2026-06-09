@@ -403,6 +403,86 @@ def api_admin_usage():
     } for r in rows])
 
 
+@bp.route("/api/admin/ai-usage")
+@admin_required
+def api_admin_ai_usage():
+    """Admin-only: aggregate Token & AI usage across all users.
+
+    Reads token/cost columns on llm_usage_log (0 for calls logged before the
+    token migration). Window from ?from / ?to (defaults to last 30d). Returns
+    totals + breakdowns by model, source, day, and top users so the frontend
+    can render the dashboard without further math.
+    """
+    from_iso, to_iso, _ = _parse_date_window()
+    win = (from_iso, to_iso)
+
+    totals = query_one(
+        f"SELECT COUNT(*) calls, COALESCE(SUM(prompt_tokens),0) prompt_tokens, "
+        f"COALESCE(SUM(completion_tokens),0) completion_tokens, "
+        f"COALESCE(SUM(total_tokens),0) total_tokens, COALESCE(SUM(cost_usd),0) cost_usd "
+        f"FROM llm_usage_log WHERE called_at >= {P} AND called_at <= {P}", win
+    ) or {}
+
+    by_model = query(
+        f"SELECT COALESCE(model,'unknown') model, COUNT(*) calls, "
+        f"COALESCE(SUM(total_tokens),0) total_tokens, COALESCE(SUM(cost_usd),0) cost_usd "
+        f"FROM llm_usage_log WHERE called_at >= {P} AND called_at <= {P} "
+        f"GROUP BY model ORDER BY cost_usd DESC, calls DESC LIMIT 25", win
+    ) or []
+
+    by_source = query(
+        f"SELECT COALESCE(call_source,'api') call_source, COUNT(*) calls, "
+        f"COALESCE(SUM(total_tokens),0) total_tokens, COALESCE(SUM(cost_usd),0) cost_usd "
+        f"FROM llm_usage_log WHERE called_at >= {P} AND called_at <= {P} "
+        f"GROUP BY call_source ORDER BY calls DESC LIMIT 25", win
+    ) or []
+
+    if IS_POSTGRES:
+        day_expr = "to_char(called_at::timestamp, 'YYYY-MM-DD')"
+    else:
+        day_expr = "substr(called_at, 1, 10)"
+    daily = query(
+        f"SELECT {day_expr} day, COUNT(*) calls, "
+        f"COALESCE(SUM(total_tokens),0) total_tokens, COALESCE(SUM(cost_usd),0) cost_usd "
+        f"FROM llm_usage_log WHERE called_at >= {P} AND called_at <= {P} "
+        f"GROUP BY day ORDER BY day", win
+    ) or []
+
+    top_users = query(
+        f"SELECT u.email, u.name, COUNT(*) calls, "
+        f"COALESCE(SUM(l.total_tokens),0) total_tokens, COALESCE(SUM(l.cost_usd),0) cost_usd "
+        f"FROM llm_usage_log l JOIN users u ON u.id = l.user_id "
+        f"WHERE l.called_at >= {P} AND l.called_at <= {P} "
+        f"GROUP BY u.id, u.email, u.name ORDER BY cost_usd DESC, calls DESC LIMIT 15", win
+    ) or []
+
+    def _f(v):
+        return round(float(v or 0), 6)
+
+    return jsonify({
+        "from": from_iso, "to": to_iso,
+        "totals": {
+            "calls": int(totals.get("calls") or 0),
+            "prompt_tokens": int(totals.get("prompt_tokens") or 0),
+            "completion_tokens": int(totals.get("completion_tokens") or 0),
+            "total_tokens": int(totals.get("total_tokens") or 0),
+            "cost_usd": _f(totals.get("cost_usd")),
+        },
+        "by_model": [{"model": r["model"], "calls": int(r["calls"]),
+                      "total_tokens": int(r["total_tokens"]), "cost_usd": _f(r["cost_usd"])}
+                     for r in by_model],
+        "by_source": [{"source": r["call_source"], "calls": int(r["calls"]),
+                       "total_tokens": int(r["total_tokens"]), "cost_usd": _f(r["cost_usd"])}
+                      for r in by_source],
+        "daily": [{"day": r["day"], "calls": int(r["calls"]),
+                   "total_tokens": int(r["total_tokens"]), "cost_usd": _f(r["cost_usd"])}
+                  for r in daily],
+        "top_users": [{"email": r["email"], "name": r["name"], "calls": int(r["calls"]),
+                       "total_tokens": int(r["total_tokens"]), "cost_usd": _f(r["cost_usd"])}
+                      for r in top_users],
+    })
+
+
 @bp.route("/api/admin/export")
 @admin_required
 def api_admin_export():
