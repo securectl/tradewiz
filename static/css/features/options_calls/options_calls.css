@@ -157,3 +157,11 @@
 }
 .oc-bar:hover { opacity: .7; }
 .oc-trend-note { font-size: 11px; color: var(--text-muted, #8b95a7); margin-top: 6px; }
+
+/* Cross-validation summary */
+.oc-xv { font-size: 12px; margin: -8px 0 16px; color: var(--text-muted, #8b95a7); }
+.oc-xv b { color: var(--text, #e6e9ef); }
+.oc-xv-ok { color: #00c896; font-weight: 700; }
+.oc-xv-warn { color: #ffc837; font-weight: 700; }
+.oc-xv-single { color: #8b95a7; }
+.oc-divergent { background: rgba(255,200,55,.18); color: #ffc837; }

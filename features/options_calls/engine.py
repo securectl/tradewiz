@@ -234,6 +234,133 @@ def get_call_history(symbol, days=RETENTION_DAYS):
         return []
 
 
+# Source priority for the *displayed* numbers; the others cross-validate it.
+SOURCE_PRIORITY = ["webull", "alpaca", "yfinance"]
+
+
+def _gather_sources(sym):
+    """Return {source_name: {price, calls}} for every source that responds.
+    Each adapter is a best-effort seam — failures/unavailability just omit the
+    source so cross-validation works with whatever is present."""
+    out = {}
+    try:
+        from shared.webull_options import fetch_call_chain as _wb
+        wb = _wb(sym)
+        if wb and wb.get("calls"):
+            out["webull"] = {"price": wb.get("price", 0), "calls": wb["calls"]}
+    except Exception as e:
+        logger.debug(f"Webull source error for {sym}: {e}")
+    try:
+        from shared.alpaca_options import fetch_call_chain as _al
+        al = _al(sym)
+        if al and al.get("calls"):
+            out["alpaca"] = {"price": al.get("price", 0), "calls": al["calls"]}
+    except Exception as e:
+        logger.debug(f"Alpaca source error for {sym}: {e}")
+    try:
+        price, calls = _fetch_calls_yf(sym)
+        if calls:
+            out["yfinance"] = {"price": price, "calls": calls}
+    except Exception as e:
+        logger.debug(f"yfinance source error for {sym}: {e}")
+    return out
+
+
+def _chain_index(calls):
+    """Map calls by (strike, expiry) -> {volume, open_interest}."""
+    idx = {}
+    for c in calls:
+        k = (round(float(c.get("strike") or 0), 2), str(c.get("expiry") or "")[:10])
+        idx[k] = {"volume": int(c.get("volume") or 0),
+                  "open_interest": int(c.get("open_interest") or 0)}
+    return idx
+
+
+def _agree(a, b, field):
+    """Do two sources agree on a field? Within 5 absolute or 25% relative.
+    Returns None when both are 0 (nothing meaningful to compare)."""
+    av, bv = a.get(field, 0), b.get(field, 0)
+    if not av and not bv:
+        return None
+    diff = abs(av - bv)
+    if diff <= 5:
+        return True
+    return (diff / max(av, bv, 1)) <= 0.25
+
+
+def _cross_validate(primary_name, sources):
+    """Compare the primary chain against the other sources contract-by-contract.
+    Returns (summary_dict, per_contract_dict keyed by (strike, expiry))."""
+    indexes = {name: _chain_index(s["calls"]) for name, s in sources.items()}
+    names = list(sources.keys())
+    others = [n for n in names if n != primary_name]
+    primary_idx = indexes[primary_name]
+
+    vol_cmp = vol_ok = oi_cmp = oi_ok = 0
+    per_contract = {}
+    for k, pv in primary_idx.items():
+        present = [primary_name] + [n for n in others if k in indexes[n]]
+        entry = {"sources": present, "divergent": False}
+        for n in others:
+            ov = indexes[n].get(k)
+            if not ov:
+                continue
+            va = _agree(pv, ov, "volume")
+            if va is not None:
+                vol_cmp += 1
+                if va:
+                    vol_ok += 1
+                else:
+                    entry["divergent"] = True
+            oa = _agree(pv, ov, "open_interest")
+            if oa is not None:
+                oi_cmp += 1
+                if oa:
+                    oi_ok += 1
+                else:
+                    entry["divergent"] = True
+        per_contract[k] = entry
+
+    def _pct(a, b):
+        return round(a / b * 100, 1) if b else None
+
+    if len(names) > 1:
+        note = "Cross-checked across " + ", ".join(names)
+    else:
+        missing = [s for s in ("webull", "alpaca") if s not in names]
+        note = (f"Single source ({names[0]}) — "
+                f"{'/'.join(missing)} options data unavailable")
+    summary = {
+        "sources": names,
+        "primary": primary_name,
+        "multi_source": len(names) > 1,
+        "volume_compared": vol_cmp,
+        "volume_agreement_pct": _pct(vol_ok, vol_cmp),
+        "oi_compared": oi_cmp,
+        "oi_agreement_pct": _pct(oi_ok, oi_cmp),
+        "divergent_contracts": sum(1 for e in per_contract.values() if e["divergent"]),
+        "note": note,
+    }
+    return summary, per_contract
+
+
+def _annotate_sources(result, per_contract):
+    """Tag each displayed contract (+ top_contract) with which sources reported
+    it and whether the sources diverged, so the UI can flag disagreement."""
+    for bucket in ("increasing", "decreasing"):
+        for c in result.get(bucket, []):
+            pc = per_contract.get((round(c["strike"], 2), c["expiry"][:10]))
+            if pc:
+                c["sources"] = pc["sources"]
+                c["divergent"] = pc["divergent"]
+    tc = result.get("top_contract")
+    if tc:
+        pc = per_contract.get((round(tc["strike"], 2), tc["expiry"][:10]))
+        if pc:
+            tc["sources"] = pc["sources"]
+            tc["divergent"] = pc["divergent"]
+
+
 def get_call_activity(symbol, force_refresh=False):
     """Return the call-activity payload for ``symbol`` (cached).
 
@@ -254,27 +381,21 @@ def get_call_activity(symbol, force_refresh=False):
             if now - ts < ttl:
                 return res
 
-    source = "yfinance"
-    price, calls = 0.0, []
-    try:
-        from shared.webull_options import fetch_call_chain
-        wb = fetch_call_chain(sym)
-        if wb and wb.get("calls"):
-            source = "webull"
-            price, calls = wb.get("price", 0.0), wb["calls"]
-    except Exception as e:
-        logger.debug(f"Webull seam error for {sym}: {e}")
-
-    if not calls:
-        price, calls = _fetch_calls_yf(sym)
-
-    if not calls:
+    # Gather every source that responds, pick a primary by priority, then
+    # cross-validate the rest against it.
+    sources = _gather_sources(sym)
+    if not sources:
         result = {"error": f"No options data available for {sym}", "symbol": sym}
     else:
-        result = _classify(sym, price, calls)
-        result["source"] = source
+        primary = next(n for n in SOURCE_PRIORITY if n in sources)
+        price = sources[primary].get("price") or sources.get("yfinance", {}).get("price", 0)
+        result = _classify(sym, price, sources[primary]["calls"])
+        result["source"] = primary
+        validation, per_contract = _cross_validate(primary, sources)
+        result["validation"] = validation
+        _annotate_sources(result, per_contract)
         # Persist today's snapshot (daily dedupe) then attach the 30-day trend.
-        _record_snapshot(result, source)
+        _record_snapshot(result, primary)
         result["history"] = get_call_history(sym)
 
     with _LOCK:

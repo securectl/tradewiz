@@ -64,9 +64,29 @@ function renderOptionCalls(d) {
     html += _ocTile('Vol / OI', t.vol_oi_ratio != null ? t.vol_oi_ratio.toFixed(2) : '—');
     html += _ocTile('Contracts', _ocFmt(t.contracts));
     html += '</div>';
-    html += '<div class="oc-meta">Source: ' + srcLabel +
+    html += '<div class="oc-meta">Primary source: ' + srcLabel +
         ' · ' + (t.increasing_count || 0) + ' increasing · ' +
         (t.decreasing_count || 0) + ' decreasing</div>';
+
+    // Cross-validation across Webull / Alpaca / Yahoo
+    if (d.validation) {
+        const v = d.validation;
+        let xv = '<div class="oc-xv">';
+        if (v.multi_source) {
+            const va = v.volume_agreement_pct;
+            const oa = v.oi_agreement_pct;
+            xv += '<span class="oc-xv-ok">✓ Cross-validated</span> across <b>' +
+                (v.sources || []).join(', ') + '</b>';
+            if (va != null) xv += ' · volume agreement ' + va + '% (' + v.volume_compared + ' contracts)';
+            if (oa != null) xv += ' · OI agreement ' + oa + '%';
+            if (v.divergent_contracts) xv += ' · <span class="oc-xv-warn">⚠ ' +
+                v.divergent_contracts + ' divergent</span>';
+        } else {
+            xv += '<span class="oc-xv-single">ⓘ ' + (v.note || 'Single source') + '</span>';
+        }
+        xv += '</div>';
+        html += xv;
+    }
 
     // Most-interest contract — the single most actively traded call.
     if (d.top_contract) {
@@ -137,10 +157,11 @@ function _ocTable(title, subtitle, rows, cls) {
         '<th>Strike</th><th>Expiry</th><th>Vol</th><th>OI</th><th>Vol/OI</th><th>Last</th>' +
         '</tr></thead><tbody>';
     rows.forEach(r => {
+        const div = r.divergent ? ' <span class="oc-tag oc-divergent" title="Sources disagree on this contract">⚠ divergent</span>' : '';
         html += '<tr' + (r.top ? ' class="oc-top-row"' : '') + '>' +
             '<td>' + (r.top ? '🔥 ' : '') + '$' + r.strike +
                 ' <span class="oc-tag ' + _ocMoneyClass(r.moneyness) + '">' +
-                r.moneyness + '</span></td>' +
+                r.moneyness + '</span>' + div + '</td>' +
             '<td>' + r.expiry + '</td>' +
             '<td>' + _ocFmt(r.volume) + '</td>' +
             '<td>' + _ocFmt(r.open_interest) + '</td>' +

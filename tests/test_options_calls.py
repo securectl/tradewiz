@@ -95,6 +95,7 @@ class TestGetCallActivity(unittest.TestCase):
         from features.options_calls import engine
         sample = [{"strike": 50, "expiry": "2026-07-17", "volume": 200, "open_interest": 100, "last": 1.0}]
         with mock.patch("shared.webull_options.fetch_call_chain", return_value=None), \
+             mock.patch("shared.alpaca_options.fetch_call_chain", return_value=None), \
              mock.patch.object(engine, "_fetch_calls_yf", return_value=(50.0, sample)), \
              mock.patch.object(engine, "_record_snapshot"), \
              mock.patch.object(engine, "get_call_history", return_value=[]):
@@ -102,23 +103,45 @@ class TestGetCallActivity(unittest.TestCase):
         self.assertEqual(out["source"], "yfinance")
         self.assertEqual(out["symbol"], "ABC")
         self.assertEqual(out["totals"]["call_volume"], 200)
+        self.assertFalse(out["validation"]["multi_source"])
 
     def test_uses_webull_when_available(self):
         from features.options_calls import engine
         wb = {"source": "webull", "price": 50.0,
               "calls": [{"strike": 50, "expiry": "2026-07-17", "volume": 300, "open_interest": 100, "last": 1.0}]}
         with mock.patch("shared.webull_options.fetch_call_chain", return_value=wb), \
+             mock.patch("shared.alpaca_options.fetch_call_chain", return_value=None), \
+             mock.patch.object(engine, "_fetch_calls_yf", return_value=(0.0, [])), \
              mock.patch.object(engine, "_record_snapshot"), \
              mock.patch.object(engine, "get_call_history", return_value=[]):
             out = engine.get_call_activity("ABC")
         self.assertEqual(out["source"], "webull")
         self.assertEqual(out["totals"]["call_volume"], 300)
 
+    def test_cross_validates_webull_and_yahoo(self):
+        from features.options_calls import engine
+        wb = {"source": "webull", "price": 50.0,
+              "calls": [{"strike": 50, "expiry": "2026-07-17", "volume": 300, "open_interest": 100, "last": 1.0}]}
+        yf = [{"strike": 50, "expiry": "2026-07-17", "volume": 310, "open_interest": 100, "last": 1.0}]
+        with mock.patch("shared.webull_options.fetch_call_chain", return_value=wb), \
+             mock.patch("shared.alpaca_options.fetch_call_chain", return_value=None), \
+             mock.patch.object(engine, "_fetch_calls_yf", return_value=(50.0, yf)), \
+             mock.patch.object(engine, "_record_snapshot"), \
+             mock.patch.object(engine, "get_call_history", return_value=[]):
+            out = engine.get_call_activity("ABC")
+        v = out["validation"]
+        self.assertTrue(v["multi_source"])
+        self.assertEqual(set(v["sources"]), {"webull", "yfinance"})
+        self.assertEqual(v["primary"], "webull")
+        # 300 vs 310 agree (within 25% / >5 abs but <3.3%)
+        self.assertEqual(v["volume_agreement_pct"], 100.0)
+
     def test_records_snapshot_and_attaches_history(self):
         from features.options_calls import engine
         sample = [{"strike": 50, "expiry": "2026-07-17", "volume": 200, "open_interest": 100, "last": 1.0}]
         hist = [{"date": "2026-06-08", "call_volume": 150, "vol_oi_ratio": 1.5, "read": "ACCUMULATING"}]
         with mock.patch("shared.webull_options.fetch_call_chain", return_value=None), \
+             mock.patch("shared.alpaca_options.fetch_call_chain", return_value=None), \
              mock.patch.object(engine, "_fetch_calls_yf", return_value=(50.0, sample)), \
              mock.patch.object(engine, "_record_snapshot") as rec, \
              mock.patch.object(engine, "get_call_history", return_value=hist):
@@ -129,6 +152,7 @@ class TestGetCallActivity(unittest.TestCase):
     def test_error_when_no_chain(self):
         from features.options_calls import engine
         with mock.patch("shared.webull_options.fetch_call_chain", return_value=None), \
+             mock.patch("shared.alpaca_options.fetch_call_chain", return_value=None), \
              mock.patch.object(engine, "_fetch_calls_yf", return_value=(0.0, [])):
             out = engine.get_call_activity("NOPE")
         self.assertIn("error", out)
@@ -186,6 +210,58 @@ class TestSnapshotTable(unittest.TestCase):
         import inspect, migrations
         src = inspect.getsource(migrations)
         self.assertIn("options_call_snapshots", src)
+
+
+class TestCrossValidation(unittest.TestCase):
+    def test_agree_tolerance(self):
+        from features.options_calls.engine import _agree
+        self.assertTrue(_agree({"volume": 100}, {"volume": 110}, "volume"))   # 10% rel
+        self.assertFalse(_agree({"volume": 100}, {"volume": 200}, "volume"))  # 100% rel
+        self.assertTrue(_agree({"volume": 2}, {"volume": 4}, "volume"))       # <=5 abs
+        self.assertIsNone(_agree({"volume": 0}, {"volume": 0}, "volume"))     # nothing to compare
+
+    def test_cross_validate_summary_and_divergence(self):
+        from features.options_calls.engine import _cross_validate
+        sources = {
+            "webull": {"price": 50, "calls": [
+                {"strike": 50, "expiry": "2026-07-17", "volume": 300, "open_interest": 100},
+                {"strike": 55, "expiry": "2026-07-17", "volume": 100, "open_interest": 50}]},
+            "yfinance": {"price": 50, "calls": [
+                {"strike": 50, "expiry": "2026-07-17", "volume": 305, "open_interest": 100},   # agrees
+                {"strike": 55, "expiry": "2026-07-17", "volume": 900, "open_interest": 50}]},  # volume diverges
+        }
+        summary, per = _cross_validate("webull", sources)
+        self.assertTrue(summary["multi_source"])
+        self.assertEqual(summary["divergent_contracts"], 1)
+        self.assertEqual(per[(55.0, "2026-07-17")]["divergent"], True)
+        self.assertEqual(per[(50.0, "2026-07-17")]["divergent"], False)
+        self.assertIn("webull", per[(50.0, "2026-07-17")]["sources"])
+        self.assertIn("yfinance", per[(50.0, "2026-07-17")]["sources"])
+
+    def test_single_source_note(self):
+        from features.options_calls.engine import _cross_validate
+        sources = {"yfinance": {"price": 50, "calls": [
+            {"strike": 50, "expiry": "2026-07-17", "volume": 300, "open_interest": 100}]}}
+        summary, _ = _cross_validate("yfinance", sources)
+        self.assertFalse(summary["multi_source"])
+        self.assertIn("unavailable", summary["note"])
+
+
+class TestAlpacaOptionsSeam(unittest.TestCase):
+    def test_occ_parse(self):
+        from shared.alpaca_options import _parse_occ
+        strike, expiry, is_call = _parse_occ("AAPL250117C00150000")
+        self.assertEqual(strike, 150.0)
+        self.assertEqual(expiry, "2025-01-17")
+        self.assertTrue(is_call)
+        # a put
+        _, _, is_call_p = _parse_occ("AAPL250117P00150000")
+        self.assertFalse(is_call_p)
+
+    def test_unconfigured_returns_none(self):
+        from shared import alpaca_options
+        with mock.patch.object(alpaca_options, "_get_client", return_value=None):
+            self.assertIsNone(alpaca_options.fetch_call_chain("AAPL"))
 
 
 class TestWebullSeam(unittest.TestCase):
