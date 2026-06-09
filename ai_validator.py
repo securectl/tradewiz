@@ -232,6 +232,18 @@ Market Cap: ${info.get('market_cap', 0):,.0f}""")
     parts.append(f"""CURRENT PRICE: ${_num(analysis['current_price'])}
 Change: {_num(analysis['change'])} ({_num(analysis['change_pct'])}%)""")
 
+    # Market-condition backdrop (SPY/Nasdaq/VIX/Fear&Greed gauge) so the LLM
+    # weighs macro risk, not just the single name. Always included when present.
+    mc = analysis.get("market_condition")
+    if mc and mc.get("available"):
+        try:
+            from shared.market_gauge import summarize_for_llm
+            block = summarize_for_llm(mc)
+            if block:
+                parts.append(block)
+        except Exception:
+            pass
+
     # Indicators (skip for research context)
     if context != "research":
         parts.append(f"""TECHNICAL INDICATORS:

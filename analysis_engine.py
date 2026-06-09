@@ -1604,11 +1604,18 @@ def calculate_moving_averages_series(df: pd.DataFrame) -> dict:
     }
 
 
-def generate_recommendation(indicators: dict, breakout_status: dict, current_price: float) -> dict:
+def generate_recommendation(indicators: dict, breakout_status: dict, current_price: float,
+                            market: dict = None) -> dict:
     """Rule-based BUY / ACCUMULATE / HOLD / REDUCE / SELL signal from the
     technical picture — trend (MA structure), RSI, MACD, breakout, Bollinger.
     Returns action + a -100..100 score + confidence + plain-English reasons,
-    so the analyzer can say when to buy, hold, or dispose."""
+    so the analyzer can say when to buy, hold, or dispose.
+
+    When ``market`` (the market-condition gauge from shared.market_gauge) is
+    supplied, the score is risk-adjusted by the broad-market backdrop: a
+    defensive (SELL) tape penalizes bullish setups and caps a marginal BUY,
+    while a risk-on (BUY) tape gives a small tailwind. This is what makes the
+    analyzer macro-aware so users limit risk in bad markets."""
     indicators = indicators or {}
     score = 0
     reasons = []
@@ -1671,6 +1678,23 @@ def generate_recommendation(indicators: dict, breakout_status: dict, current_pri
     elif bb_low and current_price and current_price < bb_low:
         score += 3; reasons.append("Below the lower Bollinger Band — stretched")
 
+    # ── Market-condition risk adjustment ──
+    # Fold the broad-market gauge into the per-stock score so verdicts are
+    # macro-aware. A defensive tape limits risk; a risk-on tape adds conviction.
+    market_meta = None
+    if market and market.get("available"):
+        mstance = market.get("stance")
+        mscore = market.get("score", 0)
+        market_meta = {"stance": mstance, "score": mscore}
+        if mstance == "SELL":
+            score -= 15
+            reasons.insert(0, f"Market gauge defensive (SELL {mscore:+d}) — macro headwind, limiting risk")
+        elif mstance == "BUY":
+            score += 8
+            reasons.insert(0, f"Market gauge risk-on (BUY {mscore:+d}) — macro tailwind")
+        else:
+            reasons.insert(0, f"Market gauge neutral (HOLD {mscore:+d})")
+
     score = max(-100, min(100, score))
     if score >= 35:
         action, label, summary = "BUY", "Buy", "Bullish confluence — favorable entry."
@@ -1683,10 +1707,16 @@ def generate_recommendation(indicators: dict, breakout_status: dict, current_pri
     else:
         action, label, summary = "SELL", "Sell / Dispose", "Bearish confluence — distribute or avoid."
 
+    # In a defensive market, never let a marginal setup read as an outright BUY.
+    if market_meta and market_meta["stance"] == "SELL" and action == "BUY":
+        action, label = "ACCUMULATE", "Accumulate / Hold"
+        summary = "Bullish setup, but market is risk-off — scale in cautiously, limit size."
+
     return {
         "action": action, "label": label, "score": score,
         "confidence": int(min(95, 50 + abs(score) // 2)),
         "summary": summary, "reasons": reasons[:6],
+        "market": market_meta,
     }
 
 
@@ -1898,6 +1928,16 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
             recent_news_lines = []
             active_catalysts_lines = []
 
+    # Market-condition gauge — fetched once (cached 15 min) so the per-stock
+    # verdict is macro-aware. Stocks only (crypto trades a different tape).
+    market_condition = None
+    if not is_crypto:
+        try:
+            from shared.market_gauge import get_market_gauge
+            market_condition = get_market_gauge()
+        except Exception:
+            market_condition = None
+
     return {
         "ticker": ticker.upper(),
         "info": info,
@@ -1911,7 +1951,8 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
         "money_flow": money_flow,
         "breakout_status": breakout_status,
         "trade_plan": trade_plan,
-        "recommendation": generate_recommendation(indicators, breakout_status, current_price),
+        "market_condition": market_condition,  # consumed by frontend + ai_validator
+        "recommendation": generate_recommendation(indicators, breakout_status, current_price, market_condition),
         "moving_averages": ma_chart,
         "trendline_tests": trendline_tests_ts,
         "candle_patterns": [

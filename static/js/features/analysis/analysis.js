@@ -113,6 +113,7 @@ function renderAnalysis(data) {
     }
 
     // Right panel
+    renderMarketGauge(data.market_condition);
     renderRecommendation(data.recommendation);
     renderMoneyFlow(data.money_flow);
     renderBreakoutStatus(data.breakout_status);
@@ -588,6 +589,43 @@ function drawPatternOverlay(data) {
 }
 
 // ─── Right Panel Renderers ───────────────────────────────────
+
+function renderMarketGauge(mc) {
+    const panel = document.getElementById('right-panel');
+    if (!panel) return;
+    let box = document.getElementById('market-gauge-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'market-gauge-box';
+        box.className = 'panel-section';
+        panel.insertBefore(box, panel.firstChild);  // sits above Recommendation
+    }
+    if (!mc || !mc.available) { box.innerHTML = ''; return; }
+    const c = mc.components || {};
+    const chip = (label, val, ok) =>
+        `<span class="mg-chip ${ok === true ? 'mg-pos' : ok === false ? 'mg-neg' : ''}">${label}: ${val}</span>`;
+    const chips = [];
+    if (c.spy && !c.spy.error) chips.push(chip('SPY', (c.spy.change_5d >= 0 ? '+' : '') + c.spy.change_5d + '%', c.spy.change_5d >= 0));
+    if (c.nasdaq && !c.nasdaq.error) chips.push(chip('QQQ', (c.nasdaq.change_5d >= 0 ? '+' : '') + c.nasdaq.change_5d + '%', c.nasdaq.change_5d >= 0));
+    if (c.vix && !c.vix.error) chips.push(chip('VIX', c.vix.value, c.vix.value < 23));
+    if (c.fear_greed && !c.fear_greed.error) chips.push(chip('F&G', c.fear_greed.score + ' ' + (c.fear_greed.rating || ''), c.fear_greed.score >= 45));
+    const volFlags = [];
+    if (c.spy && c.spy.vol_direction && c.spy.vol_direction !== 'NORMAL') volFlags.push('SPY ' + c.spy.vol_direction);
+    if (c.nasdaq && c.nasdaq.vol_direction && c.nasdaq.vol_direction !== 'NORMAL') volFlags.push('QQQ ' + c.nasdaq.vol_direction);
+    const sign = mc.score > 0 ? '+' : '';
+    box.innerHTML = `
+        <div class="panel-section-title">Market Gauge</div>
+        <div class="mg-card" style="border-left:4px solid ${mc.color}">
+            <div class="mg-top">
+                <span class="mg-stance" style="color:${mc.color}">${mc.stance}</span>
+                <span class="mg-label">${mc.label}</span>
+            </div>
+            <div class="mg-score">Market risk score ${sign}${mc.score} / 100</div>
+            <div class="mg-chips">${chips.join('')}</div>
+            ${volFlags.length ? `<div class="mg-vol">⚡ ${volFlags.join(' · ')}</div>` : ''}
+            <div class="mg-note">Verdict below is risk-adjusted for this backdrop.</div>
+        </div>`;
+}
 
 function renderRecommendation(rec) {
     const panel = document.getElementById('right-panel');

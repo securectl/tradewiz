@@ -17,6 +17,17 @@ from db import execute
 bp = Blueprint("analysis", __name__)
 
 
+@bp.route("/api/market/gauge")
+@login_required
+def api_market_gauge():
+    """Market-condition risk gauge — BUY/HOLD/SELL from SPY, Nasdaq (QQQ),
+    VIX, and Fear & Greed. Helps users gauge broad-market risk before trading.
+    ?refresh=1 bypasses the 15-minute cache."""
+    from shared.market_gauge import get_market_gauge
+    force = request.args.get("refresh") in ("1", "true", "yes")
+    return jsonify(get_market_gauge(force_refresh=force))
+
+
 @bp.route("/api/analyze/<ticker>/news")
 @login_required
 def api_news(ticker):
