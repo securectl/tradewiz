@@ -606,6 +606,25 @@ def admin_setup():
 
     row = query_one(f"SELECT * FROM users WHERE email = {P}", (admin_email,))
 
+    # Harden (M1): this route is unauthenticated. If the ADMIN_EMAIL user already
+    # holds the admin role (e.g. bootstrapped via Google SSO with no password),
+    # anyone could POST here to set a password and take over the account. Treat
+    # an existing admin as already-configured regardless of password state.
+    if row and query_one(
+        f"SELECT 1 FROM user_roles WHERE user_id = {P} AND role = 'admin'", (row["id"],)
+    ):
+        return render_template("admin_setup.html",
+                               error="Admin account already configured. Use Admin Login.",
+                               email=admin_email, already_setup=True)
+
+    # Optional hard gate: when ADMIN_SETUP_TOKEN is set (recommended in prod),
+    # a matching token must be supplied to use this bootstrap route at all.
+    _setup_token = (os.getenv("ADMIN_SETUP_TOKEN") or "").strip()
+    if _setup_token and (request.values.get("setup_token") or "").strip() != _setup_token:
+        return render_template("admin_setup.html", email=admin_email,
+                               create_new=not row, need_token=True,
+                               error="A valid setup token is required.")
+
     if request.method == "GET":
         if row and row.get("password_hash"):
             return render_template("admin_setup.html",
@@ -711,10 +730,12 @@ def admin_setup():
 
 @auth_bp.route("/dev-login", methods=["POST"])
 def dev_login():
-    """Development-only login bypass (when Google OAuth is not configured).
-    Auto-grants admin+trader roles so all features are accessible locally."""
-    if os.getenv("GOOGLE_CLIENT_ID"):
-        return jsonify({"error": "Dev login disabled when OAuth is configured"}), 403
+    """Development-only login bypass. Auto-grants admin+trader roles for local
+    access. Hard-disabled in production (never keyed on OAuth config, which left
+    it reachable on any prod deploy without GOOGLE_CLIENT_ID)."""
+    from app_config import dev_login_enabled
+    if not dev_login_enabled():
+        return jsonify({"error": "Dev login is disabled"}), 403
 
     email = request.form.get("email", "dev@localhost")
     name = request.form.get("name", "Developer")

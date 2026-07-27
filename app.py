@@ -23,8 +23,9 @@ app = Flask(__name__)
 app.json.sort_keys = False
 
 # ─── Secret key with production guard ────────────────────────────────
+from app_config import is_production
 _secret = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
-if _secret in ("dev-secret-key-change-me", "change-me-to-a-random-string") and os.getenv("DATABASE_URL"):
+if _secret in ("dev-secret-key-change-me", "change-me-to-a-random-string") and is_production():
     raise RuntimeError(
         "FATAL: SECRET_KEY is still the default. "
         "Set a strong random SECRET_KEY in your environment for production."
@@ -32,7 +33,7 @@ if _secret in ("dev-secret-key-change-me", "change-me-to-a-random-string") and o
 app.config["SECRET_KEY"] = _secret
 
 # ─── Session cookie hardening ────────────────────────────────────────
-app.config["SESSION_COOKIE_SECURE"] = bool(os.getenv("DATABASE_URL"))
+app.config["SESSION_COOKIE_SECURE"] = is_production()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
@@ -385,6 +386,9 @@ def _ensure_startup():
 
 
 if __name__ == "__main__":
+    from app_config import debug_enabled
     init_db()
     start_background_checker()
-    app.run(debug=True, port=5001)
+    # Debugger is off unless FLASK_DEBUG=1 and not production (Werkzeug debug
+    # console is an RCE surface). Production runs under gunicorn, not this path.
+    app.run(debug=debug_enabled(), port=5001)
