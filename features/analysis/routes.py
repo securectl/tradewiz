@@ -196,6 +196,14 @@ def api_validate():
         set_llm_user(_uid(), "validate")
         fast_mode = data.pop("fast_mode", None)
         result = validate_setup(data, fast_mode=fast_mode)
+        # Attach the measured-accuracy gate: how often has THIS confidence bucket
+        # been right on ~2-week direction, and is the call actionable?
+        try:
+            from shared.ai_validation_accuracy import annotate_verdict
+            if isinstance(result, dict) and result.get("verdict"):
+                result["verdict"]["accuracy"] = annotate_verdict(result["verdict"])
+        except Exception:
+            pass  # gate is advisory — never break the verdict
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"AI validation failed: {str(e)}"}), 500

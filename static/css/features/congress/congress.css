@@ -56,8 +56,8 @@
     font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
     text-transform: uppercase; letter-spacing: 0.3px;
 }
-.cong-house { background: rgba(79,138,255,0.1); color: #4f8aff; }
-.cong-senate { background: rgba(124,93,250,0.1); color: #7c5dfa; }
+.cong-house { background: rgba(79,138,255,0.1); color: var(--accent-blue); }
+.cong-senate { background: rgba(124,93,250,0.1); color: var(--accent-purple); }
 
 .cong-pdf-link {
     color: var(--accent-blue); text-decoration: none; font-weight: 600; font-size: 11px;
@@ -69,8 +69,8 @@
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 6px 10px; border-radius: 6px; margin-bottom: 4px; font-size: 12px;
 }
-.cong-buy { background: rgba(0,200,150,0.04); border-left: 3px solid #00c896; }
-.cong-sell { background: rgba(255,71,87,0.04); border-left: 3px solid #ff4757; }
+.cong-buy { background: rgba(0,200,150,0.04); border-left: 3px solid var(--accent-green); }
+.cong-sell { background: rgba(255,71,87,0.04); border-left: 3px solid var(--accent-red); }
 .cong-trade-name { color: var(--text-primary); font-weight: 500; flex: 1; min-width: 100px; }
 .cong-trade-amount { color: var(--text-bright); font-weight: 700; font-variant-numeric: tabular-nums; }
 .cong-trade-date { color: var(--text-secondary); font-size: 10px; }

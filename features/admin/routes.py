@@ -442,10 +442,10 @@ def api_admin_ai_usage():
     else:
         day_expr = "substr(called_at, 1, 10)"
     daily = query(
-        f"SELECT {day_expr} day, COUNT(*) calls, "
+        f"SELECT {day_expr} d, COUNT(*) calls, "
         f"COALESCE(SUM(total_tokens),0) total_tokens, COALESCE(SUM(cost_usd),0) cost_usd "
         f"FROM llm_usage_log WHERE called_at >= {P} AND called_at <= {P} "
-        f"GROUP BY day ORDER BY day", win
+        f"GROUP BY d ORDER BY d", win
     ) or []
 
     top_users = query(
@@ -474,7 +474,7 @@ def api_admin_ai_usage():
         "by_source": [{"source": r["call_source"], "calls": int(r["calls"]),
                        "total_tokens": int(r["total_tokens"]), "cost_usd": _f(r["cost_usd"])}
                       for r in by_source],
-        "daily": [{"day": r["day"], "calls": int(r["calls"]),
+        "daily": [{"day": r["d"], "calls": int(r["calls"]),
                    "total_tokens": int(r["total_tokens"]), "cost_usd": _f(r["cost_usd"])}
                   for r in daily],
         "top_users": [{"email": r["email"], "name": r["name"], "calls": int(r["calls"]),
@@ -983,16 +983,18 @@ def api_admin_llm_models_snapshot_delete(snap_id):
 # (user_id=0) and are read by the gate-1 / claude_gating / watchdog_gating
 # call sites via shared.runtime_config.
 
-_OLLAMA_KEYS = ("ollama_url", "ollama_api_key", "ollama_model")
+_OLLAMA_KEYS = ("ollama_url", "ollama_api_key", "ollama_model", "ollama_fallback_enabled")
 _OLLAMA_ENV_ALIASES = {
-    "ollama_url":     ("OLLAMA_URL",),
-    "ollama_api_key": ("OLLAMA_API_KEY",),
-    "ollama_model":   ("OLLAMA_MODEL",),
+    "ollama_url":              ("OLLAMA_URL",),
+    "ollama_api_key":          ("OLLAMA_API_KEY",),
+    "ollama_model":            ("OLLAMA_MODEL",),
+    "ollama_fallback_enabled": ("OLLAMA_FALLBACK_ENABLED",),
 }
 _OLLAMA_DEFAULTS = {
-    "ollama_url":     "https://ollama.com",
-    "ollama_api_key": "",
-    "ollama_model":   "gpt-oss:20b",
+    "ollama_url":              "https://ollama.com",
+    "ollama_api_key":          "",
+    "ollama_model":            "gpt-oss:20b",
+    "ollama_fallback_enabled": "0",   # OpenRouter→Ollama auto-failover, off by default
 }
 
 
@@ -1008,6 +1010,12 @@ def api_admin_ollama_config_get():
             out[k] = {"value_masked": mask_secret(val), "is_set": bool(val), "source": src}
         else:
             out[k] = {"value": val, "source": src}
+    # Surface how often the OpenRouter→Ollama backup has actually kicked in.
+    try:
+        from shared.ollama_fallback import get_stats
+        out["_fallback_stats"] = get_stats()
+    except Exception:
+        out["_fallback_stats"] = {"fallback_calls": 0, "last_used": None, "last_reason": None}
     return jsonify(out)
 
 
@@ -1070,6 +1078,68 @@ def api_admin_ollama_config_clear():
         clear_setting(k)
     logger.warning(f"Admin {_uid()} cleared all Ollama config overrides")
     return jsonify({"ok": True})
+
+
+# ─── AI-validation accuracy calibration (measure + gate the panel) ──────
+_calib_run = {"status": "idle", "progress": 0, "total": 0,
+              "started_at": None, "error": None}
+
+
+@bp.route("/api/admin/ai-validation/calibrate", methods=["POST"])
+@admin_required
+def api_admin_ai_calibrate():
+    """Replay the AI validation panel over history and store the measured
+    per-confidence hit-rate (~2-week direction). Runs in the background on
+    whatever provider validate_setup is configured for — point the LLM role
+    overrides at ollama/* first to run it on Ollama Cloud (≈0 OpenRouter cost).
+
+    Body (all optional): tickers[], start_date, end_date, step, sample_per_ticker.
+    """
+    import threading
+    from datetime import datetime
+
+    if _calib_run["status"] == "running":
+        return jsonify({"error": "calibration already running", "run": _calib_run}), 409
+
+    data = request.get_json(silent=True) or {}
+    tickers = data.get("tickers") or [
+        "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AMD", "TSLA", "JPM", "XOM"]
+    start = data.get("start_date", "2023-01-01")
+    end = data.get("end_date", "2025-06-30")
+    try:
+        step = max(5, int(data.get("step", 15)))
+        spt = max(3, int(data.get("sample_per_ticker", 12)))
+    except (TypeError, ValueError):
+        step, spt = 15, 12
+
+    _calib_run.update({"status": "running", "progress": 0, "total": len(tickers),
+                       "started_at": datetime.now().isoformat(), "error": None})
+
+    def _cb(done, total):
+        _calib_run["progress"], _calib_run["total"] = done, total
+
+    def _worker():
+        try:
+            from shared.ai_validation_accuracy import run_calibration
+            run_calibration(tickers, start, end, step=step,
+                            sample_per_ticker=spt, progress_cb=_cb)
+            _calib_run["status"] = "completed"
+        except Exception as e:
+            logger.exception("AI-validation calibration failed")
+            _calib_run["status"] = "failed"
+            _calib_run["error"] = str(e)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    logger.warning(f"Admin {_uid()} started AI-validation calibration on {len(tickers)} tickers")
+    return jsonify({"ok": True, "tickers": tickers, "start_date": start, "end_date": end})
+
+
+@bp.route("/api/admin/ai-validation/calibration", methods=["GET"])
+@admin_required
+def api_admin_ai_calibration_get():
+    """Current calibration status + the stored table."""
+    from shared.ai_validation_accuracy import load_calibration
+    return jsonify({"run": _calib_run, "table": load_calibration()})
 
 
 # ─── Per-user usage report — admin reporting ────────────────────────────

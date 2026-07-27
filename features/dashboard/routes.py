@@ -309,7 +309,7 @@ def api_oversold():
             f"FROM screener_results WHERE category='oversold' AND scan_date >= {cut} "
             f"AND (verdict IS NULL OR UPPER(verdict) NOT IN ('FALLING KNIFE','AVOID')) "
             f"GROUP BY ticker HAVING COUNT(DISTINCT scan_date) >= 2 "
-            f"ORDER BY days DESC, conf DESC LIMIT 12"
+            f"ORDER BY days DESC, conf DESC LIMIT 20"
         ) or []
     except Exception as e:
         logger.warning(f"oversold query failed: {e}")

@@ -1937,6 +1937,8 @@ function switchTab(tab, skipHash) {
     const claudeBotContent = document.getElementById('claude-bot-content');
     const dashboardContent = document.getElementById('dashboard-content');
     const optionCallsContent = document.getElementById('option-calls-content');
+    const earningsContent = document.getElementById('earnings-content');
+    const newsContent = document.getElementById('news-content');
 
     mainContent.style.display = 'none';
     if (dashboardContent) dashboardContent.style.display = 'none';
@@ -1954,6 +1956,8 @@ function switchTab(tab, skipHash) {
     if (watchdogContent) watchdogContent.style.display = 'none';
     if (claudeBotContent) claudeBotContent.style.display = 'none';
     if (optionCallsContent) optionCallsContent.style.display = 'none';
+    if (earningsContent) earningsContent.style.display = 'none';
+    if (newsContent) newsContent.style.display = 'none';
     if (autotradingContent) autotradingContent.style.display = 'none';
     if (stocktradingContent) stocktradingContent.style.display = 'none';
     if (adminContent) adminContent.style.display = 'none';
@@ -2035,6 +2039,12 @@ function switchTab(tab, skipHash) {
     } else if (tab === 'option-calls') {
         if (optionCallsContent) optionCallsContent.style.display = 'block';
         if (typeof initOptionCalls === 'function') initOptionCalls();
+    } else if (tab === 'earnings') {
+        if (earningsContent) earningsContent.style.display = 'block';
+        if (typeof initEarningsCalendar === 'function') initEarningsCalendar();
+    } else if (tab === 'news') {
+        if (newsContent) newsContent.style.display = 'block';
+        if (typeof loadNewsTab === 'function') loadNewsTab();
     } else if (tab === 'finskills') {
         finskillsContent.style.display = 'block';
         loadFinSkills();
@@ -2070,6 +2080,7 @@ function switchTab(tab, skipHash) {
         }, 5000);
     } else if (tab === 'admin') {
         adminContent.style.display = 'block';
+        if (typeof switchAdminTab === 'function') switchAdminTab('usage');
         loadAdminUsers();
         loadAdminInvites();
         loadAdminConfig();
@@ -2471,16 +2482,28 @@ function renderNarrativeDashboard(container, d, assetFilter) {
     container.innerHTML = html;
 }
 
-/* ─── Theme switcher (Aurora / Terminal / Daylight) ─────────── */
+/* ─── Theme switcher ─────────────────────────────────────────
+   Themes live in core.css as html[data-theme="..."] blocks. Persisted in
+   localStorage('tw_theme') and applied before paint by the inline script in
+   index.html. Selecting a theme only flips data-theme — every styled element
+   follows via CSS custom properties (canonical tokens + bridge aliases). */
+var TW_THEMES = ['aurora', 'midnight', 'ember', 'nord', 'terminal', 'daylight', 'sandstone'];
+
 function setTheme(t) {
+    if (TW_THEMES.indexOf(t) === -1) t = 'aurora';
     document.documentElement.setAttribute('data-theme', t);
     try { localStorage.setItem('tw_theme', t); } catch (e) {}
+    var sel = document.getElementById('theme-select');
+    if (sel && sel.value !== t) sel.value = t;
+    // legacy button row (if still present anywhere)
     document.querySelectorAll('.theme-switch-btn').forEach(function (b) {
         b.classList.toggle('active', b.dataset.theme === t);
     });
 }
 document.addEventListener('DOMContentLoaded', function () {
     var t = document.documentElement.getAttribute('data-theme') || 'aurora';
+    var sel = document.getElementById('theme-select');
+    if (sel) sel.value = t;
     document.querySelectorAll('.theme-switch-btn').forEach(function (b) {
         b.classList.toggle('active', b.dataset.theme === t);
     });

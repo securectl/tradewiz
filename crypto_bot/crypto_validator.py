@@ -145,6 +145,17 @@ def _call_openrouter(model: str, messages: list, timeout: int = 60, role: str = 
             pass
         return content
     except Exception as e:
+        # OpenRouter failed (credits/rate-limit/transport). Fall over to Ollama
+        # Cloud when the admin enabled the backup, else surface the error.
+        try:
+            from shared.ollama_fallback import try_fallback
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            fb = try_fallback(messages, temperature=0.1, max_tokens=512, timeout=timeout,
+                              reason=f"openrouter_error_{status}" if status else "openrouter_error")
+            if fb is not None:
+                return fb
+        except Exception:
+            pass
         return json.dumps({"error": str(e)})
 
 

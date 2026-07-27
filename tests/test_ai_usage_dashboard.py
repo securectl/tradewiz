@@ -90,7 +90,7 @@ class TestUsageAggregation(unittest.TestCase):
                   "total_tokens": 45, "cost_usd": 0.5}
         by_model = [{"model": "openai/gpt-4o", "calls": 2, "total_tokens": 40, "cost_usd": 0.45}]
         by_source = [{"call_source": "screener", "calls": 3, "total_tokens": 45, "cost_usd": 0.5}]
-        daily = [{"day": "2026-06-09", "calls": 3, "total_tokens": 45, "cost_usd": 0.5}]
+        daily = [{"d": "2026-06-09", "calls": 3, "total_tokens": 45, "cost_usd": 0.5}]
         top_users = [{"email": "a@b.com", "name": "A", "calls": 3, "total_tokens": 45, "cost_usd": 0.5}]
 
         from app import app
@@ -108,6 +108,30 @@ class TestUsageAggregation(unittest.TestCase):
         self.assertEqual(data["by_source"][0]["source"], "screener")
         self.assertEqual(data["daily"][0]["day"], "2026-06-09")
         self.assertEqual(data["top_users"][0]["email"], "a@b.com")
+
+
+class TestUsageRouteRealDb(unittest.TestCase):
+    """Exercise the REAL SQL end-to-end.
+
+    TestUsageAggregation mocks query()/query_one(), so it cannot catch dialect
+    errors in the SQL strings — e.g. the Postgres reserved-word `day` alias that
+    made the whole route 500 (`syntax error at or near "day"`) and left the
+    dashboard blank. This runs the view against the live DB.
+    """
+
+    def test_route_runs_against_real_db(self):
+        from app import app
+        from features.admin import routes as r
+        with app.test_request_context("/api/admin/ai-usage?from=2026-01-01&to=2026-12-31"):
+            resp = r.api_admin_ai_usage.__wrapped__()
+        data = resp.get_json()
+        for key in ("totals", "daily", "by_model", "by_source", "top_users"):
+            self.assertIn(key, data)
+        self.assertIn("calls", data["totals"])
+        # Each daily row must carry the 'day' key the frontend expects.
+        for row in data["daily"]:
+            self.assertIn("day", row)
+            self.assertIn("calls", row)
 
 
 if __name__ == "__main__":

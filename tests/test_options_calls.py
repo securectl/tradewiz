@@ -149,6 +149,35 @@ class TestGetCallActivity(unittest.TestCase):
         rec.assert_called_once()
         self.assertEqual(out["history"], hist)
 
+    def test_drops_alpaca_when_all_zero_volume_and_oi(self):
+        """Regression for APLD: Alpaca's free feed returns the full chain with
+        volume=0/OI=0 on every contract. It must not win source-priority and
+        blank the view — yfinance (real data) should become the primary."""
+        from features.options_calls import engine
+        alpaca_empty = {"source": "alpaca", "price": 41.0,
+                        "calls": [{"strike": 75, "expiry": "2026-09-18",
+                                   "volume": 0, "open_interest": 0, "last": 2.35}] * 5}
+        yf = [{"strike": 40, "expiry": "2026-06-12", "volume": 500, "open_interest": 100, "last": 1.0}]
+        with mock.patch("shared.webull_options.fetch_call_chain", return_value=None), \
+             mock.patch("shared.alpaca_options.fetch_call_chain", return_value=alpaca_empty), \
+             mock.patch.object(engine, "_fetch_calls_yf", return_value=(41.0, yf)), \
+             mock.patch.object(engine, "_record_snapshot"), \
+             mock.patch.object(engine, "get_call_history", return_value=[]):
+            out = engine.get_call_activity("APLD")
+        self.assertNotIn("error", out)
+        self.assertEqual(out["source"], "yfinance")
+        self.assertEqual(out["totals"]["call_volume"], 500)
+        self.assertEqual(out["totals"]["contracts"], 1)
+        # Alpaca contributed nothing, so this is effectively single-source.
+        self.assertNotIn("alpaca", out["validation"]["sources"])
+
+    def test_has_signal_helper(self):
+        from features.options_calls import engine
+        self.assertFalse(engine._has_signal([{"volume": 0, "open_interest": 0}]))
+        self.assertFalse(engine._has_signal([]))
+        self.assertTrue(engine._has_signal([{"volume": 0, "open_interest": 50}]))
+        self.assertTrue(engine._has_signal([{"volume": 3, "open_interest": 0}]))
+
     def test_error_when_no_chain(self):
         from features.options_calls import engine
         with mock.patch("shared.webull_options.fetch_call_chain", return_value=None), \
@@ -160,6 +189,119 @@ class TestGetCallActivity(unittest.TestCase):
     def test_blank_symbol(self):
         from features.options_calls import engine
         self.assertIn("error", engine.get_call_activity("  "))
+
+
+class TestDirection(unittest.TestCase):
+    def test_buy_near_ask(self):
+        from features.options_calls.engine import _direction
+        side, conf = _direction(1.2, 1.0, 1.2)   # printed at the ask
+        self.assertEqual(side, "buy")
+        self.assertGreater(conf, 0.5)
+
+    def test_sell_near_bid(self):
+        from features.options_calls.engine import _direction
+        side, conf = _direction(0.5, 0.5, 0.7)   # printed at the bid
+        self.assertEqual(side, "sell")
+        self.assertGreater(conf, 0.5)
+
+    def test_mid_is_neutral(self):
+        from features.options_calls.engine import _direction
+        self.assertEqual(_direction(0.6, 0.5, 0.7)[0], "neutral")
+
+    def test_missing_or_crossed_quote_neutral(self):
+        from features.options_calls.engine import _direction
+        self.assertEqual(_direction(1.0, 0, 0)[0], "neutral")
+        self.assertEqual(_direction(1.0, 1.5, 1.0)[0], "neutral")  # bid > ask
+
+
+class TestClassifyFlow(unittest.TestCase):
+    def _payload(self):
+        from features.options_calls.engine import classify_flow
+        calls = [
+            {"strike": 50, "expiry": "2026-07-17", "volume": 1000, "open_interest": 10, "last": 1.2, "bid": 1.0, "ask": 1.2},  # bought -> long call
+            {"strike": 55, "expiry": "2026-07-17", "volume": 800, "open_interest": 10, "last": 0.5, "bid": 0.5, "ask": 0.7},   # sold -> naked call
+        ]
+        puts = [
+            {"strike": 45, "expiry": "2026-07-17", "volume": 500, "open_interest": 10, "last": 1.0, "bid": 0.8, "ask": 1.0},   # bought -> long put
+            {"strike": 48, "expiry": "2026-07-17", "volume": 900, "open_interest": 10, "last": 0.6, "bid": 0.6, "ask": 0.8},   # sold -> naked put
+        ]
+        return classify_flow("ABC", 50.0, calls, puts)
+
+    def test_buckets_routed_correctly(self):
+        d = self._payload()
+        b = d["buckets"]
+        self.assertEqual(b["long_calls"]["rows"][0]["strike"], 50)
+        self.assertEqual(b["naked_calls"]["rows"][0]["strike"], 55)
+        self.assertEqual(b["long_puts"]["rows"][0]["strike"], 45)
+        self.assertEqual(b["naked_puts"]["rows"][0]["strike"], 48)
+
+    def test_ranks_assigned(self):
+        d = self._payload()
+        self.assertEqual(d["buckets"]["long_calls"]["rows"][0]["rank"], 1)
+
+    def test_top_n_cap(self):
+        from features.options_calls.engine import classify_flow, FLOW_TOP
+        calls = [{"strike": 50 + i, "expiry": "2026-07-17", "volume": 100 + i,
+                  "open_interest": 10, "last": 1.2, "bid": 1.0, "ask": 1.2} for i in range(10)]
+        d = classify_flow("ABC", 50.0, calls, [])
+        self.assertEqual(len(d["buckets"]["long_calls"]["rows"]), FLOW_TOP)
+        # ranked by volume desc -> the largest-volume contract is #1
+        self.assertEqual(d["buckets"]["long_calls"]["rows"][0]["rank"], 1)
+        self.assertEqual(d["buckets"]["long_calls"]["rows"][0]["volume"], 109)
+
+    def test_lean_bullish(self):
+        self.assertEqual(self._payload()["summary"]["lean"], "BULLISH")
+
+    def test_neutral_contracts_excluded(self):
+        from features.options_calls.engine import classify_flow
+        calls = [{"strike": 50, "expiry": "2026-07-17", "volume": 1000,
+                  "open_interest": 10, "last": 0.6, "bid": 0.5, "ask": 0.7}]  # mid -> neutral
+        d = classify_flow("ABC", 50.0, calls, [])
+        self.assertEqual(d["buckets"]["long_calls"]["rows"], [])
+        self.assertEqual(d["buckets"]["naked_calls"]["rows"], [])
+
+
+class TestGetOptionsFlow(unittest.TestCase):
+    def setUp(self):
+        from features.options_calls import engine
+        engine._FLOW_CACHE.clear()
+
+    def test_returns_buckets(self):
+        from features.options_calls import engine
+        calls = [{"strike": 50, "expiry": "2026-07-17", "volume": 1000,
+                  "open_interest": 10, "last": 1.2, "bid": 1.0, "ask": 1.2}]
+        with mock.patch.object(engine, "_fetch_chain_yf", return_value=(50.0, calls, [])):
+            out = engine.get_options_flow("ABC")
+        self.assertNotIn("error", out)
+        self.assertIn("long_calls", out["buckets"])
+        self.assertEqual(out["buckets"]["long_calls"]["rows"][0]["rank"], 1)
+
+    def test_error_when_no_chain(self):
+        from features.options_calls import engine
+        with mock.patch.object(engine, "_fetch_chain_yf", return_value=(0.0, [], [])):
+            out = engine.get_options_flow("NOPE")
+        self.assertIn("error", out)
+
+
+class TestFlowRoute(unittest.TestCase):
+    def test_route_registered(self):
+        from app import app
+        rules = [r.rule for r in app.url_map.iter_rules()]
+        self.assertIn("/api/options/flow", rules)
+
+    def test_requires_auth(self):
+        from app import app
+        resp = app.test_client().get("/api/options/flow?symbol=AAPL")
+        self.assertIn(resp.status_code, (401, 403, 302))
+
+    def test_requires_symbol(self):
+        from app import app
+        # Even unauthenticated, missing-symbol path returns 400 only after auth;
+        # so just assert the route never 200s without a symbol via a direct call.
+        from features.options_calls import routes as r
+        with app.test_request_context("/api/options/flow"):
+            resp, code = r.api_options_flow.__wrapped__()
+        self.assertEqual(code, 400)
 
 
 class TestSnapshotPersistence(unittest.TestCase):

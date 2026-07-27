@@ -66,6 +66,16 @@ def fetch_fundamentals(ticker: str) -> dict:
     # Risk
     beta = info.get("beta")
     short_ratio = info.get("shortRatio")
+    # Short interest (reported ~twice a month at exchange settlement dates).
+    # yfinance's .info carries the current + prior-month figures; we only ever
+    # extracted shortRatio before. Pull the rest so the analyzer can show a
+    # short-vs-bull positioning read with a real (bi-monthly) trend.
+    shares_short = info.get("sharesShort")
+    shares_short_prior = info.get("sharesShortPriorMonth")
+    short_pct_float = info.get("shortPercentOfFloat")
+    short_pct_out = info.get("sharesPercentSharesOut")
+    short_interest_date = info.get("dateShortInterest")           # epoch seconds
+    short_interest_prior_date = info.get("sharesShortPreviousMonthDate")  # epoch
     fifty_two_high = info.get("fiftyTwoWeekHigh")
     fifty_two_low = info.get("fiftyTwoWeekLow")
 
@@ -162,6 +172,12 @@ def fetch_fundamentals(ticker: str) -> dict:
         "risk": {
             "beta": beta,
             "short_ratio": short_ratio,
+            "shares_short": shares_short,
+            "shares_short_prior": shares_short_prior,
+            "short_percent_float": short_pct_float,
+            "short_percent_outstanding": short_pct_out,
+            "short_interest_date": short_interest_date,
+            "short_interest_prior_date": short_interest_prior_date,
             "fifty_two_week_high": fifty_two_high,
             "fifty_two_week_low": fifty_two_low,
         },
@@ -1112,7 +1128,13 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     ema_20 = close.ewm(span=20).mean().iloc[-1]
     sma_20 = close.rolling(20).mean().iloc[-1] if n >= 20 else close.iloc[-1]
     sma_50 = close.rolling(50).mean().iloc[-1] if n >= 50 else close.iloc[-1]
-    sma_200 = close.rolling(200).mean().iloc[-1] if n >= 200 else close.iloc[-1]
+    # When there aren't 200 bars (e.g. a 6-month daily window has ~124), a true
+    # 200-day SMA can't be formed. Fall back to the average of the bars we DO
+    # have — NOT the current price, which would fabricate a fake trend (price
+    # above/below a "200-MA" that is really just today's close). Consumers do
+    # arithmetic on this, so it must stay numeric. analyze_ticker also feeds a
+    # long daily window here so the trend read is genuine for the analyzer.
+    sma_200 = close.rolling(200).mean().iloc[-1] if n >= 200 else close.mean()
 
     # SMA(8)/EMA(20) crossover detection (Trend Breaker signal)
     sma_8_series = close.rolling(8).mean()
@@ -1784,6 +1806,126 @@ def compute_money_flow_read(ticker, df, is_crypto=False):
     return {"equity": equity, "options": options, "signal": signal, "label": label, "note": note}
 
 
+# Short-interest % of float that fills the bear meter completely. ~20% of float
+# short is a heavily-shorted name, so we scale the meter against that ceiling.
+_SHORT_FLOAT_FULL = 0.20
+
+
+def compute_short_vs_bull(ticker, df, is_crypto=False, fundamentals=None, money_flow=None):
+    """Side-by-side short-interest (bear positioning) vs bull-interest (bullish
+    options flow), plus a 14-day daily buying-vs-selling pressure series.
+
+    Short side — reported short interest from yfinance (exchange settlement
+    dates, ~twice a month): shares short, % of float, days-to-cover, and the
+    change vs the prior report (a real, if coarse, trend).
+
+    Bull side — premium-weighted options flow (call value vs put value), reused
+    from the already-computed money_flow read. Falls back to equity money-flow
+    (CMF) when a name has no tradable options (crypto, thin small caps).
+
+    14-day series — a genuine *daily* proxy: the money-flow multiplier (close
+    location within each day's range) mapped to a 0–100 bull share. True short
+    interest is not reported daily, so this line reads day-to-day accumulation/
+    distribution pressure; the reported short level is overlaid separately.
+
+    Never raises — degrades to whatever data is available."""
+    try:
+        risk = ((fundamentals or {}).get("risk") or {})
+        mf = money_flow or {}
+
+        # ── Short side (reported, bi-monthly) ─────────────────────────
+        shares_short = risk.get("shares_short")
+        shares_short_prior = risk.get("shares_short_prior")
+        pct_float = risk.get("short_percent_float")          # fraction, e.g. 0.124
+        pct_out = risk.get("short_percent_outstanding")      # fraction
+        days_to_cover = risk.get("short_ratio")
+
+        chg_pct = None
+        if shares_short and shares_short_prior:
+            try:
+                chg_pct = round((shares_short - shares_short_prior) / shares_short_prior * 100, 1)
+            except ZeroDivisionError:
+                chg_pct = None
+        trend = None
+        if chg_pct is not None:
+            trend = "rising" if chg_pct > 1 else "falling" if chg_pct < -1 else "flat"
+
+        pct_float_prior = None
+        if pct_float is not None and shares_short and shares_short_prior:
+            # Prior % of float, assuming float is roughly stable between reports.
+            try:
+                pct_float_prior = round(pct_float * shares_short_prior / shares_short * 100, 1)
+            except ZeroDivisionError:
+                pct_float_prior = None
+
+        short = None
+        if shares_short is not None or pct_float is not None or days_to_cover is not None:
+            short = {
+                "shares_short": shares_short,
+                "shares_short_prior": shares_short_prior,
+                "percent_float": round(pct_float * 100, 1) if pct_float is not None else None,
+                "percent_float_prior": pct_float_prior,
+                "percent_outstanding": round(pct_out * 100, 1) if pct_out is not None else None,
+                "days_to_cover": round(days_to_cover, 1) if days_to_cover is not None else None,
+                "change_pct": chg_pct,
+                "trend": trend,
+                "fill": min(100, round(pct_float / _SHORT_FLOAT_FULL * 100)) if pct_float is not None else None,
+                "reported_date": risk.get("short_interest_date"),
+                "prior_date": risk.get("short_interest_prior_date"),
+            }
+
+        # ── Bull side (options premium; fall back to equity money-flow) ─
+        opt = mf.get("options")
+        if opt and (opt.get("call_value") or opt.get("put_value")):
+            cv = float(opt.get("call_value") or 0)
+            pv = float(opt.get("put_value") or 0)
+            total = cv + pv
+            bull = {
+                "source": "options",
+                "sentiment": opt.get("sentiment"),
+                "call_value": cv,
+                "put_value": pv,
+                "net_premium": opt.get("net_premium"),
+                "pc_ratio": opt.get("pc_ratio"),
+                "fill": round(cv / total * 100) if total > 0 else None,
+            }
+        else:
+            eq = mf.get("equity") or {}
+            cmf = eq.get("cmf")
+            bull = {
+                "source": "money_flow",
+                "sentiment": eq.get("mf_label"),
+                "cmf": cmf,
+                "mfi": eq.get("mfi"),
+                # CMF is bounded [-1, 1]; map to a 0–100 bull share.
+                "fill": round((max(-1.0, min(1.0, cmf)) + 1) / 2 * 100) if cmf is not None else None,
+            }
+
+        # ── 14-day daily pressure series (accumulation proxy) ──────────
+        series = []
+        try:
+            recent = df.tail(14)
+            for idx, row in recent.iterrows():
+                hi = float(row["High"]); lo = float(row["Low"]); cl = float(row["Close"])
+                vol = float(row["Volume"]) if row["Volume"] == row["Volume"] else 0.0
+                rng = hi - lo
+                mult = ((cl - lo) - (hi - cl)) / rng if rng > 0 else 0.0  # -1..1
+                bull_share = round((mult + 1) / 2 * 100)
+                series.append({
+                    "date": str(idx.date()),
+                    "bull": bull_share,
+                    "bear": 100 - bull_share,
+                    "volume": int(vol),
+                })
+        except Exception:
+            series = []
+
+        available = bool(short) or (bull and bull.get("fill") is not None) or bool(series)
+        return {"available": available, "short": short, "bull": bull, "series_14d": series}
+    except Exception:
+        return {"available": False, "short": None, "bull": None, "series_14d": []}
+
+
 def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> dict:
     """Full analysis pipeline for a ticker."""
     # Fetch data
@@ -1804,11 +1946,29 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
     # Detect pattern
     pattern = detect_triangle_pattern(df)
 
-    # Calculate indicators
-    indicators = calculate_indicators(df)
+    # Calculate indicators. The trend read (50 vs 200-day MA) needs ≥200 daily
+    # bars, but the chart window is often shorter (6mo ≈ 124 bars) — which used
+    # to fabricate a fake 200-MA and flip strong uptrends into "downtrend".
+    # For daily analysis, compute indicators on a guaranteed-long daily series
+    # so the 200-MA (and the recommendation) are genuine. The chart still uses
+    # the requested `df`; only the indicator snapshot uses the longer history.
+    ind_df = df
+    if interval in ("1d", "1wk") and len(df) < 220:
+        try:
+            long_df = fetch_stock_data(ticker, "2y", "1d")
+            if long_df is not None and len(long_df) > len(df):
+                ind_df = long_df
+        except Exception:
+            ind_df = df  # graceful — fall back to the chart window
+    indicators = calculate_indicators(ind_df)
 
     # Money-in/out read: equity flow (CMF/MFI) fused with options flow
     money_flow = compute_money_flow_read(ticker, df, is_crypto)
+
+    # Short interest (bear positioning) vs bull interest (bullish options flow),
+    # with a 14-day daily buying/selling pressure series. Reuses money_flow's
+    # options read — no extra network call.
+    short_vs_bull = compute_short_vs_bull(ticker, df, is_crypto, fundamentals, money_flow)
 
     # Trendline tests (significant candles testing support/resistance)
     trendline_tests = detect_trendline_tests(df, pattern)
@@ -1928,6 +2088,20 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
             recent_news_lines = []
             active_catalysts_lines = []
 
+    # News agent — the platform's own 30-day RSS/Reddit store, tagged with this
+    # ticker. Surfaced for display AND folded into the LLM context so the AI
+    # analysis is aware of what the news/Reddit tape is saying about the name.
+    news_agent_items = []
+    try:
+        from features.news_agent.agent import recent as _na_recent
+        news_agent_items = _na_recent(ticker=ticker, hours=72, limit=8)
+        for it in news_agent_items:
+            line = f"[{it.get('source')}] {it.get('title')} ({it.get('sentiment')})"
+            if line not in recent_news_lines:
+                recent_news_lines.append(line)
+    except Exception:
+        news_agent_items = []
+
     # Market-condition gauge — fetched once (cached 15 min) so the per-stock
     # verdict is macro-aware. Stocks only (crypto trades a different tape).
     market_condition = None
@@ -1949,6 +2123,7 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
         "pattern": pattern,
         "indicators": indicators,
         "money_flow": money_flow,
+        "short_vs_bull": short_vs_bull,
         "breakout_status": breakout_status,
         "trade_plan": trade_plan,
         "market_condition": market_condition,  # consumed by frontend + ai_validator
@@ -1962,6 +2137,7 @@ def analyze_ticker(ticker: str, period: str = "6mo", interval: str = "1d") -> di
         "fundamentals": fundamentals,
         "recent_news": recent_news_lines,  # consumed by ai_validator._build_data_summary
         "active_catalysts": active_catalysts_lines,  # high-signal bullish news for LLM
+        "news_agent": news_agent_items,  # 30-day RSS/Reddit store tagged with this ticker
         "analysis_time": datetime.now().isoformat(),
         "period": period,
         "interval": interval,

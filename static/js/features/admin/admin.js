@@ -689,6 +689,17 @@ async function loadAdminOllamaConfig() {
         keyInput.placeholder = data.ollama_api_key?.is_set ? data.ollama_api_key.value_masked : '(not set)';
         keyInput.value = '';
         document.getElementById('admin-ollama-api-key-source').textContent = _ollamaSrcLabel(data.ollama_api_key?.source);
+        // OpenRouter→Ollama failover toggle + usage telemetry
+        const fbVal = String(data.ollama_fallback_enabled?.value ?? '0').toLowerCase();
+        const fbBox = document.getElementById('admin-ollama-fallback');
+        if (fbBox) fbBox.checked = ['1', 'true', 'yes', 'on'].includes(fbVal);
+        const fbSrc = document.getElementById('admin-ollama-fallback_enabled-source');
+        if (fbSrc) fbSrc.textContent = _ollamaSrcLabel(data.ollama_fallback_enabled?.source);
+        const st = data._fallback_stats || {};
+        const stEl = document.getElementById('admin-ollama-fallback-stats');
+        if (stEl) stEl.textContent = st.fallback_calls
+            ? `Used ${st.fallback_calls}× (last: ${st.last_used || '—'}, ${st.last_reason || ''}).`
+            : '';
     } catch (e) {
         console.error('loadAdminOllamaConfig failed:', e);
     }
@@ -698,7 +709,11 @@ async function adminOllamaSave() {
     const url = document.getElementById('admin-ollama-url').value.trim();
     const model = document.getElementById('admin-ollama-model').value.trim();
     const apiKey = document.getElementById('admin-ollama-api-key').value;
-    const payload = { ollama_url: url, ollama_model: model };
+    const fallback = document.getElementById('admin-ollama-fallback');
+    const payload = {
+        ollama_url: url, ollama_model: model,
+        ollama_fallback_enabled: (fallback && fallback.checked) ? '1' : '0',
+    };
     // Only include key if the admin actually typed something (else preserve existing)
     if (apiKey.length > 0) payload.ollama_api_key = apiKey;
     const statusEl = document.getElementById('admin-ollama-status');
@@ -942,6 +957,16 @@ async function openUsageDrilldown(userId) {
     }
 }
 
+// ─── Admin sub-tab switching (Usage · Users · Models · System) ───
+function switchAdminTab(name) {
+    document.querySelectorAll('.admin-subtab').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-atab') === name);
+    });
+    document.querySelectorAll('.admin-tabpanel').forEach(function (p) {
+        p.style.display = (p.getAttribute('data-apanel') === name) ? '' : 'none';
+    });
+}
+
 // ─── Token & AI Usage dashboard ─────────────────────────────
 function _aiFmt(n) {
     if (n === null || n === undefined) return '0';
@@ -970,6 +995,22 @@ async function loadAdminAiUsage() {
         }
         const d = await resp.json();
         const t = d.totals || {};
+        // Explain a zero-token window: calls are logged but no tokens captured.
+        const banner = document.getElementById('ai-usage-banner');
+        if (banner) {
+            if ((t.calls || 0) > 0 && (t.total_tokens || 0) === 0) {
+                banner.innerHTML = '⚠️ <strong>' + _aiFmt(t.calls) +
+                    ' calls logged, but 0 tokens captured in this window.</strong> ' +
+                    'Token &amp; cost capture started Jun&nbsp;9, 2026 — older calls are counted but show 0 tokens. ' +
+                    'If recent calls also show 0, check that the OpenRouter key has credit (a dead key returns 402 and no usage is recorded).';
+                banner.style.display = '';
+            } else if ((t.calls || 0) === 0) {
+                banner.innerHTML = 'No LLM calls recorded in this window.';
+                banner.style.display = '';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
         tiles.innerHTML =
             _aiTile('Total cost (est.)', _aiCost(t.cost_usd)) +
             _aiTile('LLM calls', _aiFmt(t.calls)) +

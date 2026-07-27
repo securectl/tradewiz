@@ -116,6 +116,29 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
         except Exception:
             pass  # llm_config unavailable — fall through with original model
 
+    # ── Ollama Cloud path (model explicitly routed with an `ollama/` prefix) ──
+    # Lets an admin run any LLM role on Ollama Cloud by setting its override to
+    # `ollama/<model>` — first-class, not just the failure fallback.
+    if isinstance(model, str) and model.startswith("ollama/"):
+        try:
+            from shared.ollama_fallback import call_ollama_chat, is_configured
+            if is_configured():
+                content = call_ollama_chat(messages, temperature=temperature,
+                                           max_tokens=max_tokens, timeout=timeout,
+                                           reason="routed_ollama", model=model)
+                try:
+                    from rate_limiter import get_llm_user, record_llm_call
+                    uid, source = _user_id, _source
+                    if not uid:
+                        uid, source = get_llm_user()
+                    if uid:
+                        record_llm_call(uid, source or "api", model)
+                except Exception:
+                    pass
+                return content
+        except Exception:
+            pass  # Ollama unavailable — fall through to Vertex/OpenRouter
+
     # ── Vertex AI path (direct Google Cloud, no OpenRouter markup) ──
     try:
         from vertex_adapter import is_available, call_vertex
@@ -177,11 +200,27 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
             pass
         return content
     except requests.exceptions.Timeout:
-        return json.dumps({"error": "LLM request timed out. Try again."})
+        fb = _ollama_fallback(messages, temperature, max_tokens, timeout, "openrouter_timeout")
+        return fb if fb is not None else json.dumps({"error": "LLM request timed out. Try again."})
     except requests.exceptions.RequestException as e:
-        return json.dumps({"error": f"OpenRouter API error: {str(e)}"})
+        # Out-of-credits (402), rate-limit (429) and transport errors all land
+        # here. If the admin enabled the Ollama Cloud backup, retry there.
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        fb = _ollama_fallback(messages, temperature, max_tokens, timeout,
+                              f"openrouter_error_{status}" if status else "openrouter_error")
+        return fb if fb is not None else json.dumps({"error": f"OpenRouter API error: {str(e)}"})
     except (KeyError, IndexError) as e:
         return json.dumps({"error": f"Unexpected API response: {str(e)}"})
+
+
+def _ollama_fallback(messages, temperature, max_tokens, timeout, reason):
+    """Retry an OpenRouter failure on Ollama Cloud when the admin toggle is on.
+    Returns the answer string, or None to keep the original OpenRouter error."""
+    try:
+        from shared.ollama_fallback import try_fallback
+        return try_fallback(messages, temperature, max_tokens, timeout, reason=reason)
+    except Exception:
+        return None
 
 
 # ─── Context-Specific Data Summaries ─────────────────────────────

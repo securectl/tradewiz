@@ -220,6 +220,27 @@ AI_TICKERS = [
     "CRWD", "ZS", "S",
 ]
 
+# High-beta, heavily-watched retail names (AI datacenters, quantum, crypto
+# miners, next-gen semis, space) that get oversold often — added so the daily
+# oversold scan can actually surface them. These were previously absent from
+# the universe (e.g. APLD, IREN), so they could never appear.
+OVERSOLD_WATCH_TICKERS = [
+    # AI datacenters / neoclouds
+    "APLD", "IREN", "NBIS", "CORZ", "CIFR", "WULF", "BTDR",
+    # Crypto miners
+    "MARA", "RIOT", "HUT", "BITF", "CLSK", "HIVE",
+    # Quantum
+    "QBTS", "IONQ", "RGTI", "QUBT", "ARQQ",
+    # Next-gen / power semis
+    "WOLF", "NVTS", "CRDO", "AMBA", "INDI", "SITM",
+    # Nuclear / clean power
+    "OKLO", "SMR", "NNE", "VST",
+    # Space / launch
+    "RKLB", "ASTS", "LUNR", "RDW", "SPCE",
+    # Biotech / other retail favorites
+    "RXRX", "TEM", "CRSP", "HIMS", "AFRM", "SOFI", "CHPT", "PLUG", "RUN",
+]
+
 # ─── Extended Universe for Top Gainers / Top Losers ──────────
 
 # S&P 500 tickers (representative sample ~200)
@@ -295,7 +316,7 @@ def _get_full_universe() -> list:
     Excludes crypto tickers (ending in -USD)."""
     all_tickers = (
         LOWCAP_TICKERS + MIDCAP_TICKERS + LARGECAP_TICKERS + ETF_TICKERS +
-        METALS_MINING_TICKERS + AI_TICKERS + SP500_TICKERS +
+        METALS_MINING_TICKERS + AI_TICKERS + OVERSOLD_WATCH_TICKERS + SP500_TICKERS +
         RUSSELL2000_TOP + NASDAQ100_EXTRA
     )
     seen = set()

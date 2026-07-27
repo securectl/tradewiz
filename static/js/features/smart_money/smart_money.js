@@ -432,14 +432,18 @@ function switchSmartMoneySub(sub) {
         b.classList.toggle('active', b.dataset.smsub === sub));
     const inst = document.getElementById('smart-money-dashboard');
     const sect = document.getElementById('smart-money-sectorflow');
+    const buff = document.getElementById('smart-money-buffett');
+    [inst, sect, buff].forEach(el => { if (el) el.style.display = 'none'; });
     if (sub === 'sectorflow') {
-        if (inst) inst.style.display = 'none';
         if (sect) sect.style.display = 'block';
         loadSectorFlow();
-    } else {
-        if (sect) sect.style.display = 'none';
-        if (inst) inst.style.display = 'block';
+    } else if (sub === 'buffett') {
         clearTimeout(_sfPollTimer);
+        if (buff) buff.style.display = 'block';
+        loadBuffettTracker();
+    } else {
+        clearTimeout(_sfPollTimer);
+        if (inst) inst.style.display = 'block';
     }
 }
 
@@ -527,4 +531,125 @@ function renderSectorFlow(d) {
     html += '<div class="sf-note">Source: ' + (d.source || 'options chains') + ' · premium-weighted call vs put dollar flow per SPDR sector ETF.</div>';
     html += '</div>';
     return html;
+}
+
+// ─── Buffett "copy & paste" tracker ──────────────────────────
+let _buffettLoading = false;
+let _buffettData = null;
+
+async function loadBuffettTracker(force) {
+    if (_buffettLoading) return;
+    _buffettLoading = true;
+    const box = document.getElementById('smart-money-buffett');
+    if (!box) { _buffettLoading = false; return; }
+    box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">Loading Buffett portfolio…</div>';
+    try {
+        const resp = await fetch('/api/smart-money/buffett' + (force ? '?refresh=1' : ''));
+        if (resp.status === 403) {
+            box.innerHTML = '<div style="text-align:center;padding:40px 0;">' +
+                '<div style="font-size:28px;margin-bottom:8px;">&#128274;</div>' +
+                '<div style="font-size:14px;font-weight:700;color:var(--text-bright);margin-bottom:6px;">Pro Feature</div>' +
+                '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;">Upgrade to Pro for the Buffett Tracker.</div>' +
+                '<button onclick="showPricingModal&&showPricingModal()" class="btn-analyze" style="padding:8px 20px;font-size:12px;">Upgrade to Pro</button></div>';
+            _buffettLoading = false; return;
+        }
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data.error) {
+            box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">' + data.error + '</div>';
+            _buffettLoading = false; return;
+        }
+        _buffettData = data;
+        box.innerHTML = renderBuffettTracker(data);
+        applyBuffettCalc();
+    } catch (e) {
+        box.innerHTML = '<div style="text-align:center;padding:40px;color:#ff5d73;">Could not load Buffett portfolio (' + e.message + ').</div>';
+    }
+    _buffettLoading = false;
+}
+
+function _bfAction(a) {
+    const m = { NEW: 'new', ADD: 'add', TRIM: 'trim', EXIT: 'exit', HELD: 'held' };
+    return '<span class="bf-act bf-' + (m[a] || 'held') + '">' + a + '</span>';
+}
+
+function renderBuffettTracker(d) {
+    const h = d.holdings || [];
+    let html = '<div class="bf">';
+    html += '<div class="bf-head">' +
+        '<div><div class="bf-name">Warren Buffett · Berkshire Hathaway</div>' +
+        '<div class="bf-sub">Copy &amp; paste his allocation — ' + h.length + ' holdings · 13F as of <b>' + (d.as_of || '—') + '</b></div></div>' +
+        '<div class="bf-actions">' +
+        '<button class="bf-copy-btn" onclick="copyBuffettList()">⧉ Copy list</button>' +
+        '<button class="bf-copy-btn ghost" onclick="loadBuffettTracker(true)">↻ Refresh</button>' +
+        '</div></div>';
+
+    // Mirror calculator
+    html += '<div class="bf-calc">' +
+        '<label class="bf-calc-label">Mirror his weights with</label>' +
+        '<div class="bf-calc-input">$<input id="bf-amount" type="number" min="0" step="100" value="10000" ' +
+        'oninput="applyBuffettCalc()" inputmode="numeric"></div>' +
+        '<span class="bf-calc-hint">→ shares to buy per name (live prices)</span></div>';
+
+    html += '<div class="bf-table-wrap"><table class="bf-table"><thead><tr>' +
+        '<th>#</th><th>Ticker</th><th class="bf-l">Company</th><th>Move</th>' +
+        '<th>Weight</th><th>Price</th><th>Allocation</th><th>Shares</th>' +
+        '</tr></thead><tbody>';
+    h.forEach(r => {
+        const px = (r.price != null) ? '$' + Number(r.price).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—';
+        html += '<tr>' +
+            '<td class="bf-rank">' + r.rank + '</td>' +
+            '<td class="bf-tk">' + r.ticker + '</td>' +
+            '<td class="bf-l bf-co">' + r.company + '</td>' +
+            '<td>' + _bfAction(r.action) + '</td>' +
+            '<td class="bf-wt">' + r.weight.toFixed(2) + '%</td>' +
+            '<td class="mono">' + px + '</td>' +
+            '<td class="mono bf-alloc" data-weight="' + r.weight + '">—</td>' +
+            '<td class="mono bf-shares" data-weight="' + r.weight + '" data-price="' + (r.price || 0) + '">—</td>' +
+            '</tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<div class="bf-note">ⓘ ' + (d.note || '') + ' Not investment advice.</div>';
+    html += '</div>';
+    return html;
+}
+
+function applyBuffettCalc() {
+    const inp = document.getElementById('bf-amount');
+    if (!inp) return;
+    const amount = Math.max(0, Number(inp.value) || 0);
+    document.querySelectorAll('#smart-money-buffett .bf-alloc').forEach(td => {
+        const w = Number(td.dataset.weight) || 0;
+        td.textContent = '$' + Math.round(amount * w / 100).toLocaleString('en-US');
+    });
+    document.querySelectorAll('#smart-money-buffett .bf-shares').forEach(td => {
+        const w = Number(td.dataset.weight) || 0;
+        const px = Number(td.dataset.price) || 0;
+        if (px <= 0) { td.textContent = '—'; return; }
+        const dollars = amount * w / 100;
+        const sh = dollars / px;
+        td.textContent = sh >= 10 ? Math.round(sh).toLocaleString('en-US') : sh.toFixed(2);
+    });
+}
+
+function copyBuffettList() {
+    if (!_buffettData) return;
+    const amount = Math.max(0, Number((document.getElementById('bf-amount') || {}).value) || 0);
+    const lines = ['Warren Buffett / Berkshire Hathaway — 13F as of ' + (_buffettData.as_of || ''),
+        'Mirror amount: $' + amount.toLocaleString('en-US'), ''];
+    (_buffettData.holdings || []).forEach(r => {
+        const dollars = amount * r.weight / 100;
+        const sh = (r.price > 0) ? (dollars / r.price) : 0;
+        const shTxt = r.price > 0 ? (sh >= 10 ? Math.round(sh) : sh.toFixed(2)) + ' sh' : '(no price)';
+        lines.push('#' + r.rank + '  ' + r.ticker + '  ' + r.weight.toFixed(2) + '%  ' +
+            r.action + '  $' + Math.round(dollars).toLocaleString('en-US') + '  ' + shTxt);
+    });
+    const text = lines.join('\n');
+    const done = btn => { const b = document.querySelector('.bf-copy-btn'); if (b) { const t = b.textContent; b.textContent = '✓ Copied'; setTimeout(() => b.textContent = t, 1500); } };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => {});
+    } else {
+        const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+        ta.select(); try { document.execCommand('copy'); done(); } catch (e) {} document.body.removeChild(ta);
+    }
 }

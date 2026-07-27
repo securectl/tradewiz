@@ -9,7 +9,7 @@ import os
 logger = logging.getLogger(__name__)
 
 LLM_SKILL = os.getenv("LLM_SKILL", "nvidia/nemotron-3-super-120b-a12b")
-LLM_SKILL_EARNINGS = os.getenv("LLM_SKILL_EARNINGS", "anthropic/claude-opus-4-6")
+LLM_SKILL_EARNINGS = os.getenv("LLM_SKILL_EARNINGS", "anthropic/claude-opus-4-8")
 
 
 def _call_llm(prompt, system_prompt=None, user_id=None, source="skill",

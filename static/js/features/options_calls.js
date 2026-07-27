@@ -21,6 +21,47 @@ function _ocMoneyClass(m) {
     return '';
 }
 
+const _OC_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// 'YYYY-MM-DD' -> 'Jun 12' (friendlier than the ISO date).
+function _ocDate(s) {
+    if (!s) return '—';
+    const p = String(s).slice(0, 10).split('-');
+    if (p.length < 3) return s;
+    const m = parseInt(p[1], 10) - 1;
+    if (m < 0 || m > 11) return s;
+    return _OC_MONTHS[m] + ' ' + parseInt(p[2], 10);
+}
+
+// Plain-English "most active call" banner: a one-line summary + labeled details.
+function _ocTopBanner(c) {
+    const cost = Math.round((c.last || 0) * 100);            // $ per contract (×100 shares)
+    const costTxt = cost > 0 ? '~$' + _ocFmt(cost) : '<$1';
+    const cheap = cost > 0 && cost < 50 ? 'cheap (' + costTxt + ') ' : '';
+    const date = _ocDate(c.expiry);
+    // This banner is calls only: OTM = strike above price, ITM = below, ATM = near.
+    let where, bet;
+    if (c.moneyness === 'ITM') { where = 'below price'; bet = 'the stock stays above $' + c.strike; }
+    else if (c.moneyness === 'ATM') { where = 'near price'; bet = 'the stock pushes past $' + c.strike; }
+    else { where = 'above price'; bet = 'the stock rises above $' + c.strike; }
+    const vo = c.vol_oi || 0;
+    const activity = vo >= 0.5 ? 'heavily traded today'
+        : (vo >= 0.15 ? 'actively traded today' : 'lightly traded today');
+    const sentence = '🔥 Busiest call — ' + cheap + 'bet ' + bet + ' by ' + date + ', ' + activity + '.';
+    const details =
+        '<span class="oc-plain-item">Strike <b>$' + c.strike + '</b> (' + where + ')</span>' +
+        '<span class="oc-plain-item">Expires <b>' + date + '</b></span>' +
+        '<span class="oc-plain-item" title="Contracts traded today">Traded today <b>' + _ocFmt(c.volume) + '</b></span>' +
+        '<span class="oc-plain-item" title="Open interest — contracts already held open from before">Open <b>' + _ocFmt(c.open_interest) + '</b></span>' +
+        '<span class="oc-plain-item" title="Today&#39;s volume ÷ open interest. Higher = busier, more fresh money">Activity <b>' + vo.toFixed(2) + '×</b></span>' +
+        '<span class="oc-plain-item" title="Price per share × 100 shares">' + costTxt + ' per contract</span>';
+    return '<div class="oc-top-banner oc-plain">' +
+        '<div class="oc-plain-headline">' + sentence + '</div>' +
+        '<div class="oc-plain-details">' + details + '</div>' +
+        '</div>';
+}
+
 async function loadOptionCalls() {
     const input = document.getElementById('oc-symbol');
     const body = document.getElementById('oc-body');
@@ -35,19 +76,85 @@ async function loadOptionCalls() {
     body.innerHTML = '<div class="oc-empty">Loading call activity for ' + symbol + '…</div>';
 
     try {
-        const resp = await fetch('/api/options/calls?symbol=' + encodeURIComponent(symbol));
-        const data = await resp.json();
-        if (!resp.ok || data.error) {
+        const enc = encodeURIComponent(symbol);
+        // Directional flow (long/naked × call/put) and call-activity load together.
+        const [callsResp, flowResp] = await Promise.all([
+            fetch('/api/options/calls?symbol=' + enc),
+            fetch('/api/options/flow?symbol=' + enc).catch(function () { return null; }),
+        ]);
+        const data = await callsResp.json();
+        if (!callsResp.ok || data.error) {
             body.innerHTML = '<div class="oc-empty oc-err">' +
                 (data.error || 'Could not load options data for ' + symbol) + '</div>';
             return;
         }
-        body.innerHTML = renderOptionCalls(data);
+        let flow = null;
+        try { flow = flowResp ? await flowResp.json() : null; } catch (e) { flow = null; }
+        let html = '';
+        if (flow && !flow.error) html += renderOptionFlow(flow);
+        html += renderOptionCalls(data);
+        body.innerHTML = html;
     } catch (e) {
         body.innerHTML = '<div class="oc-empty oc-err">Network error loading ' + symbol + '.</div>';
     } finally {
         _ocLoading = false;
     }
+}
+
+// ── Directional flow: 4 ranked buckets (Long/Naked × Call/Put) ──────────
+function _ocBiasClass(bias) {
+    return bias === 'bullish' ? 'oc-bull' : (bias === 'bearish' ? 'oc-bear' : '');
+}
+
+function _ocConfLabel(conf) {
+    if (conf >= 0.7) return 'strong';
+    if (conf >= 0.4) return 'medium';
+    return 'weak';
+}
+
+function _ocFlowBucket(b) {
+    if (!b) return '';
+    let html = '<div class="oc-flow-card ' + _ocBiasClass(b.bias) + '">';
+    html += '<div class="oc-flow-head"><span class="oc-flow-name">' + b.label + '</span>' +
+        '<span class="oc-flow-bias ' + _ocBiasClass(b.bias) + '">' + b.bias + '</span></div>';
+    const rows = b.rows || [];
+    if (!rows.length) {
+        html += '<div class="oc-empty">No directional ' + b.label.toLowerCase() + ' today.</div></div>';
+        return html;
+    }
+    html += '<ol class="oc-flow-list">';
+    rows.forEach(r => {
+        html += '<li class="oc-flow-item">' +
+            '<span class="oc-rank">#' + r.rank + '</span>' +
+            '<span class="oc-flow-contract">$' + r.strike +
+                ' <span class="oc-tag ' + _ocMoneyClass(r.moneyness) + '">' + r.moneyness + '</span>' +
+                ' <span class="oc-flow-exp">' + _ocDate(r.expiry) + '</span></span>' +
+            '<span class="oc-flow-vol">' + _ocFmt(r.volume) + ' vol</span>' +
+            '<span class="oc-conf oc-conf-' + _ocConfLabel(r.confidence) + '" ' +
+                'title="Estimate confidence (bid/ask position)">est. ' + _ocConfLabel(r.confidence) + '</span>' +
+            '</li>';
+    });
+    html += '</ol></div>';
+    return html;
+}
+
+function renderOptionFlow(f) {
+    const s = f.summary || {};
+    const buckets = f.buckets || {};
+    const leanCls = s.lean === 'BULLISH' ? 'oc-bull' : (s.lean === 'BEARISH' ? 'oc-bear' : '');
+    let html = '<div class="oc-flow">';
+    html += '<div class="oc-flow-title">Directional Flow ' +
+        '<span class="oc-flow-lean ' + leanCls + '">' + (s.lean || '—') + '</span>' +
+        '<span class="oc-flow-est">estimated from bid/ask</span></div>';
+    html += '<div class="oc-flow-grid">';
+    // Order: Long Calls, Naked Calls, Naked Puts, Long Puts (as requested).
+    ['long_calls', 'naked_calls', 'naked_puts', 'long_puts'].forEach(k => {
+        html += _ocFlowBucket(buckets[k]);
+    });
+    html += '</div>';
+    if (f.note) html += '<div class="oc-flow-note">ⓘ ' + f.note + '</div>';
+    html += '</div>';
+    return html;
 }
 
 function renderOptionCalls(d) {
@@ -88,15 +195,9 @@ function renderOptionCalls(d) {
         html += xv;
     }
 
-    // Most-interest contract — the single most actively traded call.
+    // Most-interest contract — the single most actively traded call, in plain English.
     if (d.top_contract) {
-        const c = d.top_contract;
-        html += '<div class="oc-top-banner">' +
-            '<span class="oc-top-flag">🔥 Most active call</span>' +
-            '<span class="oc-top-detail"><b>$' + c.strike + ' ' + c.moneyness + '</b> · ' +
-            c.expiry + ' · <b>' + _ocFmt(c.volume) + '</b> vol · ' +
-            _ocFmt(c.open_interest) + ' OI · ' + c.vol_oi.toFixed(2) + ' vol/OI · $' + c.last +
-            '</span></div>';
+        html += _ocTopBanner(d.top_contract);
     }
 
     // Two tables side by side
@@ -154,7 +255,12 @@ function _ocTable(title, subtitle, rows, cls) {
         return html;
     }
     html += '<table class="oc-table"><thead><tr>' +
-        '<th>Strike</th><th>Expiry</th><th>Vol</th><th>OI</th><th>Vol/OI</th><th>Last</th>' +
+        '<th title="The buy price this call locks in">Strike</th>' +
+        '<th>Expires</th>' +
+        '<th title="Contracts traded today">Traded</th>' +
+        '<th title="Open interest — contracts already held open from before">Open</th>' +
+        '<th title="Today&#39;s volume ÷ open interest. Higher = busier, more fresh money">Activity</th>' +
+        '<th title="Price per share (× 100 = cost per contract)">Price</th>' +
         '</tr></thead><tbody>';
     rows.forEach(r => {
         const div = r.divergent ? ' <span class="oc-tag oc-divergent" title="Sources disagree on this contract">⚠ divergent</span>' : '';
@@ -162,10 +268,10 @@ function _ocTable(title, subtitle, rows, cls) {
             '<td>' + (r.top ? '🔥 ' : '') + '$' + r.strike +
                 ' <span class="oc-tag ' + _ocMoneyClass(r.moneyness) + '">' +
                 r.moneyness + '</span>' + div + '</td>' +
-            '<td>' + r.expiry + '</td>' +
+            '<td>' + _ocDate(r.expiry) + '</td>' +
             '<td>' + _ocFmt(r.volume) + '</td>' +
             '<td>' + _ocFmt(r.open_interest) + '</td>' +
-            '<td>' + r.vol_oi.toFixed(2) + '</td>' +
+            '<td>' + r.vol_oi.toFixed(2) + '×</td>' +
             '<td>$' + r.last + '</td>' +
             '</tr>';
     });

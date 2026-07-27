@@ -45,6 +45,7 @@ async function loadDashboard() {
         renderDashKpis(summary.kpis || {});
         renderDashBoard(report);
         renderDashBots(summary.bots || []);
+        loadTrending();       // trending stocks/sectors from news+Reddit — non-blocking
         loadDashSectorFlow(); // sector options money flow — non-blocking
         loadOpportunities();  // market opportunities (screener) — non-blocking
         loadOversold();       // most-watched oversold — non-blocking
@@ -290,6 +291,56 @@ function renderOpps() {
     el.innerHTML = `<h3 class="dash-h3">Opportunities <span class="dash-sub">oversold · breakout · momentum</span>${asOf}</h3>
         <div class="dash-opp-head">${h('ticker', 'Ticker')}${h('type', 'Type')}${h('sector', 'Sector')}${h('verdict', 'Verdict')}${h('mf_signal', 'Flow')}${h('price', 'Price')}${h('confidence', 'Conf')}</div>
         ${rows}`;
+}
+
+/* ── Trending in the news + Reddit ── */
+async function loadTrending() {
+    const el = document.getElementById('dash-trending'); if (!el) return;
+    el.innerHTML = '<h3 class="dash-h3">Trending in the News <span class="dash-sub">stocks & sectors from news + Reddit (24h)</span></h3><div class="dash-empty">Loading…</div>';
+    try {
+        const data = await (await fetch('/api/news/trending?hours=24&limit=8')).json();
+        renderTrending(data);
+    } catch (err) {
+        console.error('trending load failed', err);
+        el.innerHTML = '<h3 class="dash-h3">Trending in the News</h3><div class="dash-empty">Failed to load.</div>';
+    }
+}
+function _trSentColor(s) { return s > 0.1 ? '#26a69a' : s < -0.1 ? '#ef5350' : '#787b86'; }
+function _trSentLabel(s) { return s > 0.1 ? 'Bullish' : s < -0.1 ? 'Bearish' : 'Neutral'; }
+function renderTrending(data) {
+    const el = document.getElementById('dash-trending'); if (!el) return;
+    const stocks = (data && data.stocks) || [];
+    const sectors = (data && data.sectors) || [];
+    if (!stocks.length && !sectors.length) {
+        el.innerHTML = '<h3 class="dash-h3">Trending in the News</h3><div class="dash-empty">No news ingested yet — the agent polls every 10 min.</div>';
+        return;
+    }
+    const stockRows = stocks.map(s => `
+        <div class="dash-tr-row" onclick="(window.sectorRadarAnalyze||window.analyzeTicker)&&(window.sectorRadarAnalyze?sectorRadarAnalyze('${_dEsc(s.ticker)}'):analyzeTicker('${_dEsc(s.ticker)}'))">
+            <span class="dash-tr-tk">${_dEsc(s.ticker)}</span>
+            <span class="dash-tr-sec">${_dEsc(s.sector || '')}</span>
+            <span class="dash-tr-ct">${s.mentions}×</span>
+            ${s.reddit_mentions ? `<span class="dash-tr-reddit">🔥 ${s.reddit_mentions} reddit</span>` : '<span class="dash-tr-reddit"></span>'}
+            <span class="dash-tr-sent" style="color:${_trSentColor(s.sentiment_score)}">${_trSentLabel(s.sentiment_score)}</span>
+        </div>`).join('');
+    const sectorRows = sectors.map(s => `
+        <div class="dash-tr-row">
+            <span class="dash-tr-tk" style="font-weight:600;">${_dEsc(s.sector)}</span>
+            <span class="dash-tr-ct">${s.mentions}×</span>
+            <span class="dash-tr-sent" style="color:${_trSentColor(s.sentiment_score)}">${_trSentLabel(s.sentiment_score)}</span>
+        </div>`).join('');
+    el.innerHTML = `
+        <h3 class="dash-h3">Trending in the News <span class="dash-sub">news + Reddit · last 24h · ${data.total_articles || 0} articles</span></h3>
+        <div class="dash-tr-grid">
+            <div>
+                <div class="dash-tr-subhead">📈 Trending Stocks</div>
+                ${stockRows || '<div class="dash-empty">No ticker mentions yet.</div>'}
+            </div>
+            <div>
+                <div class="dash-tr-subhead">🏭 Trending Sectors</div>
+                ${sectorRows || '<div class="dash-empty">No sector signal yet.</div>'}
+            </div>
+        </div>`;
 }
 
 /* ── Most-watched oversold (sortable) ── */

@@ -152,7 +152,7 @@
 }
 .screener-metric-gauge .gauge-label {
     font-size: 9px;
-    color: var(--text-secondary, #787b86);
+    color: var(--text-secondary, var(--text-muted));
     text-transform: uppercase;
     letter-spacing: 0.4px;
     margin-top: 2px;
@@ -490,9 +490,9 @@
     font-weight: 600;
     margin-right: 8px;
 }
-.hot-sector-trend.bullish { color: #26a69a; }
-.hot-sector-trend.bearish { color: #ef5350; }
-.hot-sector-trend.neutral { color: #787b86; }
+.hot-sector-trend.bullish { color: var(--accent-teal); }
+.hot-sector-trend.bearish { color: var(--accent-red); }
+.hot-sector-trend.neutral { color: var(--text-muted); }
 .hot-sector-momentum {
     display: inline-block;
     padding: 2px 8px;
@@ -500,9 +500,9 @@
     font-size: 10px;
     font-weight: 600;
 }
-.hot-sector-momentum.strong { background: rgba(38,166,154,0.15); color: #26a69a; }
+.hot-sector-momentum.strong { background: rgba(38,166,154,0.15); color: var(--accent-teal); }
 .hot-sector-momentum.moderate { background: rgba(255,152,0,0.15); color: #ff9800; }
-.hot-sector-momentum.fading { background: rgba(239,83,80,0.15); color: #ef5350; }
+.hot-sector-momentum.fading { background: rgba(239,83,80,0.15); color: var(--accent-red); }
 .hot-sector-catalysts {
     margin-top: 8px;
     font-size: 11px;
@@ -721,7 +721,7 @@
 
 .setup-badge-ep {
     background: rgba(38, 166, 154, 0.15);
-    color: #26a69a;
+    color: var(--accent-teal);
 }
 
 .setup-badge-stage2 {

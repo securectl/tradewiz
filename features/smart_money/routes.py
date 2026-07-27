@@ -22,6 +22,17 @@ def api_smart_money_summary():
     return jsonify(get_whale_summary(days=days))
 
 
+@bp.route("/api/smart-money/buffett")
+@login_required
+@subscription_required("pro")
+def api_buffett_tracker():
+    """Berkshire Hathaway's portfolio — weight-ranked holdings + live prices for
+    the 'copy & paste' mirror calculator. Cleaned from the stored 13F data."""
+    from features.smart_money.buffett import get_buffett_holdings
+    force = request.args.get("refresh") in ("1", "true", "yes")
+    return jsonify(get_buffett_holdings(force_refresh=force))
+
+
 @bp.route("/api/smart-money/sector-flow")
 @login_required
 def api_sector_flow():

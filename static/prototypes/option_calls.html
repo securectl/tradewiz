@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="aurora">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Option Calls — Aurora redesign prototype</title>
+<style>
+:root{
+  --bg:radial-gradient(1200px 620px at 82% -12%, #1b2a4a 0%, transparent 60%),
+       radial-gradient(900px 520px at -10% 8%, #2a1b4a 0%, transparent 55%), #0a0e1a;
+  --surface:rgba(255,255,255,.045);
+  --surface-2:rgba(255,255,255,.07);
+  --border:rgba(255,255,255,.09);
+  --border-strong:rgba(255,255,255,.16);
+  --text:#e8ecf4; --text-2:#9aa6bd; --text-3:#6b7588;
+  --green:#19e3a0; --green-soft:rgba(25,227,160,.14);
+  --red:#ff5d73;   --red-soft:rgba(255,93,115,.14);
+  --gold:#ffd166; --silver:#cdd6e6; --bronze:#e3955b;
+  --accent-grad:linear-gradient(135deg,#5b8cff,#a855f7);
+  --green-grad:linear-gradient(135deg,#19e3a0,#0bbf86);
+  --red-grad:linear-gradient(135deg,#ff7a8a,#ff4d6a);
+  --blur:saturate(140%) blur(14px);
+  --radius:16px; --radius-sm:11px;
+  --shadow:0 18px 50px rgba(4,8,20,.55);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);background-attachment:fixed;color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;padding:28px 26px 60px}
+.wrap{max-width:1120px;margin:0 auto}
+.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+/* Header */
+.oc-header{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:22px}
+.oc-title{margin:0;font-size:30px;font-weight:850;letter-spacing:-.02em;
+  background:linear-gradient(120deg,#fff 10%,#a9c2ff 55%,#caa9ff 95%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.oc-sub{font-size:13px;color:var(--text-2);margin-top:6px;max-width:620px;line-height:1.5}
+.oc-search{display:flex;gap:8px}
+.oc-input{padding:11px 14px;border-radius:12px;border:1px solid var(--border);
+  background:rgba(255,255,255,.04);color:var(--text);font-size:14px;width:170px;outline:none}
+.oc-input:focus{border-color:#5b8cff;box-shadow:0 0 0 3px rgba(91,140,255,.18)}
+.oc-btn{padding:11px 20px;border:none;border-radius:12px;font-weight:700;font-size:14px;
+  color:#fff;cursor:pointer;background:var(--accent-grad);box-shadow:0 8px 22px rgba(91,140,255,.35)}
+.oc-btn:hover{filter:brightness(1.07)}
+
+/* Ticker strip + summary tiles */
+.oc-strip{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.oc-ticker{font-size:20px;font-weight:800}
+.oc-price{font-size:15px;color:var(--text-2)} .oc-price b{color:var(--text)}
+.pill{font-size:12px;font-weight:800;padding:4px 13px;border-radius:999px;letter-spacing:.04em}
+.pill.bear{background:var(--red-soft);color:var(--red);box-shadow:inset 0 0 0 1px rgba(255,93,115,.35)}
+.pill.bull{background:var(--green-soft);color:var(--green);box-shadow:inset 0 0 0 1px rgba(25,227,160,.35)}
+
+.oc-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:8px}
+.tile{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:14px 15px;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+.tile::after{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--accent-grad);opacity:.8}
+.tile-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:7px}
+.tile-value{font-size:21px;font-weight:800}
+.tile-value.green{color:var(--green)} .tile-value.red{color:var(--red)}
+.oc-meta{font-size:12px;color:var(--text-3);margin:10px 2px 26px}
+
+/* Section heading */
+.sec-title{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:0 0 14px;font-size:18px;font-weight:800}
+.sec-title .est{font-size:11px;font-weight:500;color:var(--text-3)}
+
+/* Busiest-call banner */
+.banner{position:relative;display:flex;flex-direction:column;gap:9px;margin:0 0 26px;padding:18px 20px 18px 22px;
+  border-radius:var(--radius);overflow:hidden;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  background:linear-gradient(120deg,rgba(91,140,255,.16),rgba(168,85,247,.10) 60%,rgba(255,255,255,.03));
+  border:1px solid var(--border-strong);box-shadow:var(--shadow)}
+.banner::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent-grad)}
+.banner-headline{font-size:17px;font-weight:750;line-height:1.45;color:#fff}
+.banner-headline .fire{filter:drop-shadow(0 0 8px rgba(255,150,60,.6))}
+.banner-details{display:flex;flex-wrap:wrap;gap:7px 18px;font-size:12.5px;color:var(--text-2)}
+.banner-details b{color:var(--text);font-weight:700}
+.banner-details span[title]{cursor:help;border-bottom:1px dotted rgba(154,166,189,.45)}
+
+/* Directional-flow grid */
+.flow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:14px;margin-bottom:14px}
+.flow-card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:15px 16px 8px;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  transition:transform .18s cubic-bezier(.22,1,.36,1),box-shadow .18s,border-color .18s}
+.flow-card::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-radius:var(--radius) var(--radius) 0 0}
+.flow-card.bull::before{background:var(--green-grad)}
+.flow-card.bear::before{background:var(--red-grad)}
+.flow-card.bull{background:linear-gradient(180deg,var(--green-soft),transparent 42%),var(--surface)}
+.flow-card.bear{background:linear-gradient(180deg,var(--red-soft),transparent 42%),var(--surface)}
+.flow-card:hover{transform:translateY(-3px);border-color:var(--border-strong);box-shadow:var(--shadow)}
+.flow-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.flow-name{font-size:14.5px;font-weight:800}
+.flow-bias{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:2px 9px;border-radius:999px}
+.flow-bias.bull{background:var(--green-soft);color:var(--green)}
+.flow-bias.bear{background:var(--red-soft);color:var(--red)}
+.flow-list{list-style:none;margin:0;padding:0}
+.flow-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.flow-item:last-child{border-bottom:none}
+.rank{flex:none;width:24px;height:24px;border-radius:8px;display:grid;place-items:center;
+  font-size:12px;font-weight:850;color:#0a0e1a}
+.rank.r1{background:linear-gradient(135deg,#ffe08a,#ffc233);box-shadow:0 3px 10px rgba(255,200,60,.4)}
+.rank.r2{background:linear-gradient(135deg,#e9eefc,#b9c4dc)}
+.rank.r3{background:linear-gradient(135deg,#f0b98a,#d97e49)}
+.fc-contract{flex:1;font-size:13.5px}
+.fc-strike{font-weight:750}
+.fc-exp{font-size:11px;color:var(--text-3);margin-left:2px}
+.tag{font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:4px}
+.tag.itm{background:var(--green-soft);color:var(--green)}
+.tag.atm{background:rgba(255,200,55,.16);color:#ffce5c}
+.tag.otm{background:rgba(154,166,189,.16);color:var(--text-2)}
+.fc-vol{font-size:12.5px;font-weight:750;white-space:nowrap}
+.conf{font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:7px;white-space:nowrap}
+.conf.strong{background:var(--green-soft);color:var(--green)}
+.conf.medium{background:rgba(255,200,55,.16);color:#ffce5c}
+.conf.weak{background:rgba(154,166,189,.16);color:var(--text-3)}
+.flow-foot{font-size:10.5px;color:var(--text-3);padding:9px 0 5px;border-top:1px solid rgba(255,255,255,.05);margin-top:2px}
+.flow-note{font-size:11px;color:var(--text-3);margin:6px 2px 30px;line-height:1.55}
+
+/* Activity tables */
+.tables{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:26px}
+.tw{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:15px 16px;
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+.tw.up{box-shadow:inset 0 3px 0 -1px var(--green)}
+.tw.down{box-shadow:inset 0 3px 0 -1px var(--red)}
+.tw-title{font-size:14px;font-weight:800;margin-bottom:3px}
+.tw-title.up{color:var(--green)} .tw-title.down{color:var(--red)}
+.tw-sub{font-size:11px;color:var(--text-3);margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:right;padding:7px 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--text-3);border-bottom:1px solid var(--border)}
+th:first-child{text-align:left}
+td{text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.045)}
+td:first-child{text-align:left}
+tbody tr:hover{background:rgba(255,255,255,.035)}
+tbody tr:last-child td{border-bottom:none}
+.act{font-weight:750}
+.act.hi{color:var(--green)} .act.lo{color:var(--red)}
+
+/* Trend */
+.trend-title{font-size:14px;font-weight:750;margin-bottom:12px}
+.bars{display:flex;align-items:flex-end;gap:5px;height:84px;padding:10px 12px;background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius)}
+.bar{flex:1;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,#5b8cff,#a855f7);opacity:.85;min-height:4px}
+.bar:hover{opacity:1}
+
+.proto-tag{position:fixed;top:12px;right:12px;font-size:11px;font-weight:700;padding:5px 12px;border-radius:999px;
+  background:rgba(255,255,255,.08);border:1px solid var(--border);color:var(--text-2);backdrop-filter:blur(8px)}
+</style>
+</head>
+<body>
+<div class="proto-tag">PROTOTYPE · Aurora redesign</div>
+<div class="wrap">
+
+  <div class="oc-header">
+    <div>
+      <h1 class="oc-title">Option Calls</h1>
+      <div class="oc-sub">Where the money's leaning — ranked Long Calls, Naked Calls, Naked Puts &amp; Long Puts (long vs naked estimated from bid/ask), plus call volume vs open interest.</div>
+    </div>
+    <div class="oc-search">
+      <input class="oc-input" placeholder="Ticker e.g. AAPL" value="APLD">
+      <button class="oc-btn">Show Calls</button>
+    </div>
+  </div>
+
+  <div class="oc-strip">
+    <span class="oc-ticker">APLD</span>
+    <span class="oc-price">last <b>$41.06</b></span>
+    <span class="pill bear">DISTRIBUTING</span>
+  </div>
+
+  <div class="oc-summary">
+    <div class="tile"><div class="tile-label">Read</div><div class="tile-value red">Distributing</div></div>
+    <div class="tile"><div class="tile-label">Price</div><div class="tile-value mono">$41.06</div></div>
+    <div class="tile"><div class="tile-label">Call Volume</div><div class="tile-value mono">9,633</div></div>
+    <div class="tile"><div class="tile-label">Call OI</div><div class="tile-value mono">140,603</div></div>
+    <div class="tile"><div class="tile-label">Vol / OI</div><div class="tile-value mono">0.07×</div></div>
+    <div class="tile"><div class="tile-label">Contracts</div><div class="tile-value mono">143</div></div>
+  </div>
+  <div class="oc-meta">Primary source: yfinance · 12 increasing · 12 decreasing</div>
+
+  <!-- Busiest call -->
+  <div class="banner">
+    <div class="banner-headline"><span class="fire">🔥</span> Busiest call — cheap (~$3) bet the stock rises above <b>$50</b> by <b>Jun 12</b>, heavily traded today.</div>
+    <div class="banner-details">
+      <span>Strike <b>$50</b> (above price)</span>
+      <span>Expires <b>Jun 12</b></span>
+      <span title="Contracts traded today">Traded today <b>2,817</b></span>
+      <span title="Contracts already held open from before">Open <b>3,917</b></span>
+      <span title="Today's volume ÷ open interest">Activity <b>0.72×</b></span>
+      <span title="Price per share × 100">~$3 per contract</span>
+    </div>
+  </div>
+
+  <!-- Directional flow -->
+  <div class="sec-title">Directional Flow <span class="pill bear">BEARISH</span> <span class="est">estimated from bid/ask</span></div>
+  <div class="flow-grid">
+
+    <div class="flow-card bull">
+      <div class="flow-head"><span class="flow-name">Long Calls</span><span class="flow-bias bull">bullish</span></div>
+      <ul class="flow-list">
+        <li class="flow-item"><span class="rank r1">1</span><span class="fc-contract"><span class="fc-strike">$45</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">2,048</span><span class="conf strong">est. strong</span></li>
+        <li class="flow-item"><span class="rank r2">2</span><span class="fc-contract"><span class="fc-strike">$50</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 18</span></span><span class="fc-vol mono">891</span><span class="conf medium">est. medium</span></li>
+        <li class="flow-item"><span class="rank r3">3</span><span class="fc-contract"><span class="fc-strike">$44</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">643</span><span class="conf strong">est. strong</span></li>
+      </ul>
+      <div class="flow-foot">43 directional contracts · $1.76M notional</div>
+    </div>
+
+    <div class="flow-card bear">
+      <div class="flow-head"><span class="flow-name">Naked Calls</span><span class="flow-bias bear">bearish</span></div>
+      <ul class="flow-list">
+        <li class="flow-item"><span class="rank r1">1</span><span class="fc-contract"><span class="fc-strike">$49</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">870</span><span class="conf medium">est. medium</span></li>
+        <li class="flow-item"><span class="rank r2">2</span><span class="fc-contract"><span class="fc-strike">$45</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 18</span></span><span class="fc-vol mono">708</span><span class="conf strong">est. strong</span></li>
+        <li class="flow-item"><span class="rank r3">3</span><span class="fc-contract"><span class="fc-strike">$44</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 18</span></span><span class="fc-vol mono">635</span><span class="conf strong">est. strong</span></li>
+      </ul>
+      <div class="flow-foot">53 directional contracts · $1.92M notional</div>
+    </div>
+
+    <div class="flow-card bull">
+      <div class="flow-head"><span class="flow-name">Naked Puts</span><span class="flow-bias bull">bullish</span></div>
+      <ul class="flow-list">
+        <li class="flow-item"><span class="rank r1">1</span><span class="fc-contract"><span class="fc-strike">$39</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">485</span><span class="conf strong">est. strong</span></li>
+        <li class="flow-item"><span class="rank r2">2</span><span class="fc-contract"><span class="fc-strike">$38.5</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">330</span><span class="conf strong">est. strong</span></li>
+        <li class="flow-item"><span class="rank r3">3</span><span class="fc-contract"><span class="fc-strike">$33</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 18</span></span><span class="fc-vol mono">203</span><span class="conf strong">est. strong</span></li>
+      </ul>
+      <div class="flow-foot">40 directional contracts · $0.51M notional</div>
+    </div>
+
+    <div class="flow-card bear">
+      <div class="flow-head"><span class="flow-name">Long Puts</span><span class="flow-bias bear">bearish</span></div>
+      <ul class="flow-list">
+        <li class="flow-item"><span class="rank r1">1</span><span class="fc-contract"><span class="fc-strike">$39.5</span><span class="tag atm">ATM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">599</span><span class="conf strong">est. strong</span></li>
+        <li class="flow-item"><span class="rank r2">2</span><span class="fc-contract"><span class="fc-strike">$34</span><span class="tag otm">OTM</span><span class="fc-exp">Jun 18</span></span><span class="fc-vol mono">297</span><span class="conf strong">est. strong</span></li>
+        <li class="flow-item"><span class="rank r3">3</span><span class="fc-contract"><span class="fc-strike">$42</span><span class="tag itm">ITM</span><span class="fc-exp">Jun 12</span></span><span class="fc-vol mono">294</span><span class="conf medium">est. medium</span></li>
+      </ul>
+      <div class="flow-foot">36 directional contracts · $1.09M notional</div>
+    </div>
+
+  </div>
+  <div class="flow-note">ⓘ Long vs naked is <b>estimated</b> from where each trade printed in the bid/ask spread (near ask = bought/long, near bid = sold/naked). Single-leg heuristic — not confirmed buy/sell intent.</div>
+
+  <!-- Activity tables -->
+  <div class="tables">
+    <div class="tw up">
+      <div class="tw-title up">▲ Increasing volume</div>
+      <div class="tw-sub">Fresh buying — volume large vs open interest</div>
+      <table>
+        <thead><tr><th>Strike</th><th>Expires</th><th>Traded</th><th>Open</th><th>Activity</th><th>Price</th></tr></thead>
+        <tbody>
+          <tr><td>🔥 $45 <span class="tag otm">OTM</span></td><td>Jun 12</td><td class="mono">2,048</td><td class="mono">2,840</td><td class="act hi mono">0.72×</td><td class="mono">$0.41</td></tr>
+          <tr><td>$50 <span class="tag otm">OTM</span></td><td>Jun 18</td><td class="mono">891</td><td class="mono">1,560</td><td class="act hi mono">0.57×</td><td class="mono">$0.18</td></tr>
+          <tr><td>$44 <span class="tag otm">OTM</span></td><td>Jun 12</td><td class="mono">643</td><td class="mono">1,190</td><td class="act hi mono">0.54×</td><td class="mono">$0.62</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tw down">
+      <div class="tw-title down">▼ Decreasing volume</div>
+      <div class="tw-sub">Waning interest — large OI, little new volume</div>
+      <table>
+        <thead><tr><th>Strike</th><th>Expires</th><th>Traded</th><th>Open</th><th>Activity</th><th>Price</th></tr></thead>
+        <tbody>
+          <tr><td>$60 <span class="tag otm">OTM</span></td><td>Jun 18</td><td class="mono">120</td><td class="mono">18,400</td><td class="act lo mono">0.01×</td><td class="mono">$0.02</td></tr>
+          <tr><td>$42 <span class="tag itm">ITM</span></td><td>Jun 12</td><td class="mono">310</td><td class="mono">9,250</td><td class="act lo mono">0.03×</td><td class="mono">$1.84</td></tr>
+          <tr><td>$55 <span class="tag otm">OTM</span></td><td>Jun 18</td><td class="mono">95</td><td class="mono">7,720</td><td class="act lo mono">0.01×</td><td class="mono">$0.05</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Trend -->
+  <div class="trend-title">30-Day Trend · daily call volume <span style="color:var(--green)">▲ 4,210 vs May 12</span></div>
+  <div class="bars">
+    <div class="bar" style="height:30%"></div><div class="bar" style="height:42%"></div>
+    <div class="bar" style="height:38%"></div><div class="bar" style="height:55%"></div>
+    <div class="bar" style="height:48%"></div><div class="bar" style="height:67%"></div>
+    <div class="bar" style="height:60%"></div><div class="bar" style="height:78%"></div>
+    <div class="bar" style="height:72%"></div><div class="bar" style="height:90%"></div>
+    <div class="bar" style="height:84%"></div><div class="bar" style="height:100%"></div>
+  </div>
+
+</div>
+</body>
+</html>

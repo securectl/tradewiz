@@ -136,7 +136,13 @@ def _execute_action(action, context, job):
             job.message = "AI analyzing earnings..."
             job.notify("progress")
             raw = llm_adapter.analyze_earnings(context["data"], user_id=user_id)
-            context["results"]["earnings"] = llm_adapter.parse_llm_json(raw)
+            parsed = llm_adapter.parse_llm_json(raw)
+            context["results"]["earnings"] = parsed
+            # Surface a clear reason when the LLM failed (e.g. OpenRouter 402 out
+            # of credits) so the report shows an error instead of an empty card.
+            if isinstance(parsed, dict) and (parsed.get("error") or parsed.get("raw_response")):
+                context["results"]["llm_earnings_error"] = (
+                    parsed.get("error") or "LLM returned unparseable output")
 
         elif action_type == "llm_sector":
             job.message = "AI analyzing sector positioning..."

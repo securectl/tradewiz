@@ -93,6 +93,204 @@ def _fetch_calls_yf(symbol):
         return 0.0, []
 
 
+def _fetch_chain_yf(symbol):
+    """Pull nearest-2-expiration CALL **and PUT** chains from yfinance, including
+    bid/ask so trade direction can be estimated.
+
+    Returns (price, [calls], [puts]); each contract dict carries strike, expiry,
+    volume, open_interest, last, bid, ask. (0.0, [], []) on failure."""
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        expirations = ticker.options
+        if not expirations:
+            return 0.0, [], []
+        try:
+            info = ticker.fast_info
+            price = float(info.get("lastPrice", 0) or info.get("previousClose", 0) or 0)
+        except Exception:
+            price = 0.0
+        calls, puts = [], []
+        for exp_date in expirations[:2]:
+            try:
+                chain = ticker.option_chain(exp_date)
+                for df, bucket in ((chain.calls, calls), (chain.puts, puts)):
+                    if df is None or df.empty:
+                        continue
+                    df = df.copy()
+                    df["volume"] = df["volume"].fillna(0).astype(int)
+                    df["openInterest"] = df["openInterest"].fillna(0).astype(int)
+                    for _, r in df.iterrows():
+                        bucket.append({
+                            "strike": float(r["strike"]),
+                            "expiry": exp_date,
+                            "volume": int(r["volume"]),
+                            "open_interest": int(r["openInterest"]),
+                            "last": round(float(r.get("lastPrice") or 0), 2),
+                            "bid": round(float(r.get("bid") or 0), 2),
+                            "ask": round(float(r.get("ask") or 0), 2),
+                        })
+            except Exception as e:
+                logger.debug(f"yf chain failed for {symbol} {exp_date}: {e}")
+        return price, calls, puts
+    except Exception as e:
+        logger.warning(f"yfinance chain fetch failed for {symbol}: {e}")
+        return 0.0, [], []
+
+
+# ── Directional flow (Long/Naked × Calls/Puts) ──────────────────────────
+# The options chain can't tell us if a print was bought or sold, so we estimate
+# the aggressor from where the last trade sits in the bid/ask spread (the
+# standard options-flow heuristic): a fill near the ASK was lifted (bought,
+# "long"); near the BID it was hit (sold/written, "naked"). It's an ESTIMATE.
+
+FLOW_TOP = 3              # ranked rows kept per bucket (#1 / #2 / #3)
+_FLOW_EDGE = 0.30         # how far past mid (fraction of half-spread) to call a side
+_FLOW_CACHE = {}          # symbol -> (result, ts)
+
+
+def _moneyness_for(strike, price, is_call):
+    """ITM / ATM / OTM relative to spot, for a call or a put. ATM within ±1.5%."""
+    if not price or price <= 0:
+        return "—"
+    diff = (strike - price) / price
+    if abs(diff) <= 0.015:
+        return "ATM"
+    if is_call:
+        return "ITM" if strike < price else "OTM"
+    return "ITM" if strike > price else "OTM"
+
+
+def _direction(last, bid, ask):
+    """Estimate aggressor side from the print's position in the spread.
+
+    Returns (side, confidence) with side in {'buy', 'sell', 'neutral'} and
+    confidence in [0, 1]. 'neutral' when the quote is missing/crossed or the
+    print sits mid-market (no conviction either way)."""
+    last = float(last or 0)
+    bid = float(bid or 0)
+    ask = float(ask or 0)
+    if last <= 0 or bid <= 0 or ask <= 0 or ask < bid:
+        return "neutral", 0.0
+    half = (ask - bid) / 2.0
+    if half <= 0:
+        return "neutral", 0.0
+    mid = (bid + ask) / 2.0
+    pos = (last - mid) / half          # -1 at bid, 0 mid, +1 at ask
+    if pos >= _FLOW_EDGE:
+        return "buy", round(min(1.0, pos), 2)
+    if pos <= -_FLOW_EDGE:
+        return "sell", round(min(1.0, -pos), 2)
+    return "neutral", 0.0
+
+
+# bucket -> (display label, directional bias)
+_FLOW_BUCKETS = {
+    "long_calls":  ("Long Calls", "bullish"),
+    "naked_calls": ("Naked Calls", "bearish"),
+    "naked_puts":  ("Naked Puts", "bullish"),
+    "long_puts":   ("Long Puts", "bearish"),
+}
+
+
+def classify_flow(symbol, price, calls, puts):
+    """Bucket every traded, directional contract into long/naked × call/put and
+    rank the top ``FLOW_TOP`` of each by volume. Pure (no network)."""
+    raw = {k: [] for k in _FLOW_BUCKETS}
+
+    def _enrich(c, is_call):
+        vol = int(c.get("volume") or 0)
+        if vol < MIN_VOL:
+            return None
+        side, conf = _direction(c.get("last"), c.get("bid"), c.get("ask"))
+        if side == "neutral":
+            return None
+        strike = round(float(c.get("strike") or 0), 2)
+        last = round(float(c.get("last") or 0), 2)
+        return {
+            "strike": strike,
+            "expiry": str(c.get("expiry") or "")[:10],
+            "type": "call" if is_call else "put",
+            "volume": vol,
+            "open_interest": int(c.get("open_interest") or 0),
+            "last": last,
+            "bid": round(float(c.get("bid") or 0), 2),
+            "ask": round(float(c.get("ask") or 0), 2),
+            "side": side,
+            "confidence": conf,
+            "notional": round(vol * last * 100, 0),
+            "moneyness": _moneyness_for(strike, price, is_call),
+        }, side
+
+    for c in calls:
+        r = _enrich(c, True)
+        if r:
+            row, side = r
+            raw["long_calls" if side == "buy" else "naked_calls"].append(row)
+    for p in puts:
+        r = _enrich(p, False)
+        if r:
+            row, side = r
+            raw["long_puts" if side == "buy" else "naked_puts"].append(row)
+
+    bull = bear = 0.0
+    buckets = {}
+    for key, (label, bias) in _FLOW_BUCKETS.items():
+        ranked = sorted(raw[key], key=lambda x: -x["volume"])[:FLOW_TOP]
+        for i, row in enumerate(ranked, 1):
+            row["rank"] = i
+        notional = sum(x["notional"] for x in raw[key])
+        if bias == "bullish":
+            bull += notional
+        else:
+            bear += notional
+        buckets[key] = {"label": label, "bias": bias,
+                        "total_notional": round(notional, 0),
+                        "contract_count": len(raw[key]), "rows": ranked}
+
+    total = bull + bear
+    if not total:
+        lean = "NO SIGNAL"
+    elif bull >= bear * 1.2:
+        lean = "BULLISH"
+    elif bear >= bull * 1.2:
+        lean = "BEARISH"
+    else:
+        lean = "MIXED"
+    return {
+        "symbol": symbol.upper(),
+        "price": round(float(price or 0), 2),
+        "buckets": buckets,
+        "summary": {"bullish_notional": round(bull, 0),
+                    "bearish_notional": round(bear, 0), "lean": lean},
+        "note": ("Long vs naked is ESTIMATED from where each trade printed in the "
+                 "bid/ask spread (near ask = bought/long, near bid = sold/naked). "
+                 "Single-leg heuristic — not confirmed buy/sell intent."),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+def get_options_flow(symbol, force_refresh=False):
+    """Cached directional-flow payload (4 ranked buckets) for ``symbol``."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"error": "no symbol"}
+    now = time.time()
+    if not force_refresh:
+        with _LOCK:
+            hit = _FLOW_CACHE.get(sym)
+        if hit and now - hit[1] < _CACHE_TTL:
+            return hit[0]
+    price, calls, puts = _fetch_chain_yf(sym)
+    if not calls and not puts:
+        result = {"error": f"No options chain available for {sym}", "symbol": sym}
+    else:
+        result = classify_flow(sym, price, calls, puts)
+    with _LOCK:
+        _FLOW_CACHE[sym] = (result, now)
+    return result
+
+
 def _classify(symbol, price, calls):
     """Pure function: turn a raw call list into the activity payload.
 
@@ -238,23 +436,39 @@ def get_call_history(symbol, days=RETENTION_DAYS):
 SOURCE_PRIORITY = ["webull", "alpaca", "yfinance"]
 
 
+def _has_signal(calls):
+    """True if any contract carries real volume or open interest.
+
+    Some feeds (e.g. Alpaca's free/IEX options tier) return the full chain with
+    prices but **zero volume and zero OI on every contract**. Such a source is
+    useless for both the displayed read and cross-validation, so we drop it —
+    otherwise it would win source-priority and the whole view shows "no data"
+    even when yfinance has usable numbers."""
+    return any((int(c.get("volume") or 0) > 0 or int(c.get("open_interest") or 0) > 0)
+               for c in (calls or []))
+
+
 def _gather_sources(sym):
-    """Return {source_name: {price, calls}} for every source that responds.
-    Each adapter is a best-effort seam — failures/unavailability just omit the
-    source so cross-validation works with whatever is present."""
+    """Return {source_name: {price, calls}} for every source with usable data.
+    Each adapter is a best-effort seam — failures/unavailability/empty (all-zero
+    volume+OI) sources are omitted so cross-validation works with whatever real
+    data is present."""
     out = {}
     try:
         from shared.webull_options import fetch_call_chain as _wb
         wb = _wb(sym)
-        if wb and wb.get("calls"):
+        if wb and _has_signal(wb.get("calls")):
             out["webull"] = {"price": wb.get("price", 0), "calls": wb["calls"]}
     except Exception as e:
         logger.debug(f"Webull source error for {sym}: {e}")
     try:
         from shared.alpaca_options import fetch_call_chain as _al
         al = _al(sym)
-        if al and al.get("calls"):
+        if al and _has_signal(al.get("calls")):
             out["alpaca"] = {"price": al.get("price", 0), "calls": al["calls"]}
+        elif al and al.get("calls"):
+            logger.debug(f"Alpaca returned {len(al['calls'])} calls for {sym} "
+                         f"with no volume/OI — dropping as a display source")
     except Exception as e:
         logger.debug(f"Alpaca source error for {sym}: {e}")
     try:

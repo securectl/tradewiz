@@ -374,6 +374,18 @@ def _run_postgres(conn):
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_optsnap_symbol_date ON options_call_snapshots(symbol, snap_date)")
 
+    # Earnings calendar — one JSON board per week (mirror of the computed weekly
+    # "most anticipated reports" view, so a restart serves the last board fast).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS earnings_calendar_snapshots (
+            id SERIAL PRIMARY KEY,
+            week_start TEXT NOT NULL,
+            payload TEXT,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(week_start)
+        )
+    """)
+
     # LLM model snapshots — admin-saved point-in-time captures of which models
     # are wired to which roles. Used by the "revert to previous version"
     # button in the admin UI when a cheaper-model swap turns out worse.
@@ -757,6 +769,25 @@ def _run_postgres(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_wa_ticker ON whale_activity (ticker, created_at DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_wa_entity ON whale_activity (entity_id, created_at DESC)")
 
+    # ── News agent (RSS/Reddit ingestion; 30-day retention) ──────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS news_articles (
+            id SERIAL PRIMARY KEY,
+            source TEXT,
+            category TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            url TEXT UNIQUE,
+            published_at TIMESTAMP,
+            tickers TEXT,
+            sectors TEXT,
+            sentiment TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_news_created ON news_articles (created_at DESC)")
+
     cur.close()
     logger.info("PostgreSQL tables created.")
 
@@ -1101,6 +1132,17 @@ def _run_sqlite(conn):
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_optsnap_symbol_date ON options_call_snapshots(symbol, snap_date)")
+
+    # Earnings calendar — one JSON board per week (see the Postgres section).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS earnings_calendar_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start TEXT NOT NULL,
+            payload TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(week_start)
+        )
+    """)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_snapshots (
@@ -1485,6 +1527,25 @@ def _run_sqlite(conn):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # ── News agent (RSS/Reddit ingestion; 30-day retention) ──────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS news_articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT,
+            category TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            url TEXT UNIQUE,
+            published_at TIMESTAMP,
+            tickers TEXT,
+            sectors TEXT,
+            sentiment TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_created ON news_articles (created_at DESC)")
 
     logger.info("SQLite tables created.")
 
