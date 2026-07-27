@@ -4,6 +4,13 @@
 .env.production
 .env.*.local
 
+# ── TLS certs & private keys (NEVER commit) ───────────────────
+certbot/
+*.pem
+*.key
+*_private_key.json
+private_key.json
+
 # ── Python ────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
