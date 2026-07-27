@@ -119,6 +119,13 @@ def handle_webhook(payload, sig_header):
         logger.warning(f"Webhook signature verification failed: {e}")
         raise
 
+    # Idempotency: Stripe may deliver an event more than once and out of order.
+    # Claim it by event id; if already processed, acknowledge and skip so we don't
+    # re-run (e.g. an out-of-order `updated` reviving a `deleted` subscription).
+    event_id = event.get("id")
+    if event_id and _event_already_processed(event_id):
+        return {"status": "ok", "duplicate": True}
+
     event_type = event["type"]
     data = event["data"]["object"]
 
@@ -131,7 +138,33 @@ def handle_webhook(payload, sig_header):
     elif event_type == "invoice.payment_failed":
         _handle_payment_failed(data)
 
+    if event_id:
+        _mark_event_processed(event_id, event_type)
     return {"status": "ok"}
+
+
+def _event_already_processed(event_id):
+    """True if this Stripe event id was handled before. Fail-open (treat as new)
+    on any DB error so we never silently drop a real event."""
+    try:
+        return bool(query_one(
+            f"SELECT 1 FROM stripe_events WHERE event_id = {P}", (event_id,)
+        ))
+    except Exception as e:
+        logger.debug(f"stripe_events lookup failed ({e}); processing anyway")
+        return False
+
+
+def _mark_event_processed(event_id, event_type):
+    """Record a processed event id. Best-effort; never breaks the webhook."""
+    try:
+        execute(
+            f"INSERT INTO stripe_events (event_id, event_type, processed_at) "
+            f"VALUES ({P}, {P}, {P}) ON CONFLICT (event_id) DO NOTHING",
+            (event_id, event_type, datetime.utcnow().isoformat()),
+        )
+    except Exception as e:
+        logger.debug(f"stripe_events record failed: {e}")
 
 
 def _handle_checkout_completed(session):
@@ -178,8 +211,11 @@ def _sync_subscription(sub):
     if status not in ("active", "trialing"):
         tier = "free"
 
-    period_start = sub.get("current_period_start")
-    period_end = sub.get("current_period_end")
+    # Period fields: on the current Stripe API (Basil, 2025-06-30) these moved off
+    # the Subscription onto its items. Read from the item, fall back to top-level.
+    item = items[0] if items else {}
+    period_start = sub.get("current_period_start") or item.get("current_period_start")
+    period_end = sub.get("current_period_end") or item.get("current_period_end")
     cancel_at_end = sub.get("cancel_at_period_end", False)
 
     _upsert_subscription(

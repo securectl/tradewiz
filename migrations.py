@@ -280,6 +280,15 @@ def _run_postgres(conn):
         )
     """)
 
+    # Stripe webhook idempotency — one row per processed event id.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS stripe_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT,
+            processed_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS llm_usage_log (
             id SERIAL PRIMARY KEY,
@@ -630,6 +639,15 @@ def _run_sqlite(conn):
             cancel_at_period_end INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Stripe webhook idempotency (see Postgres section).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS stripe_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 

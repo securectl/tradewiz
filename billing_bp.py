@@ -51,24 +51,14 @@ def billing_status():
 @billing_bp.route("/checkout/<tier>", methods=["POST"])
 @login_required
 def billing_checkout(tier):
-    """Create a Stripe Checkout session for the given tier. Only invited users can upgrade."""
+    """Create a Stripe Checkout session for the given tier. Open to any logged-in
+    user (public self-serve). Bot access remains invite-only and is never granted
+    by a paid plan."""
     if tier not in ("starter", "pro"):
         return jsonify({"error": "Invalid tier. Choose 'starter' or 'pro'."}), 400
 
     if not stripe_configured():
         return jsonify({"error": "Stripe is not configured. Contact administrator."}), 503
-
-    # Verify user was invited (has an accepted invite or is admin)
-    from db import query_one, IS_POSTGRES
-    P = "%s" if IS_POSTGRES else "?"
-    is_admin = any(r == "admin" for r in (current_user.roles or []))
-    if not is_admin:
-        invite = query_one(
-            f"SELECT email FROM invites WHERE email = {P} AND accepted_at IS NOT NULL",
-            (current_user.email.lower(),),
-        )
-        if not invite:
-            return jsonify({"error": "Upgrade is available to invited users only. Contact an administrator."}), 403
 
     try:
         base_url = request.host_url.rstrip("/")
