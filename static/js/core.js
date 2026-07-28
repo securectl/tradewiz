@@ -206,6 +206,12 @@ function renderAccountBody() {
         ${usageRows}
       </div>
       <div class="acct-section">
+        <div class="acct-section-title">Have an access code?</div>
+        <input type="text" id="acct-code" class="acct-input" placeholder="Enter code (e.g. TW-XXXXXXXX)" autocomplete="off" style="text-transform:uppercase;letter-spacing:.5px;">
+        <button type="button" class="acct-btn acct-btn-primary" onclick="submitRedeemCode()">Redeem code</button>
+        <div id="acct-code-msg" style="font-size:12px;margin-top:8px;"></div>
+      </div>
+      <div class="acct-section">
         <div class="acct-section-title">Security — Change password</div>
         <input type="password" id="acct-cur-pw" class="acct-input" placeholder="Current password (leave blank if none)" autocomplete="current-password">
         <input type="password" id="acct-new-pw" class="acct-input" placeholder="New password (min 8 chars)" autocomplete="new-password">
@@ -213,6 +219,22 @@ function renderAccountBody() {
         <button type="button" class="acct-btn acct-btn-primary" onclick="submitChangePassword()">Update password</button>
         <div id="acct-pw-msg" style="font-size:12px;margin-top:8px;"></div>
       </div>`;
+}
+
+async function submitRedeemCode() {
+    const code = ((document.getElementById('acct-code') || {}).value || '').trim();
+    const msg = document.getElementById('acct-code-msg');
+    const show = (t, ok) => { if (msg) { msg.style.color = ok ? '#26a69a' : '#ef5350'; msg.textContent = t; } };
+    if (!code) return show('Enter a code.', false);
+    try {
+        const r = await fetch('/api/promo/redeem', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: code }),
+        });
+        const d = await r.json();
+        show(d.message || (d.ok ? 'Code applied.' : 'Could not redeem code.'), !!d.ok);
+        if (d.ok) { if (typeof loadBillingStatus === 'function') await loadBillingStatus(); renderAccountBody(); }
+    } catch (e) { show('Request failed.', false); }
 }
 
 async function manageBilling() {

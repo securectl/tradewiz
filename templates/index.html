@@ -1633,7 +1633,42 @@
         <button class="admin-subtab active" data-atab="usage" onclick="switchAdminTab('usage')">Usage</button>
         <button class="admin-subtab" data-atab="users" onclick="switchAdminTab('users')">Users</button>
         <button class="admin-subtab" data-atab="models" onclick="switchAdminTab('models')">Models</button>
+        <button class="admin-subtab" data-atab="codes" onclick="switchAdminTab('codes')">Codes</button>
         <button class="admin-subtab" data-atab="system" onclick="switchAdminTab('system')">System</button>
+    </div>
+
+    <!-- ══ Codes tab — admin-generated access codes ══ -->
+    <div class="admin-grid admin-tabpanel" data-apanel="codes" style="display:none;">
+        <div class="admin-card admin-card-wide">
+            <div class="admin-card-title">Generate access codes</div>
+            <div style="color:var(--text-secondary);font-size:13px;margin-bottom:14px;">
+                Create free-access codes to share with users. Each code unlocks the chosen plan free for the set number of days.
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+                <label style="font-size:12px;color:var(--text-secondary);">Plan<br>
+                    <select id="pc-tier" class="settings-input" style="min-width:120px;">
+                        <option value="starter">Starter</option>
+                        <option value="pro">Pro</option>
+                    </select></label>
+                <label style="font-size:12px;color:var(--text-secondary);">Free days<br>
+                    <input id="pc-days" type="number" min="1" value="30" class="settings-input" style="width:90px;"></label>
+                <label style="font-size:12px;color:var(--text-secondary);">Uses per code<br>
+                    <input id="pc-uses" type="number" min="1" value="1" class="settings-input" style="width:90px;"></label>
+                <label style="font-size:12px;color:var(--text-secondary);">Code expires (days)<br>
+                    <input id="pc-exp" type="number" min="1" value="90" class="settings-input" style="width:110px;"></label>
+                <label style="font-size:12px;color:var(--text-secondary);">How many<br>
+                    <input id="pc-qty" type="number" min="1" max="200" value="1" class="settings-input" style="width:90px;"></label>
+                <button class="btn-primary" onclick="generatePromoCodes()" style="padding:9px 16px;">Generate</button>
+            </div>
+            <div id="pc-new" style="margin-top:14px;"></div>
+        </div>
+        <div class="admin-card admin-card-wide">
+            <div class="admin-card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                <span>Active &amp; past codes</span>
+                <button class="btn-ghost" onclick="loadPromoCodes()" style="padding:5px 12px;font-size:12px;">Refresh</button>
+            </div>
+            <div id="pc-table"><div style="color:var(--text-secondary);padding:14px;">Loading…</div></div>
+        </div>
     </div>
 
     <!-- ══ Usage tab ══ -->
@@ -2229,7 +2264,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
   </div>
 </div>
 
-<script src="/static/js/core.js?v=12"></script>
+<script src="/static/js/core.js?v=13"></script>
 <script src="/static/js/features/dashboard.js?v=10"></script>
 <script src="/static/js/features/news/news.js?v=2"></script>
 <script src="/static/js/features/analysis/analysis.js?v=10"></script>
@@ -2246,7 +2281,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 <script src="/static/js/features/release_notes.js"></script>
 <script src="/static/js/features/feedback.js"></script>
 <script src="/static/js/features/user/settings.js"></script>
-<script src="/static/js/features/admin/admin.js?v=2"></script>
+<script src="/static/js/features/admin/admin.js?v=3"></script>
 <script src="/static/js/features/predictions/predictions.js"></script>
 <script src="/static/js/features/congress/congress.js"></script>
 <script src="/static/js/features/smart_money/smart_money.js?v=4"></script>

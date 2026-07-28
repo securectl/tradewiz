@@ -134,3 +134,13 @@ def change_password():
     execute(f"UPDATE users SET password_hash = {P} WHERE id = {P}",
             (generate_password_hash(new), uid))
     return jsonify({"ok": True})
+
+
+@bp.route("/api/promo/redeem", methods=["POST"])
+@login_required
+def redeem_promo():
+    """Redeem an admin-issued access code for the current user."""
+    import promo
+    code = (request.get_json(silent=True) or {}).get("code", "")
+    ok, message, info = promo.redeem_code(_uid(), code)
+    return jsonify({"ok": ok, "message": message, "info": info})

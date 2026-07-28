@@ -1411,3 +1411,33 @@ def api_admin_platform_set():
     logger.warning(f"Admin {_uid()} set deployment_target={target or 'auto'}")
     return jsonify({"ok": True, "platform": get_platform()})
 
+
+
+# ── Promo / access codes ──────────────────────────────────────────────────
+@bp.route("/api/admin/promo-codes", methods=["GET", "POST"])
+@admin_required
+def api_admin_promo_codes():
+    """List all codes, or POST to generate one or more."""
+    import promo
+    from flask_login import current_user
+    if request.method == "POST":
+        d = request.get_json(silent=True) or {}
+        codes = promo.create_codes(
+            tier=d.get("tier", "starter"),
+            days=int(d.get("days", 30) or 30),
+            max_uses=int(d.get("max_uses", 1) or 1),
+            expires_days=int(d.get("expires_days", 90) or 90),
+            quantity=int(d.get("quantity", 1) or 1),
+            created_by=getattr(current_user, "id", None),
+        )
+        return jsonify({"ok": True, "codes": codes})
+    return jsonify({"codes": promo.list_codes()})
+
+
+@bp.route("/api/admin/promo-codes/<code>/toggle", methods=["POST"])
+@admin_required
+def api_admin_promo_toggle(code):
+    import promo
+    active = bool((request.get_json(silent=True) or {}).get("active"))
+    promo.set_active(code, active)
+    return jsonify({"ok": True, "code": code, "active": active})
