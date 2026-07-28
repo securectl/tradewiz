@@ -30,12 +30,34 @@ def billing_status():
     usage = check_rate_limit(uid)
     bot = has_bot_access(uid)
 
+    # Subscription detail for the account panel (status, renewal, cancel state).
+    subscription = None
+    try:
+        from db import query_one, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+        row = query_one(
+            f"SELECT status, current_period_end, cancel_at_period_end, "
+            f"stripe_subscription_id FROM user_subscriptions WHERE user_id = {P}",
+            (uid,),
+        )
+        if row:
+            subscription = {
+                "status": row.get("status"),
+                "current_period_end": (str(row.get("current_period_end"))
+                                       if row.get("current_period_end") else None),
+                "cancel_at_period_end": bool(row.get("cancel_at_period_end")),
+                "active": bool(row.get("stripe_subscription_id")),
+            }
+    except Exception:
+        pass
+
     return jsonify({
         "tier": usage["tier"],
         "used": usage["used"],
         "limit": usage["limit"],
         "remaining": usage["remaining"],
         "bot_access": bot,
+        "subscription": subscription,
         "stripe_configured": stripe_configured(),
         "prices": {
             "starter": {"price_id": STRIPE_PRICE_STARTER, "amount": 19, "name": "Starter"},

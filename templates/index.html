@@ -31,10 +31,11 @@
 
 <!-- Header -->
 <div class="header">
-    <div class="logo">
+    <button type="button" class="logo" onclick="switchTab('dashboard')" title="Go to Dashboard"
+            style="background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;">
         <span class="logo-flash">Trade</span><span class="logo-flash logo-wiz">Wiz</span>
         <span>Smart Market Intelligence</span>
-    </div>
+    </button>
     <form class="search-bar" id="search-form">
         <input type="text" id="ticker-input" placeholder="Enter ticker..." autocomplete="off" maxlength="10">
         <select id="period-select">
@@ -111,8 +112,11 @@
                 </div>
                 <span class="usage-gauge-label" id="usage-badge"></span>
             </div>
-            <img class="user-avatar" id="user-avatar" src="" alt="">
-            <span class="user-name" id="user-name"></span>
+            <button type="button" class="user-identity" onclick="openAccountModal()" title="Account &amp; billing"
+                    style="display:inline-flex;align-items:center;gap:6px;background:none;border:none;padding:0;font:inherit;color:inherit;cursor:pointer;">
+                <img class="user-avatar" id="user-avatar" src="" alt="">
+                <span class="user-name" id="user-name"></span>
+            </button>
             <button class="btn-logout" id="btn-logout" onclick="location.href='/auth/logout'" title="Sign out">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -2193,7 +2197,39 @@ function closeDisclaimer(){document.getElementById('disclaimer-overlay').style.d
 if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('disclaimer-overlay').style.display='none'}
 </script>
 
-<script src="/static/js/core.js?v=11"></script>
+<style>
+  .acct-section { margin-bottom: 16px; }
+  .acct-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--text-muted, #8a90a0); margin-bottom: 8px; font-weight: 700; }
+  .acct-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
+    font-size: 13px; color: var(--text-secondary, #b0b4bd);
+    border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.06)); }
+  .acct-row b { color: var(--text-bright, #e6e8ec); font-weight: 600; }
+  .acct-input { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 9px 10px;
+    background: var(--bg-input, #0f1218); border: 1px solid var(--border, #2a2e39);
+    border-radius: 6px; color: var(--text-bright, #e6e8ec); font-size: 13px; }
+  .acct-btn { width: 100%; padding: 9px 12px; border-radius: 8px; margin-top: 4px;
+    border: 1px solid var(--border, #2a2e39); background: var(--bg-input, #1a1d24);
+    color: var(--text-bright, #e6e8ec); font-size: 13px; font-weight: 600; cursor: pointer; }
+  .acct-btn:hover { border-color: var(--accent-primary, #4f8aff); }
+  .acct-btn-primary { background: var(--accent-primary, #4f8aff); border-color: var(--accent-primary, #4f8aff); color: #fff; }
+</style>
+
+<!-- Account / billing modal (opened from the profile) -->
+<div id="account-modal-overlay" class="acct-overlay"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;"
+     onclick="if(event.target===this)closeAccountModal()">
+  <div class="acct-modal" style="background:var(--bg-card,#161923);border:1px solid var(--border,#2a2e39);border-radius:12px;max-width:460px;width:92%;max-height:88vh;overflow:auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;font-size:18px;color:var(--text-bright,#e6e8ec);">Account</h3>
+      <button type="button" onclick="closeAccountModal()" aria-label="Close"
+              style="background:none;border:none;color:var(--text-muted,#8a90a0);font-size:24px;line-height:1;cursor:pointer;">&times;</button>
+    </div>
+    <div id="acct-body"><div style="color:var(--text-muted,#8a90a0);padding:20px 0;text-align:center;">Loading…</div></div>
+  </div>
+</div>
+
+<script src="/static/js/core.js?v=12"></script>
 <script src="/static/js/features/dashboard.js?v=10"></script>
 <script src="/static/js/features/news/news.js?v=2"></script>
 <script src="/static/js/features/analysis/analysis.js?v=10"></script>

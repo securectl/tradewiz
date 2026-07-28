@@ -113,3 +113,24 @@ def api_settings_save():
             updated.append(field)
 
     return jsonify({"ok": True, "updated": updated})
+
+
+@bp.route("/api/user/change-password", methods=["POST"])
+@login_required
+def change_password():
+    """Change the current user's password. Requires the current password when one
+    is already set (SSO-only accounts may set one for the first time)."""
+    from werkzeug.security import generate_password_hash, check_password_hash
+    data = request.get_json(silent=True) or {}
+    current = data.get("current_password") or ""
+    new = data.get("new_password") or ""
+    if len(new) < 8:
+        return jsonify({"ok": False, "error": "New password must be at least 8 characters."}), 200
+    uid = _uid()
+    row = query_one(f"SELECT password_hash FROM users WHERE id = {P}", (uid,))
+    existing = row.get("password_hash") if row else None
+    if existing and not check_password_hash(existing, current):
+        return jsonify({"ok": False, "error": "Current password is incorrect."}), 200
+    execute(f"UPDATE users SET password_hash = {P} WHERE id = {P}",
+            (generate_password_hash(new), uid))
+    return jsonify({"ok": True})

@@ -136,6 +136,115 @@ function updateUsageBadge() {
     }
 }
 
+// ─── Account / billing modal ────────────────────────────────
+function _acctEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function _acctDate(iso) {
+    if (!iso) return null;
+    const d = new Date(String(iso).replace(' ', 'T'));
+    if (isNaN(d)) return null;
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+async function openAccountModal() {
+    const overlay = document.getElementById('account-modal-overlay');
+    if (overlay) overlay.style.display = 'flex';
+    if (!billingStatus) await loadBillingStatus();
+    else loadBillingStatus();   // refresh in background
+    renderAccountBody();
+}
+
+function closeAccountModal() {
+    const overlay = document.getElementById('account-modal-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function renderAccountBody() {
+    const body = document.getElementById('acct-body');
+    if (!body) return;
+    const b = billingStatus || {};
+    const tier = (b.tier || 'free');
+    const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
+    const sub = b.subscription;
+
+    // Plan & billing
+    let planRows = `<div class="acct-row"><span>Plan</span><b>${_acctEsc(tierName)}</b></div>`;
+    if (sub && sub.status) {
+        planRows += `<div class="acct-row"><span>Status</span><b>${_acctEsc(sub.status)}</b></div>`;
+        const when = _acctDate(sub.current_period_end);
+        if (when) planRows += `<div class="acct-row"><span>${sub.cancel_at_period_end ? 'Ends' : 'Renews'}</span><b>${when}</b></div>`;
+    }
+    let planActions = '';
+    if (sub && sub.active) {
+        planActions = `<button type="button" class="acct-btn" onclick="manageBilling()">Manage / Cancel subscription</button>`;
+    } else if (b.stripe_configured) {
+        planActions = `<button type="button" class="acct-btn acct-btn-primary" onclick="closeAccountModal();showPricingModal()">Upgrade plan</button>`;
+    }
+
+    // Usage
+    let usageRows;
+    if (b.limit === null || b.limit === undefined) {
+        usageRows = `<div class="acct-row"><span>LLM calls (24h)</span><b>Unlimited</b></div>`;
+    } else {
+        usageRows = `<div class="acct-row"><span>LLM calls (24h)</span><b>${b.used || 0} / ${b.limit}</b></div>`
+                  + `<div class="acct-row"><span>Remaining</span><b>${b.remaining != null ? b.remaining : '—'}</b></div>`;
+    }
+    usageRows += `<div class="acct-row"><span>Bot access</span><b>${b.bot_access ? 'Yes' : 'No'}</b></div>`;
+
+    body.innerHTML = `
+      <div class="acct-section">
+        <div class="acct-section-title">Plan &amp; Billing</div>
+        ${planRows}
+        ${planActions ? `<div style="margin-top:10px;">${planActions}</div>` : ''}
+      </div>
+      <div class="acct-section">
+        <div class="acct-section-title">Usage</div>
+        ${usageRows}
+      </div>
+      <div class="acct-section">
+        <div class="acct-section-title">Security — Change password</div>
+        <input type="password" id="acct-cur-pw" class="acct-input" placeholder="Current password (leave blank if none)" autocomplete="current-password">
+        <input type="password" id="acct-new-pw" class="acct-input" placeholder="New password (min 8 chars)" autocomplete="new-password">
+        <input type="password" id="acct-cf-pw" class="acct-input" placeholder="Confirm new password" autocomplete="new-password">
+        <button type="button" class="acct-btn acct-btn-primary" onclick="submitChangePassword()">Update password</button>
+        <div id="acct-pw-msg" style="font-size:12px;margin-top:8px;"></div>
+      </div>`;
+}
+
+async function manageBilling() {
+    try {
+        const r = await fetch('/billing/portal', { method: 'POST' });
+        const d = await r.json();
+        if (d.url) { location.href = d.url; }
+        else { alert(d.error || 'Billing portal is unavailable. Contact support.'); }
+    } catch (e) { alert('Could not open the billing portal.'); }
+}
+
+async function submitChangePassword() {
+    const cur = (document.getElementById('acct-cur-pw') || {}).value || '';
+    const nw = (document.getElementById('acct-new-pw') || {}).value || '';
+    const cf = (document.getElementById('acct-cf-pw') || {}).value || '';
+    const msg = document.getElementById('acct-pw-msg');
+    const show = (t, ok) => { if (msg) { msg.style.color = ok ? '#26a69a' : '#ef5350'; msg.textContent = t; } };
+    if (nw.length < 8) return show('New password must be at least 8 characters.', false);
+    if (nw !== cf) return show('New passwords do not match.', false);
+    try {
+        const r = await fetch('/api/user/change-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_password: cur, new_password: nw }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+            show('Password updated.', true);
+            ['acct-cur-pw', 'acct-new-pw', 'acct-cf-pw'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        } else { show(d.error || 'Could not change password.', false); }
+    } catch (e) { show('Request failed.', false); }
+}
+
 // ─── Market Pulse (header tiles) ────────────────────────────
 
 async function loadMarketPulse() {
