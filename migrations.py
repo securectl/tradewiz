@@ -355,6 +355,9 @@ def _run_postgres(conn):
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    # Seed the Earnings tab as an admin-only canary (admins can then ramp it).
+    cur.execute("INSERT INTO feature_flags (flag, state, rollout_pct) "
+                "VALUES ('earnings_tab', 'admin', 0) ON CONFLICT (flag) DO NOTHING")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
@@ -1105,6 +1108,8 @@ def _run_sqlite(conn):
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.execute("INSERT OR IGNORE INTO feature_flags (flag, state, rollout_pct) "
+                 "VALUES ('earnings_tab', 'admin', 0)")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_usage_log (

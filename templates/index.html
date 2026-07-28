@@ -179,7 +179,7 @@
     <button class="tab-btn" data-tab="tracker" onclick="switchTab('tracker')">Tracker</button>
     <button class="tab-btn" data-tab="screener" onclick="switchTab('screener')">Screener</button>
     <button class="tab-btn" data-tab="option-calls" onclick="switchTab('option-calls')">Option Calls</button>
-    <button class="tab-btn" data-tab="earnings" onclick="switchTab('earnings')">Earnings</button>
+    <button class="tab-btn" data-tab="earnings" data-flag="earnings_tab" onclick="switchTab('earnings')" style="display:none;">Earnings</button>
     <button class="tab-btn" data-tab="research" onclick="switchTab('research')">Research</button>
     <button class="tab-btn" data-tab="news" onclick="switchTab('news')">News</button>
     <button class="tab-btn" data-tab="finskills" onclick="switchTab('finskills')">Fin Skills</button>
@@ -2216,7 +2216,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 <script src="/static/js/features/smart_money/smart_money.js?v=4"></script>
 <script src="/static/js/features/watchdog/watchdog.js?v=1"></script>
 <script src="/static/js/features/claude_bot/claude_bot.js?v=1"></script>
-<script src="/static/js/init.js?v=3"></script>
+<script src="/static/js/init.js?v=4"></script>
 <footer style="text-align:center;padding:16px 0 12px;font-size:11px;color:#636b7e;border-top:1px solid rgba(54,58,69,0.4);margin-top:24px;">
     TradeWiz is a product of <strong style="color:#c8ccd4;">Infinity Ventures Group LLC</strong><br>
     &copy; 2025 Infinity Ventures Group LLC. All rights reserved. Developed by Infinity Ventures Group LLC.
