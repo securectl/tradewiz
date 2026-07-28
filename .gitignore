@@ -40,3 +40,8 @@ Thumbs.db
 # ── Node (if frontend build tools added later) ───────────────
 node_modules/
 images/
+# ── TLS certs & private keys (NEVER commit — git-tracked symlinks broke TLS) ──
+certbot/
+*.pem
+*.key
+*_private_key.json

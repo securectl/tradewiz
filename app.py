@@ -75,6 +75,7 @@ from features.options_calls.routes import bp as options_calls_bp
 from features.earnings_calendar.routes import bp as earnings_calendar_bp
 from features.news_agent.routes import bp as news_agent_bp
 from claude_bot.routes import bp as claude_bot_bp
+from features.flags.routes import bp as feature_flags_bp
 
 app.register_blueprint(ipo_bp)
 app.register_blueprint(status_bp)
@@ -278,6 +279,7 @@ def _maybe_start_scheduler():
     except (FileExistsError, OSError):
         pass
 
+app.register_blueprint(feature_flags_bp)
 
 # Serve feature static files (JS/CSS)
 @app.route('/features/<path:filename>')
@@ -556,11 +558,48 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max upload
 
 # ─── Root route ──────────────────────────────────────────────────────
 
+def _landing_context():
+    """First-time-IP detection for the landing page. Records the visitor IP and
+    returns whether this is a first visit (→ recommend Starter). Best-effort."""
+    from datetime import datetime
+    ip = (request.remote_addr or "unknown")  # ProxyFix already resolves X-Forwarded-For
+    first_time = True
+    try:
+        from db import query_one, execute, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+        first_time = query_one(f"SELECT 1 FROM landing_visits WHERE ip = {P}", (ip,)) is None
+        execute(
+            f"INSERT INTO landing_visits (ip, first_seen, hits) VALUES ({P}, {P}, 1) "
+            f"ON CONFLICT (ip) DO UPDATE SET hits = landing_visits.hits + 1",
+            (ip, datetime.utcnow().isoformat()),
+        )
+    except Exception:
+        pass
+    starter_amt, pro_amt = 19, 39
+    try:
+        from app_settings import get_setting
+        s = get_setting("price_starter_amount")
+        p = get_setting("price_pro_amount")
+        starter_amt = int(float(s)) if s not in (None, "") else 19
+        pro_amt = int(float(p)) if p not in (None, "") else 39
+    except Exception:
+        pass
+    return {"first_time": first_time, "recommended": "starter",
+            "starter_amount": starter_amt, "pro_amount": pro_amt}
+
+
 @app.route("/")
 def index():
+    # Going live: anonymous visitors see the marketing landing page (not login).
     if not current_user.is_authenticated:
-        return redirect(url_for("auth.login"))
+        return render_template("landing.html", **_landing_context())
     return render_template("index.html")
+
+
+@app.route("/welcome")
+def welcome():
+    """Always render the landing page (preview it even while signed in)."""
+    return render_template("landing.html", **_landing_context())
 
 
 # ─── Init DB ─────────────────────────────────────────────────────────

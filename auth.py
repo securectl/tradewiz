@@ -301,8 +301,17 @@ def signup():
         (email,),
     )
     if not invite:
-        flash("This platform is invite-only. You need an invitation to sign up. Contact an administrator.", "error")
-        return redirect(url_for("auth.login"))
+        # Public signup is gated by the 'public_signup' feature flag (off by
+        # default). Flip it on in Admin to accept non-invited registrations.
+        public_ok = False
+        try:
+            from feature_flags import is_enabled
+            public_ok = is_enabled("public_signup")
+        except Exception:
+            public_ok = False
+        if not public_ok:
+            flash("This platform is invite-only. You need an invitation to sign up. Contact an administrator.", "error")
+            return redirect(url_for("auth.login"))
 
     # Create account
     from werkzeug.security import generate_password_hash

@@ -345,6 +345,60 @@ def _run_postgres(conn):
     cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0")
     cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
     cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cost_usd REAL DEFAULT 0")
+
+    # Feature flags — cohort/canary rollout control (off/admin/beta/percent/on).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS feature_flags (
+            flag TEXT PRIMARY KEY,
+            state TEXT NOT NULL DEFAULT 'off',
+            rollout_pct INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    # Seed the Earnings tab as an admin-only canary (admins can then ramp it).
+    cur.execute("INSERT INTO feature_flags (flag, state, rollout_pct) "
+                "VALUES ('earnings_tab', 'admin', 0) ON CONFLICT (flag) DO NOTHING")
+    # Public (non-invite) signup — OFF by default; flip to 'on' in Admin to go live.
+    cur.execute("INSERT INTO feature_flags (flag, state, rollout_pct) "
+                "VALUES ('public_signup', 'off', 0) ON CONFLICT (flag) DO NOTHING")
+    # Landing-page visits — first-time-IP detection for the Starter recommendation.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS landing_visits (
+            ip TEXT PRIMARY KEY,
+            first_seen TIMESTAMP DEFAULT NOW(),
+            hits INTEGER DEFAULT 1
+        )
+    """)
+    # Promo / access codes — admin-generated codes that grant free tier access.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            tier TEXT NOT NULL DEFAULT 'starter',
+            days INTEGER NOT NULL DEFAULT 30,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            active BOOLEAN DEFAULT TRUE,
+            expires_at TIMESTAMP,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS promo_redemptions (
+            id SERIAL PRIMARY KEY,
+            code TEXT NOT NULL,
+            user_id INTEGER,
+            redeemed_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(code, user_id)
+        )
+    """)
+    # Global key/value settings (admin-editable plan pricing, etc.)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
@@ -1084,6 +1138,54 @@ def _run_sqlite(conn):
             cancel_at_period_end INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feature_flags (
+            flag TEXT PRIMARY KEY,
+            state TEXT NOT NULL DEFAULT 'off',
+            rollout_pct INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("INSERT OR IGNORE INTO feature_flags (flag, state, rollout_pct) "
+                 "VALUES ('earnings_tab', 'admin', 0)")
+    conn.execute("INSERT OR IGNORE INTO feature_flags (flag, state, rollout_pct) "
+                 "VALUES ('public_signup', 'off', 0)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS landing_visits (
+            ip TEXT PRIMARY KEY,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            hits INTEGER DEFAULT 1
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            tier TEXT NOT NULL DEFAULT 'starter',
+            days INTEGER NOT NULL DEFAULT 30,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            expires_at TIMESTAMP,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_redemptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            user_id INTEGER,
+            redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(code, user_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
     """)
 

@@ -9,6 +9,7 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from decorators import login_required
+from feature_flags import feature_required
 from features.earnings_calendar.engine import get_earnings_week
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ bp = Blueprint("earnings_calendar", __name__)
 
 @bp.route("/api/earnings/calendar")
 @login_required
+@feature_required("earnings_tab")
 def api_earnings_calendar():
     """Weekly earnings board: ?week=0 (offset, 0=current) &wide=1 &refresh=1.
 

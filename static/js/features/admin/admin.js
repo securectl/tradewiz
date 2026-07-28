@@ -965,6 +965,100 @@ function switchAdminTab(name) {
     document.querySelectorAll('.admin-tabpanel').forEach(function (p) {
         p.style.display = (p.getAttribute('data-apanel') === name) ? '' : 'none';
     });
+    if (name === 'codes') {
+        if (typeof loadPromoCodes === 'function') loadPromoCodes();
+        if (typeof loadPricing === 'function') loadPricing();
+    }
+}
+
+// ─── Plan pricing ───────────────────────────────────────────
+async function loadPricing() {
+    try {
+        const r = await fetch('/billing/admin/pricing');
+        const d = await r.json();
+        const p = d.pricing || {};
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set('pr-starter-amt', (p.starter || {}).amount != null ? p.starter.amount : '');
+        set('pr-starter-id', (p.starter || {}).stripe_price_id || '');
+        set('pr-pro-amt', (p.pro || {}).amount != null ? p.pro.amount : '');
+        set('pr-pro-id', (p.pro || {}).stripe_price_id || '');
+    } catch (e) { /* ignore */ }
+}
+
+async function savePricing() {
+    const msg = document.getElementById('pr-msg');
+    const v = id => (document.getElementById(id) || {}).value || '';
+    const body = {
+        starter_amount: v('pr-starter-amt'), starter_price_id: v('pr-starter-id'),
+        pro_amount: v('pr-pro-amt'), pro_price_id: v('pr-pro-id'),
+    };
+    try {
+        const r = await fetch('/billing/admin/pricing', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const d = await r.json();
+        if (msg) { msg.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)'; msg.textContent = d.ok ? 'Pricing saved.' : (d.error || 'Save failed.'); }
+    } catch (e) { if (msg) { msg.style.color = 'var(--accent-red)'; msg.textContent = 'Request failed.'; } }
+}
+
+// ─── Promo / access codes ───────────────────────────────────
+function _pcEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+async function loadPromoCodes() {
+    const el = document.getElementById('pc-table');
+    if (!el) return;
+    try {
+        const r = await fetch('/api/admin/promo-codes');
+        const d = await r.json();
+        const codes = d.codes || [];
+        if (!codes.length) { el.innerHTML = '<div style="color:var(--text-secondary);padding:14px;">No codes yet — generate some above.</div>'; return; }
+        let h = '<table class="admin-table" style="width:100%;font-size:13px;"><thead><tr>' +
+            '<th style="text-align:left;">Code</th><th>Plan</th><th>Days</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>';
+        codes.forEach(function(c){
+            const used = c.used_count + '/' + c.max_uses;
+            const full = c.used_count >= c.max_uses;
+            h += '<tr>' +
+                '<td><code style="font-weight:700;letter-spacing:.5px;">' + _pcEsc(c.code) + '</code> ' +
+                    '<button class="btn-ghost" style="padding:1px 7px;font-size:11px;" onclick="navigator.clipboard&&navigator.clipboard.writeText(\'' + _pcEsc(c.code) + '\')">copy</button></td>' +
+                '<td style="text-align:center;text-transform:capitalize;">' + _pcEsc(c.tier) + '</td>' +
+                '<td style="text-align:center;">' + c.days + '</td>' +
+                '<td style="text-align:center;' + (full?'color:var(--accent-red);':'') + '">' + used + '</td>' +
+                '<td style="text-align:center;color:var(--text-secondary);">' + (c.expires_at||'—') + '</td>' +
+                '<td style="text-align:center;">' + (c.active ? '<span style="color:var(--accent-green);">Active</span>' : '<span style="color:var(--text-secondary);">Off</span>') + '</td>' +
+                '<td style="text-align:right;"><button class="btn-ghost" style="padding:3px 10px;font-size:11px;" onclick="togglePromoCode(\'' + _pcEsc(c.code) + '\',' + (!c.active) + ')">' + (c.active?'Deactivate':'Activate') + '</button></td>' +
+                '</tr>';
+        });
+        el.innerHTML = h + '</tbody></table>';
+    } catch (e) { el.innerHTML = '<div style="color:var(--accent-red);padding:14px;">Failed to load codes.</div>'; }
+}
+
+async function generatePromoCodes() {
+    const body = {
+        tier: (document.getElementById('pc-tier')||{}).value || 'starter',
+        days: parseInt((document.getElementById('pc-days')||{}).value || '30', 10),
+        max_uses: parseInt((document.getElementById('pc-uses')||{}).value || '1', 10),
+        expires_days: parseInt((document.getElementById('pc-exp')||{}).value || '90', 10),
+        quantity: parseInt((document.getElementById('pc-qty')||{}).value || '1', 10),
+    };
+    const out = document.getElementById('pc-new');
+    try {
+        const r = await fetch('/api/admin/promo-codes', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const d = await r.json();
+        const codes = d.codes || [];
+        if (codes.length) {
+            out.innerHTML = '<div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;padding:12px;">' +
+                '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">New codes (share these):</div>' +
+                codes.map(function(c){return '<code style="display:inline-block;margin:3px 8px 3px 0;font-weight:700;letter-spacing:.5px;font-size:15px;color:var(--accent-green);">' + _pcEsc(c) + '</code>';}).join('') +
+                '</div>';
+        } else { out.innerHTML = '<div style="color:var(--accent-red);">Could not generate codes.</div>'; }
+        loadPromoCodes();
+    } catch (e) { out.innerHTML = '<div style="color:var(--accent-red);">Request failed.</div>'; }
+}
+
+async function togglePromoCode(code, active) {
+    try {
+        await fetch('/api/admin/promo-codes/' + encodeURIComponent(code) + '/toggle',
+            {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:active})});
+        loadPromoCodes();
+    } catch (e) { /* ignore */ }
 }
 
 // ─── Token & AI Usage dashboard ─────────────────────────────
