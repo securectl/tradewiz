@@ -1596,6 +1596,101 @@ def _categorize_results(vetted: list, positive_verdicts: list, cautious_verdicts
     return {"opportunities": opportunities, "risky": risky, "avoided": avoided}
 
 
+# ── Money-flow + uptrend gate ─────────────────────────────────────────────
+# We recommend names with money flowing IN and price in an uptrend — not falling
+# knives (e.g. a solar/uranium ETF rolling over). Opportunities that are
+# distributing or downtrending are demoted to "risky" with a reason.
+
+_TREND_CACHE = {}                     # TICKER -> (read, day)
+_DISTRIBUTION_SIGNALS = {"OUT", "STRONG_OUT", "TOP", "PROFIT_TAKING", "DISTRIBUTION"}
+
+
+def _classify_trend(close):
+    """Uptrend / Downtrend / Sideways from a close-price series."""
+    try:
+        c = close.dropna()
+        if len(c) < 50:
+            return {"uptrend": None, "trend_label": "—"}
+        price = float(c.iloc[-1])
+        sma50 = float(c.rolling(50).mean().iloc[-1])
+        sma50_prev = float(c.rolling(50).mean().iloc[-11]) if len(c) >= 60 else sma50
+        sma200 = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else None
+        above50 = price > sma50
+        rising = sma50 > sma50_prev
+        golden = sma200 is None or sma50 >= sma200
+        if above50 and rising and golden:
+            return {"uptrend": True, "trend_label": "Uptrend"}
+        if (not above50) and (not rising):
+            return {"uptrend": False, "trend_label": "Downtrend"}
+        return {"uptrend": None, "trend_label": "Sideways"}
+    except Exception:
+        return {"uptrend": None, "trend_label": "—"}
+
+
+def _batch_trend(tickers):
+    """{TICKER: {uptrend, trend_label}} for the given tickers (one batched pull,
+    ~8mo so 50/200-day SMAs exist). Cached per day. Never raises."""
+    from datetime import date
+    today = date.today().isoformat()
+    out, need = {}, []
+    for t in tickers:
+        k = (t or "").upper()
+        hit = _TREND_CACHE.get(k)
+        if hit and hit[1] == today:
+            out[k] = hit[0]
+        elif k:
+            need.append(k)
+    if need and HAS_YFINANCE:
+        try:
+            data = yf.download(" ".join(need), period="10mo", progress=False, threads=True)
+            closes = data.get("Close")
+            multi = closes is not None and hasattr(closes, "columns")
+            for k in need:
+                try:
+                    col = closes[k] if (multi and k in closes.columns) else (closes if not multi else None)
+                    read = _classify_trend(col) if col is not None else {"uptrend": None, "trend_label": "—"}
+                except Exception:
+                    read = {"uptrend": None, "trend_label": "—"}
+                _TREND_CACHE[k] = (read, today)
+                out[k] = read
+        except Exception:
+            for k in need:
+                out[k] = {"uptrend": None, "trend_label": "—"}
+    return out
+
+
+def _flow_trend_gate(result):
+    """Demote opportunities that are distributing or downtrending to 'risky'.
+    Only demotes on positive evidence — missing data never demotes."""
+    opps = result.get("opportunities") or []
+    if not opps:
+        return result
+    trends = _batch_trend([o.get("ticker") for o in opps if o.get("ticker")])
+    kept, demoted = [], []
+    for opp in opps:
+        tk = (opp.get("ticker") or "").upper()
+        tr = trends.get(tk, {})
+        opp["trend_label"] = tr.get("trend_label", opp.get("trend_label"))
+        mf = (opp.get("mf_signal") or "").upper()
+        cmf = opp.get("cmf")
+        distributing = mf in _DISTRIBUTION_SIGNALS or (cmf is not None and cmf < -0.08)
+        downtrend = tr.get("uptrend") is False
+        if distributing or downtrend:
+            reasons = []
+            if downtrend:
+                reasons.append("price in a downtrend")
+            if distributing:
+                reasons.append("money flowing out")
+            opp["flow_trend_demoted"] = "; ".join(reasons)
+            demoted.append(opp)
+        else:
+            kept.append(opp)
+    result["opportunities"] = kept
+    result["risky"] = demoted + (result.get("risky") or [])
+    result["flow_trend_demoted_count"] = len(demoted)
+    return result
+
+
 def get_hot_sectors(period: str = "1mo") -> dict:
     """Use LLM to identify trending sectors/themes for a given time period."""
     if not is_configured():
@@ -2092,6 +2187,10 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
 
     vetted = _parallel_vet(candidates, vet_fn)
     result = _categorize_results(vetted, positive, cautious)
+
+    # Money-flow + uptrend gate: only recommend names with money flowing in and
+    # price trending up; demote distributing / downtrending names to "risky".
+    result = _flow_trend_gate(result)
 
     # Supervisor post-filter — only if LLM_SUPERVISOR is configured
     if LLM_SUPERVISOR:
