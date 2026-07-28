@@ -617,12 +617,52 @@ _TICKER_UNIVERSE = [
 ]
 
 
-def _compute_ticker(limit=15):
-    """Live quotes for the day's most-traded names.
+def _ticker_alpaca(limit=15):
+    """Live quotes from the Alpaca broker feed (one snapshot call, all symbols)."""
+    import os
+    import requests
+    k = os.getenv("ALPACA_API_KEY")
+    s = os.getenv("ALPACA_SECRET_KEY")
+    if not (k and s):
+        return []
+    try:
+        r = requests.get(
+            "https://data.alpaca.markets/v2/stocks/snapshots",
+            params={"symbols": ",".join(_TICKER_UNIVERSE), "feed": "iex"},
+            headers={"APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": s}, timeout=10,
+        )
+        if r.status_code != 200:
+            return []
+        body = r.json()
+        snaps = body.get("snapshots", body)
+        out = []
+        for t in _TICKER_UNIVERSE:
+            sn = snaps.get(t) or {}
+            price = (sn.get("latestTrade") or {}).get("p") or (sn.get("dailyBar") or {}).get("c")
+            prev = (sn.get("prevDailyBar") or {}).get("c")
+            vol = (sn.get("dailyBar") or {}).get("v") or 0
+            if not price or not prev:
+                continue
+            chg = (float(price) - float(prev)) / float(prev) * 100.0
+            if abs(chg) > 30:
+                continue
+            out.append({"symbol": t, "price": round(float(price), 2),
+                        "change_pct": round(chg, 2), "_v": float(vol)})
+        out.sort(key=lambda x: -x["_v"])
+        for o in out:
+            o.pop("_v", None)
+        return out[:limit]
+    except Exception:
+        return []
 
-    Uses real-time ``fast_info.last_price`` (the actual traded price — avoids the
-    split-unadjusted daily closes that made some names look wrong), ranks by the
-    day's share volume, and drops implausible ticks."""
+
+def _compute_ticker(limit=15):
+    """Live quotes for the day's most-traded names — Alpaca broker feed first,
+    yfinance real-time fallback. Ranked by share volume; implausible ticks dropped."""
+    alp = _ticker_alpaca(limit)
+    if alp:
+        return alp
+
     import yfinance as yf
     from concurrent.futures import ThreadPoolExecutor
 

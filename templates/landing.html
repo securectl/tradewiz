@@ -360,12 +360,11 @@
       bar.style.display=''; var html=rows.map(cell).join('');
       track.innerHTML=html+html;   // duplicated for a seamless -50% loop
     }
-    var FALLBACK=[{symbol:'SPY',price:561.2,change_pct:0.4},{symbol:'AAPL',price:224.1,change_pct:0.8},
-      {symbol:'NVDA',price:126.4,change_pct:1.9},{symbol:'MSFT',price:430.2,change_pct:-0.3},
-      {symbol:'TSLA',price:248.5,change_pct:-1.2},{symbol:'AMD',price:162.8,change_pct:-0.7}];
+    // Only ever show real live prices. If the feed is unavailable, hide the bar
+    // (never display stale/placeholder numbers).
     function load(){ fetch('/api/market/ticker').then(function(r){return r.json();})
-      .then(function(d){ if(d.quotes&&d.quotes.length){ render(d.quotes); } else if(!track.innerHTML){ render(FALLBACK); } })
-      .catch(function(){ if(!track.innerHTML){ render(FALLBACK); } }); }
+      .then(function(d){ if(d.quotes&&d.quotes.length){ render(d.quotes); } else if(!track.innerHTML){ bar.style.display='none'; } })
+      .catch(function(){ if(!track.innerHTML){ bar.style.display='none'; } }); }
     load(); setInterval(load, 60000);
   })();
 
