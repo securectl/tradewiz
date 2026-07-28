@@ -982,6 +982,8 @@ async function loadPricing() {
         set('pr-starter-id', (p.starter || {}).stripe_price_id || '');
         set('pr-pro-amt', (p.pro || {}).amount != null ? p.pro.amount : '');
         set('pr-pro-id', (p.pro || {}).stripe_price_id || '');
+        set('pr-trader-amt', (p.trader || {}).amount != null ? p.trader.amount : '');
+        set('pr-trader-id', (p.trader || {}).stripe_price_id || '');
     } catch (e) { /* ignore */ }
 }
 
@@ -991,6 +993,7 @@ async function savePricing() {
     const body = {
         starter_amount: v('pr-starter-amt'), starter_price_id: v('pr-starter-id'),
         pro_amount: v('pr-pro-amt'), pro_price_id: v('pr-pro-id'),
+        trader_amount: v('pr-trader-amt'), trader_price_id: v('pr-trader-id'),
     };
     try {
         const r = await fetch('/billing/admin/pricing', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

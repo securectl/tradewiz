@@ -1657,6 +1657,12 @@
                     <label style="font-size:12px;color:var(--text-secondary);margin-left:8px;">Stripe Price ID<br>
                         <input id="pr-pro-id" type="text" placeholder="price_…" class="settings-input" style="width:200px;"></label>
                 </div>
+                <div><div style="font-size:12px;color:var(--text-bright);font-weight:600;margin-bottom:6px;">Trader (Pro + bots)</div>
+                    <label style="font-size:12px;color:var(--text-secondary);">Displayed $ / mo<br>
+                        <input id="pr-trader-amt" type="number" min="0" class="settings-input" style="width:110px;"></label>
+                    <label style="font-size:12px;color:var(--text-secondary);margin-left:8px;">Stripe Price ID<br>
+                        <input id="pr-trader-id" type="text" placeholder="price_…" class="settings-input" style="width:200px;"></label>
+                </div>
                 <button class="btn-primary" onclick="savePricing()" style="padding:9px 16px;">Save pricing</button>
             </div>
             <div id="pr-msg" style="margin-top:10px;font-size:12px;"></div>
@@ -2303,7 +2309,7 @@ if(sessionStorage.getItem('disclaimerClosed')==='1'){document.getElementById('di
 <script src="/static/js/features/release_notes.js"></script>
 <script src="/static/js/features/feedback.js"></script>
 <script src="/static/js/features/user/settings.js"></script>
-<script src="/static/js/features/admin/admin.js?v=4"></script>
+<script src="/static/js/features/admin/admin.js?v=5"></script>
 <script src="/static/js/features/predictions/predictions.js"></script>
 <script src="/static/js/features/congress/congress.js"></script>
 <script src="/static/js/features/smart_money/smart_money.js?v=4"></script>

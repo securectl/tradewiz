@@ -161,14 +161,14 @@ def admin_pricing():
     from app_settings import get_setting, set_setting
     if request.method == "POST":
         d = request.get_json(silent=True) or {}
-        for tier in ("starter", "pro"):
+        for tier in ("starter", "pro", "trader"):
             if f"{tier}_amount" in d and str(d[f"{tier}_amount"]).strip() != "":
                 set_setting(f"price_{tier}_amount", int(float(d[f"{tier}_amount"])))
             if f"{tier}_price_id" in d:
                 set_setting(f"price_{tier}_stripe_id", (d[f"{tier}_price_id"] or "").strip())
         return jsonify({"ok": True})
     out = {}
-    for tier, default in (("starter", 19), ("pro", 39)):
+    for tier, default in (("starter", 19), ("pro", 39), ("trader", 79)):
         out[tier] = {
             "amount": _plan_amount(tier, default),
             "stripe_price_id": get_setting(f"price_{tier}_stripe_id", ""),
