@@ -41,6 +41,19 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching for static fil
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
+
+@app.after_request
+def _no_cache_html(resp):
+    """Never let the browser cache the HTML shell — it references versioned JS/CSS,
+    so a stale shell keeps old markup (and old ?v= asset URLs) around. Static
+    assets themselves are still cacheable and busted via ?v=N."""
+    try:
+        if (resp.headers.get("Content-Type") or "").startswith("text/html"):
+            resp.headers["Cache-Control"] = "no-cache, must-revalidate, max-age=0"
+    except Exception:
+        pass
+    return resp
+
 # Initialize auth
 init_auth(app)
 app.register_blueprint(auth_bp)
