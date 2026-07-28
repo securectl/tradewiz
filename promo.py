@@ -78,6 +78,29 @@ def set_active(code, active):
             (bool(active) if IS_POSTGRES else (1 if active else 0), code.strip().upper()))
 
 
+def code_is_valid(code):
+    """True if ``code`` is currently redeemable by *someone* (active, unexpired,
+    uses remaining). Per-user redemption limits aren't checked here — used to gate
+    signup before the account exists."""
+    code = (code or "").strip().upper()
+    if not code:
+        return False
+    try:
+        row = query_one(
+            f"SELECT active, expires_at, used_count, max_uses FROM promo_codes WHERE code = {P}",
+            (code,),
+        )
+        if not row or not bool(row["active"]):
+            return False
+        if row.get("expires_at") and str(row["expires_at"]) < datetime.utcnow().isoformat():
+            return False
+        if int(row["used_count"] or 0) >= int(row["max_uses"] or 0):
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def redeem_code(user_id, code):
     """Redeem ``code`` for ``user_id``. Returns (ok, message, info)."""
     code = (code or "").strip().upper()

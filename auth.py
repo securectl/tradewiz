@@ -300,17 +300,29 @@ def signup():
         f"SELECT * FROM invites WHERE email = {P} AND accepted_at IS NULL",
         (email,),
     )
+    access_code = (request.form.get("access_code", "") or "").strip().upper()
+
     if not invite:
-        # Public signup is gated by the 'public_signup' feature flag (off by
-        # default). Flip it on in Admin to accept non-invited registrations.
+        # Signup is allowed with an invite, when public signup is enabled, or with
+        # a valid access/coupon code (the code also grants its plan on success).
         public_ok = False
+        code_ok = False
         try:
             from feature_flags import is_enabled
             public_ok = is_enabled("public_signup")
         except Exception:
             public_ok = False
-        if not public_ok:
-            flash("This platform is invite-only. You need an invitation to sign up. Contact an administrator.", "error")
+        if access_code:
+            try:
+                import promo
+                code_ok = promo.code_is_valid(access_code)
+            except Exception:
+                code_ok = False
+            if access_code and not code_ok:
+                flash("That access code isn't valid. Check it and try again.", "error")
+                return redirect(url_for("auth.signup"))
+        if not (public_ok or code_ok):
+            flash("This platform is invite-only. Enter an access code, or contact an administrator.", "error")
             return redirect(url_for("auth.login"))
 
     # Create account
@@ -320,13 +332,22 @@ def signup():
 
     if user:
         login_user(user)
-        logger.info(f"New invite-only signup: {email} (tier={user.tier})")
-        # Activate 7-day trial for new users
-        try:
-            from trial_manager import activate_trial
-            activate_trial(user.id, request)
-        except Exception as e:
-            logger.warning(f"Trial activation failed for {email}: {e}")
+        logger.info(f"New signup: {email} (tier={user.tier})")
+        redeemed = False
+        if access_code:
+            try:
+                import promo
+                ok, _msg, _info = promo.redeem_code(user.id, access_code)
+                redeemed = ok
+            except Exception as e:
+                logger.warning(f"Code redemption failed for {email}: {e}")
+        if not redeemed:
+            # No code (or it failed) — give the standard free trial.
+            try:
+                from trial_manager import activate_trial
+                activate_trial(user.id, request)
+            except Exception as e:
+                logger.warning(f"Trial activation failed for {email}: {e}")
         return redirect("/")
     else:
         flash("Failed to create account. Please try again.", "error")

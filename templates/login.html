@@ -304,6 +304,12 @@
                 <input type="password" name="confirm_password" class="form-input"
                        placeholder="Confirm password" required minlength="8">
             </div>
+            <div class="form-group">
+                <label>Access / coupon code <span style="opacity:.6;font-weight:400">(optional)</span></label>
+                <input type="text" name="access_code" class="form-input"
+                       placeholder="Have a code? Enter it for free access"
+                       autocomplete="off" style="text-transform:uppercase;letter-spacing:.5px;">
+            </div>
             <button type="submit" class="btn-primary">Create Account</button>
         </form>
         <div class="links">Already have an account? <a href="/auth/login">Sign in</a></div>
