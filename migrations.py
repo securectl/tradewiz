@@ -369,6 +369,29 @@ def _run_postgres(conn):
             hits INTEGER DEFAULT 1
         )
     """)
+    # Promo / access codes — admin-generated codes that grant free tier access.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            tier TEXT NOT NULL DEFAULT 'starter',
+            days INTEGER NOT NULL DEFAULT 30,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            active BOOLEAN DEFAULT TRUE,
+            expires_at TIMESTAMP,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS promo_redemptions (
+            id SERIAL PRIMARY KEY,
+            code TEXT NOT NULL,
+            user_id INTEGER,
+            redeemed_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(code, user_id)
+        )
+    """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
@@ -1128,6 +1151,28 @@ def _run_sqlite(conn):
             ip TEXT PRIMARY KEY,
             first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             hits INTEGER DEFAULT 1
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            tier TEXT NOT NULL DEFAULT 'starter',
+            days INTEGER NOT NULL DEFAULT 30,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            expires_at TIMESTAMP,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_redemptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            user_id INTEGER,
+            redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(code, user_id)
         )
     """)
 
