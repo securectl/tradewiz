@@ -84,6 +84,9 @@ def create_checkout_session(user_id, email, name, tier, success_url, cancel_url,
         "line_items": [{"price": price_id, "quantity": 1}],
         "success_url": success_url,
         "cancel_url": cancel_url,
+        # Surface the promo-code field so launch codes (e.g. LAUNCH20) apply.
+        # Create the matching Coupon + Promotion Code in the Stripe dashboard.
+        "allow_promotion_codes": True,
         "metadata": {"user_id": str(user_id), "tier": tier},
     }
 
