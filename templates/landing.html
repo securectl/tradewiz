@@ -63,18 +63,18 @@
     .promobar b{color:var(--bright)}
     .promobar .code{font-family:var(--mono);border:1px dashed var(--blue);border-radius:var(--r-sm);padding:0 7px;margin-left:4px;color:var(--bright)}
 
-    /* Scrolling ticker tape */
+    /* Scrolling ticker tape — news-flash style, right→left */
     .ticker{overflow:hidden;white-space:nowrap;border-bottom:1px solid var(--border);background:rgba(20,24,32,.5)}
-    .ticker-track{display:inline-block;padding:7px 0;animation:tick 48s linear infinite}
+    .ticker-track{display:inline-block;padding:8px 0;will-change:transform;animation:tick 26s linear infinite}
     .ticker:hover .ticker-track{animation-play-state:paused}
-    @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-    .ticker .sym{font-family:var(--mono);font-size:12.5px;color:var(--text);margin:0 20px}
+    @keyframes tick{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+    .ticker .sym{font-family:var(--mono);font-size:13px;color:var(--text);margin:0 22px}
     .ticker .sym b{color:var(--bright);font-weight:700}
     .ticker .up{color:var(--green)}.ticker .dn{color:var(--red)}
-    @media(prefers-reduced-motion:reduce){.ticker-track{animation:none}}
+    @media(prefers-reduced-motion:reduce){.ticker-track{animation-duration:120s}}
 
-    /* Live-market chart behind the hero */
-    #mktbg{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.26;pointer-events:none}
+    /* Animated wavy backdrop behind the hero */
+    #mktbg{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.42;pointer-events:none}
 
     .hero{position:relative;padding:76px 0 64px;overflow:hidden}
     .hero::before{content:"";position:absolute;top:-260px;right:-160px;width:640px;height:640px;z-index:0;
@@ -369,7 +369,7 @@
     load(); setInterval(load, 60000);
   })();
 
-  // Live-market area chart drifting behind the hero (Aurora colours, subtle)
+  // Flowing wavy backdrop behind the hero (Aurora colours, continuous motion)
   (function(){
     var c=document.getElementById('mktbg'); if(!c) return;
     var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -377,22 +377,30 @@
     function size(){dpr=Math.min(2,window.devicePixelRatio||1);var r=c.getBoundingClientRect();
       w=r.width;h=r.height;c.width=w*dpr;c.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);}
     size(); window.addEventListener('resize',size);
-    var N=150, cols=['#4f8aff','#00c896'], S=[[],[]];
-    for(var s=0;s<2;s++){var v=0.45+s*0.12; for(var i=0;i<N;i++){v+=(Math.random()-0.5)*0.045; v=Math.max(0.15,Math.min(0.85,v)); S[s].push(v);} }
-    function stepData(){for(var s=0;s<2;s++){var v=S[s][S[s].length-1]+(Math.random()-0.5)*0.06; v=Math.max(0.12,Math.min(0.9,v)); S[s].push(v); S[s].shift();}}
-    function draw(){ ctx.clearRect(0,0,w,h); var stepX=w/(N-1);
-      for(var s=0;s<2;s++){ var p=S[s], i, x, y;
-        ctx.beginPath(); for(i=0;i<N;i++){x=i*stepX; y=h-p[i]*h; i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
-        ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath();
-        var g=ctx.createLinearGradient(0,0,0,h); g.addColorStop(0,cols[s]+'40'); g.addColorStop(1,cols[s]+'00');
+    // layered waves: colour, vertical position, amplitude, wavelength, speed, phase
+    var L=[
+      {c:'#4f8aff', y:0.55, a:0.11, f:1.1, s:0.00040, p:0},
+      {c:'#7c5dfa', y:0.66, a:0.09, f:1.6, s:-0.00055, p:1.7},
+      {c:'#00c896', y:0.77, a:0.075,f:2.2, s:0.00075, p:3.1}
+    ];
+    function wave(t){
+      ctx.clearRect(0,0,w,h);
+      for(var k=0;k<L.length;k++){ var o=L[k];
+        ctx.beginPath(); ctx.moveTo(0,h);
+        for(var x=0;x<=w;x+=6){
+          var ph=(x/w)*Math.PI*2*o.f;
+          var y=h*o.y + Math.sin(ph + t*o.s + o.p)*h*o.a
+                      + Math.sin(ph*0.5 + t*o.s*1.6 + o.p)*h*o.a*0.45;
+          ctx.lineTo(x,y);
+        }
+        ctx.lineTo(w,h); ctx.closePath();
+        var g=ctx.createLinearGradient(0,h*o.y-h*o.a,0,h);
+        g.addColorStop(0,o.c+'66'); g.addColorStop(1,o.c+'00');
         ctx.fillStyle=g; ctx.fill();
-        ctx.beginPath(); for(i=0;i<N;i++){x=i*stepX; y=h-p[i]*h; i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
-        ctx.strokeStyle=cols[s]; ctx.lineWidth=1.5; ctx.stroke();
       }
     }
-    if(reduce){draw();return;}
-    var last=0;
-    function loop(ts){ if(ts-last>95){stepData(); last=ts;} draw(); requestAnimationFrame(loop); }
+    if(reduce){ wave(0); return; }
+    function loop(ts){ wave(ts); requestAnimationFrame(loop); }
     requestAnimationFrame(loop);
   })();
 </script>

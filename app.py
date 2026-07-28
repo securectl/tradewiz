@@ -612,39 +612,56 @@ def _fmt_amt(v):
 
 
 _TICKER_UNIVERSE = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "INTC",
-    "BAC", "F", "PLTR", "SOFI", "COIN", "RIVN", "NIO", "UBER", "DIS", "BABA",
-    "AAL", "T", "SNAP", "MU", "QQQ", "SPY",
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX",
+    "INTC", "BAC", "F", "PLTR", "SOFI", "COIN", "UBER", "DIS", "T", "QQQ", "SPY",
 ]
 
 
 def _compute_ticker(limit=15):
-    """Live quotes for the day's most-traded names (ranked by dollar volume)."""
-    try:
-        import yfinance as yf
-        df = yf.download(_TICKER_UNIVERSE, period="2d", interval="1d",
-                         group_by="ticker", threads=True, progress=False, auto_adjust=False)
-        out = []
-        multi = hasattr(df.columns, "levels")
-        for t in _TICKER_UNIVERSE:
+    """Live quotes for the day's most-traded names.
+
+    Uses real-time ``fast_info.last_price`` (the actual traded price — avoids the
+    split-unadjusted daily closes that made some names look wrong), ranks by the
+    day's share volume, and drops implausible ticks."""
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _g(fi, *names):
+        for n in names:
             try:
-                sub = df[t] if multi else df
-                closes = sub["Close"].dropna()
-                vols = sub["Volume"].dropna()
-                if len(closes) < 1:
-                    continue
-                price = float(closes.iloc[-1])
-                prev = float(closes.iloc[-2]) if len(closes) >= 2 else price
-                vol = float(vols.iloc[-1]) if len(vols) >= 1 else 0.0
-                chg = ((price - prev) / prev * 100) if prev else 0.0
-                out.append({"symbol": t, "price": round(price, 2),
-                            "change_pct": round(chg, 2), "_dv": price * vol})
+                v = fi[n]
+                if v is not None:
+                    return v
             except Exception:
-                continue
-        out.sort(key=lambda x: -x["_dv"])
-        for o in out:
-            o.pop("_dv", None)
-        return out[:limit]
+                pass
+            v = getattr(fi, n, None)
+            if v is not None:
+                return v
+        return None
+
+    def _one(t):
+        try:
+            fi = yf.Ticker(t).fast_info
+            price = float(_g(fi, "last_price", "lastPrice") or 0)
+            prev = float(_g(fi, "previous_close", "previousClose") or 0)
+            vol = float(_g(fi, "last_volume", "lastVolume", "ten_day_average_volume") or 0)
+            if price <= 0 or prev <= 0:
+                return None
+            chg = (price - prev) / prev * 100.0
+            if abs(chg) > 30:            # implausible single-day move → stale/bad tick
+                return None
+            return {"symbol": t, "price": round(price, 2),
+                    "change_pct": round(chg, 2), "_v": vol}
+        except Exception:
+            return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            rows = [r for r in ex.map(_one, _TICKER_UNIVERSE) if r]
+        rows.sort(key=lambda x: -x["_v"])       # most-traded (by share volume) first
+        for r in rows:
+            r.pop("_v", None)
+        return rows[:limit]
     except Exception:
         return []
 
