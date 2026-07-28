@@ -273,7 +273,8 @@ def signup():
         return redirect("/")
 
     if request.method == "GET":
-        return render_template("login.html", signup_mode=True,
+        prefill_code = (request.args.get("code", "") or "").strip().upper()
+        return render_template("login.html", signup_mode=True, prefill_code=prefill_code,
                                dev_mode=False, google_configured=bool(os.getenv("GOOGLE_CLIENT_ID")))
 
     _validate_csrf()
