@@ -30,18 +30,23 @@ function _dMiniBars(spark) {
 
 async function loadDashboard() {
     try {
-        const [sumR, srR] = await Promise.all([
+        const [sumR, srR, gaugeR] = await Promise.all([
             fetch('/api/dashboard/summary'),
             fetch('/api/sector-radar/latest').catch(() => null),
+            fetch('/api/market/gauge').catch(() => null),
         ]);
         const summary = await sumR.json();
         let report = null;
         if (srR) { const sr = await srR.json().catch(() => ({})); report = (sr && sr.report) || null; }
-        renderDashRegime(report);
+        let gauge = null;
+        if (gaugeR) { gauge = await gaugeR.json().catch(() => null); }
+        renderDashRegime(report, gauge);
         renderDashHero(report);
         renderDashKpis(summary.kpis || {});
         renderDashBoard(report);
         renderDashBots(summary.bots || []);
+        loadTrending();       // trending stocks/sectors from news+Reddit — non-blocking
+        loadDashSectorFlow(); // sector options money flow — non-blocking
         loadOpportunities();  // market opportunities (screener) — non-blocking
         loadOversold();       // most-watched oversold — non-blocking
         loadMySectors();      // sector resolution may hit network — non-blocking
@@ -52,17 +57,31 @@ async function loadDashboard() {
     }
 }
 
-function renderDashRegime(report) {
+function renderDashRegime(report, gauge) {
     const el = document.getElementById('dash-regime'); if (!el) return;
     const ctx = (report && report.context) || {};
     const r = ctx.macro || {}, sm = ctx.smart_money || {};
+
+    // Prefer the live market gauge (always available, cached) for the macro
+    // read; fall back to the sector-radar report's macro context.
+    let regime = r.regime || 'UNKNOWN';
+    let composite = r.composite_score;
+    let vix = r.vix;
+    let spy5d = r.spy_5d;
+    if (gauge && gauge.available) {
+        regime = gauge.stance === 'BUY' ? 'RISK-ON' : gauge.stance === 'SELL' ? 'RISK-OFF' : 'NEUTRAL';
+        composite = gauge.score;
+        const c = gauge.components || {};
+        if (c.vix && c.vix.value != null) vix = c.vix.value;
+        if (c.spy && c.spy.change_5d != null) spy5d = c.spy.change_5d;
+    }
     el.innerHTML = `
-        <span class="dash-pill"><span class="dash-led" style="background:${_dRegimeColor(r.regime)}"></span>${_dEsc(r.regime || 'UNKNOWN')}</span>
-        <span class="dash-kv">Composite <b>${r.composite_score != null ? r.composite_score : '—'}</b></span>
-        <span class="dash-kv">VIX <b>${r.vix != null ? r.vix : '—'}</b></span>
-        <span class="dash-kv">SPY 5d <b>${_dPct(r.spy_5d)}</b></span>
+        <span class="dash-pill"><span class="dash-led" style="background:${_dRegimeColor(regime)}"></span>${_dEsc(regime)}</span>
+        <span class="dash-kv">Composite <b>${composite != null ? composite : '—'}</b></span>
+        <span class="dash-kv">VIX <b>${vix != null ? vix : '—'}</b></span>
+        <span class="dash-kv">SPY 5d <b>${_dPct(spy5d)}</b></span>
         <span class="dash-kv">Smart-money <b>${_dEsc(sm.tilt || 'n/a')}</b>${sm.avg_put_call != null ? ' · P/C ' + sm.avg_put_call : ''}</span>
-        <span class="dash-kv dash-kv-right">Auto research analyst</span>`;
+        <span class="dash-kv dash-kv-right">Live market gauge</span>`;
 }
 
 function renderDashHero(report) {
@@ -216,10 +235,14 @@ const _OPPS_NUM = new Set(['confidence', 'price']);
 /* Money-flow chip: are buyers accumulating or are sellers taking profit?
    Shared visual contract with the Screener (same colors/labels). */
 const _MF_META = {
+    STRONG_IN: { label: 'Strong In', color: '#26a69a' },
     IN: { label: 'Money In', color: '#26a69a' },
-    OUT: { label: 'Money Out', color: '#ef5350' },
-    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800' },
     NEUTRAL: { label: 'Neutral', color: '#787b86' },
+    DIVERGENCE: { label: 'Divergence', color: '#ff9800' },
+    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800' },
+    OUT: { label: 'Money Out', color: '#ef5350' },
+    TOP: { label: 'Topping', color: '#ef5350' },
+    STRONG_OUT: { label: 'Strong Out', color: '#ef5350' },
 };
 function _mfChip(signal, cmf, mfi) {
     const m = _MF_META[signal];
@@ -270,6 +293,56 @@ function renderOpps() {
         ${rows}`;
 }
 
+/* ── Trending in the news + Reddit ── */
+async function loadTrending() {
+    const el = document.getElementById('dash-trending'); if (!el) return;
+    el.innerHTML = '<h3 class="dash-h3">Trending in the News <span class="dash-sub">stocks & sectors from news + Reddit (24h)</span></h3><div class="dash-empty">Loading…</div>';
+    try {
+        const data = await (await fetch('/api/news/trending?hours=24&limit=8')).json();
+        renderTrending(data);
+    } catch (err) {
+        console.error('trending load failed', err);
+        el.innerHTML = '<h3 class="dash-h3">Trending in the News</h3><div class="dash-empty">Failed to load.</div>';
+    }
+}
+function _trSentColor(s) { return s > 0.1 ? '#26a69a' : s < -0.1 ? '#ef5350' : '#787b86'; }
+function _trSentLabel(s) { return s > 0.1 ? 'Bullish' : s < -0.1 ? 'Bearish' : 'Neutral'; }
+function renderTrending(data) {
+    const el = document.getElementById('dash-trending'); if (!el) return;
+    const stocks = (data && data.stocks) || [];
+    const sectors = (data && data.sectors) || [];
+    if (!stocks.length && !sectors.length) {
+        el.innerHTML = '<h3 class="dash-h3">Trending in the News</h3><div class="dash-empty">No news ingested yet — the agent polls every 10 min.</div>';
+        return;
+    }
+    const stockRows = stocks.map(s => `
+        <div class="dash-tr-row" onclick="(window.sectorRadarAnalyze||window.analyzeTicker)&&(window.sectorRadarAnalyze?sectorRadarAnalyze('${_dEsc(s.ticker)}'):analyzeTicker('${_dEsc(s.ticker)}'))">
+            <span class="dash-tr-tk">${_dEsc(s.ticker)}</span>
+            <span class="dash-tr-sec">${_dEsc(s.sector || '')}</span>
+            <span class="dash-tr-ct">${s.mentions}×</span>
+            ${s.reddit_mentions ? `<span class="dash-tr-reddit">🔥 ${s.reddit_mentions} reddit</span>` : '<span class="dash-tr-reddit"></span>'}
+            <span class="dash-tr-sent" style="color:${_trSentColor(s.sentiment_score)}">${_trSentLabel(s.sentiment_score)}</span>
+        </div>`).join('');
+    const sectorRows = sectors.map(s => `
+        <div class="dash-tr-row">
+            <span class="dash-tr-tk" style="font-weight:600;">${_dEsc(s.sector)}</span>
+            <span class="dash-tr-ct">${s.mentions}×</span>
+            <span class="dash-tr-sent" style="color:${_trSentColor(s.sentiment_score)}">${_trSentLabel(s.sentiment_score)}</span>
+        </div>`).join('');
+    el.innerHTML = `
+        <h3 class="dash-h3">Trending in the News <span class="dash-sub">news + Reddit · last 24h · ${data.total_articles || 0} articles</span></h3>
+        <div class="dash-tr-grid">
+            <div>
+                <div class="dash-tr-subhead">📈 Trending Stocks</div>
+                ${stockRows || '<div class="dash-empty">No ticker mentions yet.</div>'}
+            </div>
+            <div>
+                <div class="dash-tr-subhead">🏭 Trending Sectors</div>
+                ${sectorRows || '<div class="dash-empty">No sector signal yet.</div>'}
+            </div>
+        </div>`;
+}
+
 /* ── Most-watched oversold (sortable) ── */
 let _ovData = [];
 let _ovSort = { field: 'days', dir: 'desc' };
@@ -312,4 +385,45 @@ function renderOversold() {
     el.innerHTML = `<h3 class="dash-h3">Most-Watched Oversold <span class="dash-sub">days in the daily oversold scan — longer = stronger bottom signal</span></h3>
         <div class="dash-ov-head">${h('ticker', 'Ticker')}${h('days', 'Days oversold')}${h('sector', 'Sector')}${h('verdict', 'Status')}${h('price', 'Price')}</div>
         ${body}`;
+}
+
+// ─── Sector options money flow (dashboard card) ─────────────
+let _dashSfPoll = null;
+function _sfMoneyDash(v) {
+    const n = Math.abs(Number(v) || 0);
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+    return '$' + n.toFixed(0);
+}
+async function loadDashSectorFlow() {
+    const el = document.getElementById('dash-sectorflow'); if (!el) return;
+    el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">Loading…</div>';
+    try {
+        const d = await (await fetch('/api/smart-money/sector-flow')).json();
+        if (d.computing && (!d.sectors || !d.sectors.length)) {
+            el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">Computing sector flow…</div>';
+            clearTimeout(_dashSfPoll);
+            _dashSfPoll = setTimeout(loadDashSectorFlow, 6000);
+            return;
+        }
+        if (!d.sectors || !d.sectors.length) {
+            el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">No sector options data.</div>';
+            return;
+        }
+        const tiltColor = d.tilt === 'RISK-ON' ? 'var(--accent-green)' : d.tilt === 'RISK-OFF' ? 'var(--accent-red)' : 'var(--accent-yellow)';
+        const row = (s) => `<div class="dash-sf-row">
+            <span class="dash-sf-name">${_dEsc(s.sector)} <span class="dash-sf-etf">${_dEsc(s.etf)}</span></span>
+            <span class="dash-sf-net" style="color:${s.color}">${s.net_premium >= 0 ? '+' : ''}${_sfMoneyDash(s.net_premium)}</span>
+            <span class="dash-sf-sig" style="color:${s.color}">${_dEsc(s.flow_signal)}</span></div>`;
+        const ins = (d.money_in || []).slice(0, 4).map(row).join('') || '<div class="dash-empty">None</div>';
+        const outs = (d.selling || []).slice(0, 4).map(row).join('') || '<div class="dash-empty">None</div>';
+        el.innerHTML = `<h3 class="dash-h3">Sector Options Flow
+                <span class="dash-sub">tilt <b style="color:${tiltColor}">${_dEsc(d.tilt)}</b> · calls vs puts</span></h3>
+            <div class="dash-sf-cols">
+              <div><div class="dash-sf-h dash-sf-in">▲ Money flowing in</div>${ins}</div>
+              <div><div class="dash-sf-h dash-sf-out">▼ Being sold</div>${outs}</div>
+            </div>`;
+    } catch (e) {
+        el.innerHTML = '<h3 class="dash-h3">Sector Options Flow</h3><div class="dash-empty">Failed to load.</div>';
+    }
 }

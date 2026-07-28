@@ -689,6 +689,17 @@ async function loadAdminOllamaConfig() {
         keyInput.placeholder = data.ollama_api_key?.is_set ? data.ollama_api_key.value_masked : '(not set)';
         keyInput.value = '';
         document.getElementById('admin-ollama-api-key-source').textContent = _ollamaSrcLabel(data.ollama_api_key?.source);
+        // OpenRouter→Ollama failover toggle + usage telemetry
+        const fbVal = String(data.ollama_fallback_enabled?.value ?? '0').toLowerCase();
+        const fbBox = document.getElementById('admin-ollama-fallback');
+        if (fbBox) fbBox.checked = ['1', 'true', 'yes', 'on'].includes(fbVal);
+        const fbSrc = document.getElementById('admin-ollama-fallback_enabled-source');
+        if (fbSrc) fbSrc.textContent = _ollamaSrcLabel(data.ollama_fallback_enabled?.source);
+        const st = data._fallback_stats || {};
+        const stEl = document.getElementById('admin-ollama-fallback-stats');
+        if (stEl) stEl.textContent = st.fallback_calls
+            ? `Used ${st.fallback_calls}× (last: ${st.last_used || '—'}, ${st.last_reason || ''}).`
+            : '';
     } catch (e) {
         console.error('loadAdminOllamaConfig failed:', e);
     }
@@ -698,7 +709,11 @@ async function adminOllamaSave() {
     const url = document.getElementById('admin-ollama-url').value.trim();
     const model = document.getElementById('admin-ollama-model').value.trim();
     const apiKey = document.getElementById('admin-ollama-api-key').value;
-    const payload = { ollama_url: url, ollama_model: model };
+    const fallback = document.getElementById('admin-ollama-fallback');
+    const payload = {
+        ollama_url: url, ollama_model: model,
+        ollama_fallback_enabled: (fallback && fallback.checked) ? '1' : '0',
+    };
     // Only include key if the admin actually typed something (else preserve existing)
     if (apiKey.length > 0) payload.ollama_api_key = apiKey;
     const statusEl = document.getElementById('admin-ollama-status');
@@ -940,5 +955,95 @@ async function openUsageDrilldown(userId) {
     } catch (e) {
         alert('Error: ' + e.message);
     }
+}
+
+// ─── Admin sub-tab switching (Usage · Users · Models · System) ───
+function switchAdminTab(name) {
+    document.querySelectorAll('.admin-subtab').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-atab') === name);
+    });
+    document.querySelectorAll('.admin-tabpanel').forEach(function (p) {
+        p.style.display = (p.getAttribute('data-apanel') === name) ? '' : 'none';
+    });
+}
+
+// ─── Token & AI Usage dashboard ─────────────────────────────
+function _aiFmt(n) {
+    if (n === null || n === undefined) return '0';
+    return Number(n).toLocaleString('en-US');
+}
+function _aiCost(n) {
+    const v = Number(n || 0);
+    if (v === 0) return '$0';
+    if (v < 0.01) return '$' + v.toFixed(4);
+    return '$' + v.toFixed(2);
+}
+
+async function loadAdminAiUsage() {
+    const tiles = document.getElementById('ai-usage-tiles');
+    if (!tiles) return;
+    const days = parseInt((document.getElementById('ai-usage-range') || {}).value || '30', 10);
+    const to = new Date();
+    const from = new Date(to.getTime() - days * 86400000);
+    const qs = 'from=' + from.toISOString().slice(0, 10) + '&to=' + to.toISOString().slice(0, 10);
+    tiles.innerHTML = '<div class="ai-usage-empty">Loading…</div>';
+    try {
+        const resp = await fetch('/api/admin/ai-usage?' + qs);
+        if (!resp.ok) {
+            tiles.innerHTML = '<div class="ai-usage-empty">Could not load usage.</div>';
+            return;
+        }
+        const d = await resp.json();
+        const t = d.totals || {};
+        // Explain a zero-token window: calls are logged but no tokens captured.
+        const banner = document.getElementById('ai-usage-banner');
+        if (banner) {
+            if ((t.calls || 0) > 0 && (t.total_tokens || 0) === 0) {
+                banner.innerHTML = '⚠️ <strong>' + _aiFmt(t.calls) +
+                    ' calls logged, but 0 tokens captured in this window.</strong> ' +
+                    'Token &amp; cost capture started Jun&nbsp;9, 2026 — older calls are counted but show 0 tokens. ' +
+                    'If recent calls also show 0, check that the OpenRouter key has credit (a dead key returns 402 and no usage is recorded).';
+                banner.style.display = '';
+            } else if ((t.calls || 0) === 0) {
+                banner.innerHTML = 'No LLM calls recorded in this window.';
+                banner.style.display = '';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+        tiles.innerHTML =
+            _aiTile('Total cost (est.)', _aiCost(t.cost_usd)) +
+            _aiTile('LLM calls', _aiFmt(t.calls)) +
+            _aiTile('Total tokens', _aiFmt(t.total_tokens)) +
+            _aiTile('Prompt tokens', _aiFmt(t.prompt_tokens)) +
+            _aiTile('Completion tokens', _aiFmt(t.completion_tokens));
+
+        _aiFillTable('ai-usage-by-model', (d.by_model || []).map(r =>
+            [r.model, _aiFmt(r.calls), _aiFmt(r.total_tokens), _aiCost(r.cost_usd)]));
+        _aiFillTable('ai-usage-by-source', (d.by_source || []).map(r =>
+            [r.source, _aiFmt(r.calls), _aiFmt(r.total_tokens), _aiCost(r.cost_usd)]));
+        _aiFillTable('ai-usage-top-users', (d.top_users || []).map(r =>
+            [r.email || r.name || '—', _aiFmt(r.calls), _aiFmt(r.total_tokens), _aiCost(r.cost_usd)]));
+    } catch (e) {
+        tiles.innerHTML = '<div class="ai-usage-empty">Error loading usage.</div>';
+    }
+}
+
+function _aiTile(label, value) {
+    return '<div class="ai-usage-tile"><div class="ai-usage-tile-label">' + label +
+        '</div><div class="ai-usage-tile-value">' + value + '</div></div>';
+}
+
+function _aiFillTable(id, rows) {
+    const tb = document.getElementById(id);
+    if (!tb) return;
+    if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="4" class="ai-usage-empty">No data</td></tr>';
+        return;
+    }
+    tb.innerHTML = rows.map(cells =>
+        '<tr>' + cells.map((c, i) =>
+            '<td' + (i === 0 ? ' class="ai-usage-name"' : '') + '>' + c + '</td>').join('') + '</tr>'
+    ).join('');
 }
 

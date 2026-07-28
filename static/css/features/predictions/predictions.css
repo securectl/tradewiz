@@ -22,8 +22,8 @@
     display: inline-flex; align-items: center; gap: 4px;
     padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
 }
-.pred-signal-bull { background: rgba(0,200,150,0.08); color: #00c896; border: 1px solid rgba(0,200,150,0.2); }
-.pred-signal-bear { background: rgba(255,71,87,0.08); color: #ff4757; border: 1px solid rgba(255,71,87,0.2); }
+.pred-signal-bull { background: rgba(0,200,150,0.08); color: var(--accent-green); border: 1px solid rgba(0,200,150,0.2); }
+.pred-signal-bear { background: rgba(255,71,87,0.08); color: var(--accent-red); border: 1px solid rgba(255,71,87,0.2); }
 
 /* ── Category Filter (pill tabs) ── */
 .pred-cat-bar {
@@ -81,7 +81,7 @@
     color: #fff; flex-shrink: 0;
 }
 .pred-src-polymarket { background: #4285f4; }
-.pred-src-kalshi { background: #7c5dfa; }
+.pred-src-kalshi { background: var(--accent-purple); }
 .pred-cat {
     font-size: 10px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.3px; color: var(--text-secondary);
@@ -90,8 +90,8 @@
     margin-left: auto; font-size: 12px; font-weight: 700;
     padding: 2px 8px; border-radius: 4px;
 }
-.pred-change-up { color: #00c896; background: rgba(0,200,150,0.1); }
-.pred-change-down { color: #ff4757; background: rgba(255,71,87,0.1); }
+.pred-change-up { color: var(--accent-green); background: rgba(0,200,150,0.1); }
+.pred-change-down { color: var(--accent-red); background: rgba(255,71,87,0.1); }
 
 /* Card title */
 .pred-card-title {
@@ -125,11 +125,11 @@
     font-size: 12px; font-weight: 700; letter-spacing: 0.3px;
 }
 .pred-btn-yes {
-    background: rgba(0,200,150,0.08); color: #00c896;
+    background: rgba(0,200,150,0.08); color: var(--accent-green);
     border: 1px solid rgba(0,200,150,0.15);
 }
 .pred-btn-no {
-    background: rgba(255,71,87,0.06); color: #ff4757;
+    background: rgba(255,71,87,0.06); color: var(--accent-red);
     border: 1px solid rgba(255,71,87,0.12);
 }
 

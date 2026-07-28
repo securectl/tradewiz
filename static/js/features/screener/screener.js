@@ -347,11 +347,23 @@ async function runScreener(force = false) {
 // ─── Money-flow chip (shared visual contract with the Dashboard) ──
 // Is money flowing in (accumulation) or out (distribution / profit-taking)?
 const _SCR_MF_META = {
-    IN: { label: 'Money In', color: '#26a69a', rank: 3 },
-    OUT: { label: 'Money Out', color: '#ef5350', rank: 0 },
-    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800', rank: 1 },
-    NEUTRAL: { label: 'Neutral', color: '#787b86', rank: 2 },
+    STRONG_IN: { label: 'Strong In', color: '#26a69a', rank: 6 },
+    IN: { label: 'Money In', color: '#26a69a', rank: 5 },
+    NEUTRAL: { label: 'Neutral', color: '#787b86', rank: 4 },
+    DIVERGENCE: { label: 'Divergence', color: '#ff9800', rank: 3 },
+    PROFIT_TAKING: { label: 'Profit-Taking', color: '#ff9800', rank: 2 },
+    OUT: { label: 'Money Out', color: '#ef5350', rank: 1 },
+    TOP: { label: 'Topping', color: '#ef5350', rank: 0 },
+    STRONG_OUT: { label: 'Strong Out', color: '#ef5350', rank: -1 },
 };
+// Filter families group the combined (options-fused) signals under the 4 base buckets.
+const _MF_FAMILY = {
+    IN: ['IN', 'STRONG_IN'],
+    OUT: ['OUT', 'STRONG_OUT', 'TOP'],
+    PROFIT_TAKING: ['PROFIT_TAKING', 'TOP'],
+    NEUTRAL: ['NEUTRAL', 'DIVERGENCE'],
+};
+function _mfInFamily(sig, fam) { return (_MF_FAMILY[fam] || [fam]).includes(sig); }
 function _mfChipHtml(sig, cmf, mfi) {
     const m = _SCR_MF_META[sig];
     if (!m) return '<span style="color:#555;">—</span>';
@@ -489,7 +501,7 @@ function renderScreenerResults(data, fromCache = false) {
         ...(data.risky || []),
     ];
     if (_screenerMfFilter !== 'all') {
-        allRows = allRows.filter(r => (r.mf_signal || '') === _screenerMfFilter);
+        allRows = allRows.filter(r => _mfInFamily(r.mf_signal || '', _screenerMfFilter));
     }
     _applyScreenerSort(allRows);
 

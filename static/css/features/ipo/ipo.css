@@ -95,7 +95,7 @@
 .ipo-ticker {
     font-size: 12px;
     font-weight: 700;
-    color: #7c4dff;
+    color: var(--accent-purple);
     background: rgba(124, 77, 255, 0.15);
     padding: 2px 8px;
     border-radius: 4px;
@@ -189,10 +189,10 @@
     border-radius: 3px;
     transition: width 0.4s ease;
 }
-.ipo-bar-fill.buzz { background: linear-gradient(90deg, #ff9800, #f44336); }
+.ipo-bar-fill.buzz { background: linear-gradient(90deg, #ff9800, var(--accent-red)); }
 .ipo-bar-fill.inst { background: linear-gradient(90deg, #2196f3, #1565c0); }
-.ipo-bar-fill.fit { background: linear-gradient(90deg, #4caf50, #2e7d32); }
-.ipo-bar-fill.moat { background: linear-gradient(90deg, #7c4dff, #651fff); }
+.ipo-bar-fill.fit { background: linear-gradient(90deg, var(--accent-green), #2e7d32); }
+.ipo-bar-fill.moat { background: linear-gradient(90deg, var(--accent-purple), #651fff); }
 
 .ipo-rating-tag {
     font-size: 11px;
@@ -303,7 +303,7 @@
     transition: all 0.2s;
 }
 .ipo-filter-btn.active {
-    background: #7c4dff;
+    background: var(--accent-purple);
     color: #fff;
 }
 .ipo-filter-btn:hover:not(.active) { color: var(--text-bright); }
@@ -373,7 +373,7 @@
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: #7c4dff;
+    color: var(--accent-purple);
     margin-bottom: 10px;
 }
 
@@ -401,7 +401,7 @@
     font-size: 9px;
     font-weight: 700;
     text-transform: uppercase;
-    color: #7c4dff;
+    color: var(--accent-purple);
     background: rgba(124, 77, 255, 0.15);
     padding: 1px 6px;
     border-radius: 3px;
@@ -453,9 +453,9 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-.ipo-accred.open { color: #4caf50; background: rgba(76, 175, 80, 0.15); }
+.ipo-accred.open { color: var(--accent-green); background: rgba(76, 175, 80, 0.15); }
 .ipo-accred.accred { color: #ff9800; background: rgba(255, 152, 0, 0.15); }
-.ipo-accred.qp { color: #f44336; background: rgba(244, 67, 54, 0.15); }
+.ipo-accred.qp { color: var(--accent-red); background: rgba(244, 67, 54, 0.15); }
 
 .ipo-source-tag {
     display: inline-block;
@@ -492,7 +492,7 @@
 .ipo-crossref-chip {
     font-size: 11px;
     font-weight: 600;
-    color: #4caf50;
+    color: var(--accent-green);
     background: rgba(76, 175, 80, 0.12);
     padding: 2px 8px;
     border-radius: 4px;
@@ -615,13 +615,13 @@
     padding: 20px;
     transition: all var(--transition);
 }
-.guide-step-card:hover { border-color: #4caf50; box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.15); }
+.guide-step-card:hover { border-color: var(--accent-green); box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.15); }
 .guide-step-num {
     font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    color: #4caf50;
+    color: var(--accent-green);
     margin-bottom: 6px;
 }
 .guide-step-title {
@@ -649,7 +649,7 @@
 }
 .guide-step-tips li::before {
     content: "\2713";
-    color: #4caf50;
+    color: var(--accent-green);
     font-weight: 700;
     margin-right: 8px;
 }
@@ -695,7 +695,7 @@
 }
 .guide-channel-action {
     font-size: 11px;
-    color: #4caf50;
+    color: var(--accent-green);
     font-weight: 600;
     padding: 6px 10px;
     background: rgba(76, 175, 80, 0.08);

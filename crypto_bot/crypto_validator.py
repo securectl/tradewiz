@@ -78,7 +78,19 @@ def _call_ollama(prompt: str, timeout: int = 30, model: str = None) -> dict:
             timeout=timeout,
         )
         resp.raise_for_status()
-        text = resp.json().get("response", "")
+        rj = resp.json()
+        text = rj.get("response", "")
+        # Record Ollama usage (Ollama returns prompt_eval_count / eval_count)
+        try:
+            from rate_limiter import get_llm_user, record_llm_call
+            uid, source = get_llm_user()
+            if uid:
+                pt = int(rj.get("prompt_eval_count", 0) or 0)
+                ct = int(rj.get("eval_count", 0) or 0)
+                record_llm_call(uid, source or "bot", f"ollama/{chosen}",
+                                prompt_tokens=pt, completion_tokens=ct)
+        except Exception:
+            pass
         return _parse_json(text)
     except requests.exceptions.ConnectionError:
         logger.warning("Ollama Cloud not reachable — will fall back to OpenRouter-only")
@@ -101,26 +113,49 @@ def _call_openrouter(model: str, messages: list, timeout: int = 60, role: str = 
             model = get_model(role, model)
         except Exception:
             pass
+    try:
+        from ai_validator import _with_prompt_cache
+        messages = _with_prompt_cache(model, messages)
+    except Exception:
+        pass  # caching helper unavailable — send messages as-is
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": 1024,
+        "max_tokens": 512,
         "temperature": 0.1,
     }
     try:
         resp = requests.post(OPENROUTER_URL, headers=HEADERS, json=payload, timeout=timeout)
         resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        # Record LLM usage
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        # Record LLM usage (with token counts from the response when present)
         try:
             from rate_limiter import get_llm_user, record_llm_call
             uid, source = get_llm_user()
             if uid:
-                record_llm_call(uid, source, model)
+                u = data.get("usage") or {}
+                record_llm_call(
+                    uid, source, model,
+                    prompt_tokens=u.get("prompt_tokens", 0),
+                    completion_tokens=u.get("completion_tokens", 0),
+                    total_tokens=u.get("total_tokens", 0),
+                )
         except Exception:
             pass
         return content
     except Exception as e:
+        # OpenRouter failed (credits/rate-limit/transport). Fall over to Ollama
+        # Cloud when the admin enabled the backup, else surface the error.
+        try:
+            from shared.ollama_fallback import try_fallback
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            fb = try_fallback(messages, temperature=0.1, max_tokens=512, timeout=timeout,
+                              reason=f"openrouter_error_{status}" if status else "openrouter_error")
+            if fb is not None:
+                return fb
+        except Exception:
+            pass
         return json.dumps({"error": str(e)})
 
 

@@ -71,6 +71,9 @@ from features.dashboard.routes import bp as dashboard_bp
 from features.feedback.routes import bp as feedback_bp
 from features.research.routes import bp as research_bp
 from features.alerts.routes import bp as alerts_bp
+from features.options_calls.routes import bp as options_calls_bp
+from features.earnings_calendar.routes import bp as earnings_calendar_bp
+from features.news_agent.routes import bp as news_agent_bp
 from claude_bot.routes import bp as claude_bot_bp
 
 app.register_blueprint(ipo_bp)
@@ -93,6 +96,9 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(feedback_bp)
 app.register_blueprint(research_bp)
 app.register_blueprint(alerts_bp)
+app.register_blueprint(options_calls_bp)
+app.register_blueprint(earnings_calendar_bp)
+app.register_blueprint(news_agent_bp)
 app.register_blueprint(claude_bot_bp)
 
 # ─── Startup: log rotation + cleanup ────────────────────────────
@@ -129,7 +135,7 @@ def _run_scheduled_oversold_scan():
     log.info("[SCHEDULER] Starting daily oversold scan (9 AM CST)...")
     try:
         from screener import _oversold_background_scan
-        _oversold_background_scan(limit=20)
+        _oversold_background_scan(limit=40)  # store top-40 so more oversold names accrue "days"
         log.info("[SCHEDULER] Oversold scan complete")
     except Exception as e:
         log.error(f"[SCHEDULER] Oversold scan failed: {e}")
@@ -327,6 +333,9 @@ def market_pulse():
             data["vix"] = {
                 "value": round(vix_val, 2),
                 "change_pct": round(vix_change, 2),
+                # 5-day low/high so the header meter can place the current VIX.
+                "day_high": round(float(vix_df["High"].max()), 2),
+                "day_low": round(float(vix_df["Low"].min()), 2),
             }
     except Exception:
         pass
@@ -644,6 +653,15 @@ def _auto_start_bots():
             _log.info("[AUTO-START] Options-flow scanner started")
     except Exception as e:
         _log.warning(f"[AUTO-START] Options-flow scanner failed: {e}")
+
+    # News agent scanner (global, no per-user flag) — RSS/Reddit ingestion
+    try:
+        from features.news_agent.agent import start_scanner as news_start, is_scanner_running as news_running
+        if not news_running():
+            news_start()
+            _log.info("[AUTO-START] News agent scanner started")
+    except Exception as e:
+        _log.warning(f"[AUTO-START] News agent scanner failed: {e}")
 
 
 def _is_postgres():

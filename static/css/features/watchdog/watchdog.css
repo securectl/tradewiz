@@ -59,11 +59,11 @@
     border: 1px solid;
 }
 
-.wd-signal-buy { background: #00c89618; color: #00c896; border-color: #00c89633; }
-.wd-signal-sell { background: #ff475718; color: #ff4757; border-color: #ff475733; }
-.wd-signal-hedge { background: #ff8c4218; color: #ff8c42; border-color: #ff8c4233; }
-.wd-signal-watch { background: #ffc83718; color: #ffc837; border-color: #ffc83733; }
-.wd-signal-avoid { background: #ff475718; color: #ef5350; border-color: #ef535033; }
+.wd-signal-buy { background: #00c89618; color: var(--accent-green); border-color: #00c89633; }
+.wd-signal-sell { background: #ff475718; color: var(--accent-red); border-color: #ff475733; }
+.wd-signal-hedge { background: #ff8c4218; color: var(--accent-orange); border-color: #ff8c4233; }
+.wd-signal-watch { background: #ffc83718; color: var(--accent-yellow); border-color: #ffc83733; }
+.wd-signal-avoid { background: #ff475718; color: var(--accent-red); border-color: #ef535033; }
 .wd-signal-error { background: #636b7e18; color: #636b7e; border-color: #636b7e33; }
 
 .wd-table {

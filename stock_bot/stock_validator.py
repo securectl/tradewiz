@@ -62,6 +62,18 @@ Historical Performance (last 7 days):
         if overall["win_rate"] < 30:
             ctx += "\n\nNOTE: Overall win rate is below 30%. Look for reasonable confluence before approving."
 
+    # News-agent buzz + sentiment (informational context only — does NOT change
+    # any risk gate; helps the LLM weigh news-driven moves).
+    try:
+        from features.news_agent.agent import ticker_signal
+        sig = ticker_signal(symbol, hours=48)
+        if sig["mentions"]:
+            ctx += (f"\n\nNews/Reddit buzz (48h): {sig['mentions']} articles "
+                    f"({sig['reddit_mentions']} from Reddit), net sentiment "
+                    f"{sig['sentiment_score']:+.2f} (-1 bearish … +1 bullish).")
+    except Exception:
+        pass
+
     ctx += "\n\nThis is a PAPER TRADING bot on Alpaca paper. The goal is to ACTIVELY TRADE swing opportunities. Approve trades with reasonable technical confluence (2+ indicators). Only reject if indicators clearly conflict or setup is fundamentally flawed."
     return ctx
 

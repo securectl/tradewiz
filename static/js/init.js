@@ -16,6 +16,14 @@ document.getElementById('backdrop').addEventListener('click', closeHistory);
 document.getElementById('btn-ai-validate').addEventListener('click', runAIValidation);
 document.getElementById('btn-prediction').addEventListener('click', runPrediction);
 document.getElementById('btn-earnings').addEventListener('click', runEarningsAnalysis);
+document.getElementById('btn-backtest').addEventListener('click', runTickerBacktest);
+document.getElementById('bt-modal-close').addEventListener('click', closeBacktestModal);
+document.getElementById('bt-overlay').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeBacktestModal();
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('bt-overlay').classList.contains('open')) closeBacktestModal();
+});
 
 // MA toggle listeners
 for (const [key, config] of Object.entries(MA_CONFIG)) {

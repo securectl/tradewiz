@@ -147,6 +147,46 @@ async function loadMarketPulse() {
     } catch (e) {
         console.error('Market pulse error:', e);
     }
+    loadMarketGauge();  // BUY/HOLD/SELL signal tile — same cadence as the pulse
+}
+
+// ─── Market Gauge signal tile (BUY / HOLD / SELL) ───────────
+async function loadMarketGauge() {
+    const stance = document.getElementById('pulse-gauge-stance');
+    if (!stance) return;
+    try {
+        const resp = await fetch('/api/market/gauge');
+        if (!resp.ok) return;
+        const g = await resp.json();
+        const meter = document.getElementById('pulse-gauge-meter');
+        const marker = document.getElementById('pulse-gauge-marker');
+        const tile = document.getElementById('pulse-gauge');
+        if (!g.available) {
+            stance.textContent = '—';
+            if (meter) meter.style.display = 'none';
+            return;
+        }
+        stance.textContent = g.stance;            // BUY / HOLD / SELL
+        stance.style.color = g.color;
+        // Meter: red→orange→yellow→green band, marker at the score position.
+        if (meter) meter.style.display = 'block';
+        if (marker) {
+            const pos = Math.max(0, Math.min(100, (g.score + 100) / 2));  // -100..100 → 0..100%
+            marker.style.left = pos + '%';
+        }
+        if (tile) tile.title = (g.label || '') +
+            (g.reasons && g.reasons.length ? '  —  ' + g.reasons.join('  •  ') : '');
+    } catch (e) {
+        console.error('Market gauge error:', e);
+    }
+}
+
+// Position a header meter marker: where `val` sits in [lo, hi] as 0-100%.
+function _meterMark(markerId, val, lo, hi) {
+    const m = document.getElementById(markerId);
+    if (!m) return;
+    if (hi == null || lo == null || hi <= lo) { m.style.left = '50%'; return; }
+    m.style.left = Math.max(0, Math.min(100, (val - lo) / (hi - lo) * 100)) + '%';
 }
 
 function renderMarketPulse(d) {
@@ -175,6 +215,8 @@ function renderMarketPulse(d) {
             else if (pct <= -0.3) spyBull = -1;
         }
         if (rng) rng.textContent = 'L ' + d.spy.day_low.toFixed(2) + ' — H ' + d.spy.day_high.toFixed(2);
+        // Meter: where price sits in the day range (low → high, red → green).
+        _meterMark('pulse-spy-marker', d.spy.price, d.spy.day_low, d.spy.day_high);
     }
 
     // ── VIX ── (inverted: high VIX = bearish)
@@ -195,6 +237,12 @@ function renderMarketPulse(d) {
         if (el) { el.textContent = v.toFixed(2); el.className = 'pulse-value pulse-' + color; }
         if (tile) tile.className = 'pulse-tile tile-' + color;
         if (sub) sub.textContent = vixLabel;
+        // Meter: VIX in its 5-day range (low → high, green → red = calm → fear).
+        if (d.vix.day_low != null && d.vix.day_high != null) {
+            _meterMark('pulse-vix-marker', v, d.vix.day_low, d.vix.day_high);
+        } else {
+            _meterMark('pulse-vix-marker', v, 10, 40);  // fallback scale
+        }
         if (chg) {
             const pct = d.vix.change_pct;
             chg.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
@@ -221,6 +269,8 @@ function renderMarketPulse(d) {
         if (el) { el.textContent = s; el.className = 'pulse-value pulse-' + color; }
         if (tile) tile.className = 'pulse-tile tile-' + color;
         if (sub) sub.textContent = d.fear_greed.rating;
+        // Meter: 0 (extreme fear, red) → 100 (extreme greed, green).
+        _meterMark('pulse-fg-marker', s, 0, 100);
     }
 
     // ── Market Regime Synthesis ──
@@ -274,6 +324,8 @@ function renderMarketPulse(d) {
     if (regimeTile) {
         regimeTile.style.borderLeftColor = regimeColor;
     }
+    // Meter: regime score -6 (bear, red) → +6 (bull, green).
+    _meterMark('pulse-regime-marker', regimeScore, -6, 6);
 
     // ── Dynamic logo color based on market regime ──
     const logoEl = document.querySelector('.logo');
@@ -303,6 +355,8 @@ function renderMarketPulse(d) {
             polyDesc.style.color = d.poly_sentiment.color;
         }
         if (polyTile) polyTile.style.borderLeftColor = d.poly_sentiment.color;
+        // Meter: net sentiment score (bearish → bullish); clamp to ±10 band.
+        _meterMark('pulse-poly-marker', d.poly_sentiment.score || 0, -10, 10);
     }
 
     // ── Trump Mood ──
@@ -334,6 +388,8 @@ function renderMarketPulse(d) {
                 trumpTile.className = 'pulse-tile tile-yellow';
             }
         }
+        // Meter: mood -100 (aggressive, red) → +100 (market-friendly, green).
+        _meterMark('pulse-trump-marker', tm.mood || 0, -100, 100);
     }
 }
 
@@ -1880,6 +1936,9 @@ function switchTab(tab, skipHash) {
     const watchdogContent = document.getElementById('watchdog-content');
     const claudeBotContent = document.getElementById('claude-bot-content');
     const dashboardContent = document.getElementById('dashboard-content');
+    const optionCallsContent = document.getElementById('option-calls-content');
+    const earningsContent = document.getElementById('earnings-content');
+    const newsContent = document.getElementById('news-content');
 
     mainContent.style.display = 'none';
     if (dashboardContent) dashboardContent.style.display = 'none';
@@ -1896,6 +1955,9 @@ function switchTab(tab, skipHash) {
     if (trumpContent) trumpContent.style.display = 'none';
     if (watchdogContent) watchdogContent.style.display = 'none';
     if (claudeBotContent) claudeBotContent.style.display = 'none';
+    if (optionCallsContent) optionCallsContent.style.display = 'none';
+    if (earningsContent) earningsContent.style.display = 'none';
+    if (newsContent) newsContent.style.display = 'none';
     if (autotradingContent) autotradingContent.style.display = 'none';
     if (stocktradingContent) stocktradingContent.style.display = 'none';
     if (adminContent) adminContent.style.display = 'none';
@@ -1974,6 +2036,15 @@ function switchTab(tab, skipHash) {
             loadSkillCatalog();
             loadSkillJobs();
         }
+    } else if (tab === 'option-calls') {
+        if (optionCallsContent) optionCallsContent.style.display = 'block';
+        if (typeof initOptionCalls === 'function') initOptionCalls();
+    } else if (tab === 'earnings') {
+        if (earningsContent) earningsContent.style.display = 'block';
+        if (typeof initEarningsCalendar === 'function') initEarningsCalendar();
+    } else if (tab === 'news') {
+        if (newsContent) newsContent.style.display = 'block';
+        if (typeof loadNewsTab === 'function') loadNewsTab();
     } else if (tab === 'finskills') {
         finskillsContent.style.display = 'block';
         loadFinSkills();
@@ -2009,6 +2080,7 @@ function switchTab(tab, skipHash) {
         }, 5000);
     } else if (tab === 'admin') {
         adminContent.style.display = 'block';
+        if (typeof switchAdminTab === 'function') switchAdminTab('usage');
         loadAdminUsers();
         loadAdminInvites();
         loadAdminConfig();
@@ -2017,6 +2089,7 @@ function switchTab(tab, skipHash) {
         if (typeof loadAdminOllamaConfig === 'function') loadAdminOllamaConfig();
         if (typeof loadAdminPlatform === 'function') loadAdminPlatform();
         if (typeof loadAdminUsersUsage === 'function') loadAdminUsersUsage();
+        if (typeof loadAdminAiUsage === 'function') loadAdminAiUsage();
     } else {
         mainContent.style.display = 'grid';
     }
@@ -2176,30 +2249,147 @@ const GUIDES = {
             { heading: 'How to Use', body: 'Browse prediction markets for various assets. Check the confidence level and supporting rationale. Higher confidence with multiple agreeing sources = stronger signal.' },
         ],
     },
+    earnings: {
+        title: 'Earnings Calendar — User Guide',
+        sections: [
+            { heading: 'What It Does', body: 'A weekly "most anticipated reports" board — every large/mid-cap company reporting earnings this week, laid out Mon–Fri and grouped by session (<strong>Before Open</strong>, <strong>After Close</strong>, <strong>Session TBD</strong>). Each name is scored and colour-coded so you can see, at a glance, which reporters are strong going into the print.' },
+            { heading: 'How to Use', body: '<ol><li>Open the tab — it loads the current week automatically</li><li>Use <strong>&#8249; Prev / Next &#8250;</strong> to move week to week, or <strong>This week</strong> to jump back</li><li>Click a filter chip (<strong>Leading / Improving / Weakening / Lagging / Near highs</strong>) to narrow the board — filtering is instant (no refetch)</li><li>Tick <strong>Wide universe</strong> to add mid-caps; <strong>Refresh</strong> forces a live re-pull</li></ol>' },
+            { heading: 'Reading the Badges', body: 'The badge is the stock\'s <strong>RRG quadrant</strong> — its rotation relative to the S&amp;P 500 (SPY):<ul><li><strong>LE — Leading</strong> (green): outperforming and still gaining strength</li><li><strong>IM — Improving</strong> (blue): lagging but turning up — early momentum</li><li><strong>WE — Weakening</strong> (amber): outperforming but losing steam</li><li><strong>LAG — Lagging</strong> (red): underperforming and still falling</li><li><strong>Green dot</strong> — price is within 3% of its 52-week high</li></ul>' },
+            { heading: 'The DX Score (0–100)', body: 'The number on the right is a composite of 3-month momentum, relative strength vs SPY, and how close the stock is to its highs — then scaled 0–100 across this week\'s reporters so the board sorts strongest-first within each session. Higher = stronger technical setup <em>into</em> the report (it is not a prediction of the earnings result).' },
+            { heading: 'Where the Data Comes From', body: 'Earnings dates, company names and the before/after-close session come from <strong>yfinance</strong>; prices for the RRG/score come from one batched yfinance download vs SPY. The board is cached for a few hours and mirrored to the database so it loads instantly after a restart. Session is best-effort — many names show <strong>TBD</strong> until the exact time is confirmed.' },
+            { heading: 'Tips', body: '<ul><li>Filter to <strong>Leading + Near highs</strong> for names with momentum going into the print — these tend to have the most violent reactions.</li><li>A high DX Score with a <strong>Lagging</strong> badge is a divergence worth a closer look in the Analyzer.</li><li>Click through to the <strong>Analyzer</strong> or <strong>Option Calls</strong> tab on any ticker to dig deeper before the report.</li></ul>' },
+        ],
+    },
+    overview: {
+        title: 'How TradeWiz Works',
+        sections: [
+            { heading: 'The Big Picture', body:
+                '<p style="margin:0 0 12px">TradeWiz pulls <strong>live market &amp; alternative data</strong> from many sources, runs it through <strong>analysis engines</strong>, has a <strong>panel of AI models</strong> vet the result, and surfaces it in the <strong>feature tabs</strong> you use. Same pipeline everywhere — only the data source and the question change.</p>' +
+                '<div style="border:1px solid var(--border,#333);border-radius:10px;overflow:hidden;font-size:12px">' +
+                  // Layer 1 — Data
+                  '<div style="padding:10px 12px;background:var(--bg-tertiary,#1a1d24)">' +
+                    '<div style="font-weight:700;letter-spacing:.5px;color:var(--accent-primary);margin-bottom:6px">1 · DATA SOURCES</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+                      ['yfinance (prices/options/earnings)','SEC EDGAR 13F','Reddit + Substack','Truth Social / GDELT','Congress PTR filings','BloFin (crypto)','Alpaca (stocks)','OpenRouter + Ollama (LLMs)']
+                        .map(function(s){return '<span style="padding:3px 8px;border-radius:999px;background:var(--bg-input,#12141a);border:1px solid var(--border,#333)">'+s+'</span>';}).join('') +
+                    '</div></div>' +
+                  '<div style="text-align:center;color:var(--text-muted,#8a90a0);padding:2px">&#9660;</div>' +
+                  // Layer 2 — Engines
+                  '<div style="padding:10px 12px;background:var(--bg-tertiary,#1a1d24)">' +
+                    '<div style="font-weight:700;letter-spacing:.5px;color:var(--accent-primary);margin-bottom:6px">2 · ANALYSIS ENGINES</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+                      ['analysis_engine (20+ indicators, patterns)','screener (multi-category scan)','earnings_calendar (RRG + DX score)','market_sensor (regime)','news_agent','smart_money (13F)']
+                        .map(function(s){return '<span style="padding:3px 8px;border-radius:999px;background:var(--bg-input,#12141a);border:1px solid var(--border,#333)">'+s+'</span>';}).join('') +
+                    '</div></div>' +
+                  '<div style="text-align:center;color:var(--text-muted,#8a90a0);padding:2px">&#9660;</div>' +
+                  // Layer 3 — AI
+                  '<div style="padding:10px 12px;background:var(--bg-input,#12141a);border-top:1px solid var(--border,#333);border-bottom:1px solid var(--border,#333)">' +
+                    '<div style="font-weight:700;letter-spacing:.5px;color:var(--accent-purple,#a78bfa);margin-bottom:6px">3 · MULTI-LLM VALIDATION</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">' +
+                      ['Research model','Pattern model','Risk model'].map(function(s){return '<span style="padding:3px 8px;border-radius:6px;background:var(--bg-tertiary,#1a1d24);border:1px solid var(--accent-purple,#a78bfa)">'+s+'</span>';}).join('') +
+                      '<span style="color:var(--text-muted,#8a90a0)">&#8594; consensus verdict (rule-based fallback if LLMs are down)</span>' +
+                    '</div></div>' +
+                  '<div style="text-align:center;color:var(--text-muted,#8a90a0);padding:2px">&#9660;</div>' +
+                  // Layer 4 — Features
+                  '<div style="padding:10px 12px;background:var(--bg-tertiary,#1a1d24)">' +
+                    '<div style="font-weight:700;letter-spacing:.5px;color:var(--accent-green,#22c55e);margin-bottom:6px">4 · FEATURE TABS (what you click)</div>' +
+                    '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+                      ['Analyzer','Screener','Breakout Scanner','Earnings','Option Calls','Research','Smart Money','Congress','Trump','Crypto/Stock Bots','ThunderBot']
+                        .map(function(s){return '<span style="padding:3px 8px;border-radius:999px;background:var(--bg-input,#12141a);border:1px solid var(--accent-green,#22c55e)">'+s+'</span>';}).join('') +
+                    '</div></div>' +
+                  '<div style="text-align:center;color:var(--text-muted,#8a90a0);padding:2px">&#9660;</div>' +
+                  // Layer 5 — You
+                  '<div style="padding:10px 12px;background:var(--bg-input,#12141a)">' +
+                    '<div style="font-weight:700;letter-spacing:.5px;color:var(--text-primary,#fff);margin-bottom:6px">5 · YOU</div>' +
+                    '<div style="color:var(--text-muted,#8a90a0)">Dashboard, Tracker/Journal, and Alerts tie it together — decisions, logged trades, and notifications.</div>' +
+                  '</div>' +
+                '</div>' },
+            { heading: 'Where each data source connects', body:
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+                '<thead><tr style="text-align:left;color:var(--text-muted,#8a90a0)">' +
+                  '<th style="padding:6px 8px;border-bottom:1px solid var(--border,#333)">Source</th>' +
+                  '<th style="padding:6px 8px;border-bottom:1px solid var(--border,#333)">Feeds these tabs</th></tr></thead><tbody>' +
+                [['yfinance','Analyzer, Screener, Breakout, Earnings, Option Calls, both Bots, ThunderBot'],
+                 ['SEC EDGAR (13F)','Smart Money (fund holdings, convergence signals)'],
+                 ['Congress PTR / QuiverQuant','Congress trades'],
+                 ['Reddit · Substack · TechCrunch','IPOs / VC / Startups, News'],
+                 ['Truth Social · GDELT','Trump market indicator'],
+                 ['BloFin (demo)','Crypto Trading Bot — paper orders'],
+                 ['Alpaca (paper)','Stock Trading Bot, ThunderBot — paper orders'],
+                 ['OpenRouter · Ollama','Every "AI" verdict, screener vetting, bot trade votes']]
+                 .map(function(r){return '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border,#222);font-weight:600">'+r[0]+'</td><td style="padding:6px 8px;border-bottom:1px solid var(--border,#222);color:var(--text-muted,#8a90a0)">'+r[1]+'</td></tr>';}).join('') +
+                '</tbody></table>' },
+            { heading: 'Worked example — analysing a stock', body:
+                '<ol style="margin:0;padding-left:18px">' +
+                '<li>You type <strong>AAPL</strong> in the Analyzer and click Analyze.</li>' +
+                '<li><strong>yfinance</strong> returns OHLCV price history + fundamentals.</li>' +
+                '<li><strong>analysis_engine</strong> computes 20+ indicators (RSI, MACD, moving averages, Bollinger, ATR) and detects chart patterns.</li>' +
+                '<li>That package is sent to the <strong>multi-LLM panel</strong> (research + pattern + risk models), which returns a consensus verdict, grade, and an ATR-based trade plan.</li>' +
+                '<li>The chart + AI verdict render in the tab. Nothing is a recommendation — it is analysis you act on.</li></ol>' },
+            { heading: 'Worked example — the Earnings tab', body:
+                '<ol style="margin:0;padding-left:18px">' +
+                '<li>You open <strong>Earnings</strong>. The engine lists every universe name reporting this week (yfinance earnings dates).</li>' +
+                '<li>One batched <strong>yfinance download</strong> pulls 6 months of prices for all reporters + SPY.</li>' +
+                '<li>For each name it computes the <strong>RRG quadrant</strong> vs SPY, whether it is <strong>near its 52-week high</strong>, and a <strong>0–100 DX Score</strong>.</li>' +
+                '<li>Names are placed into Mon–Fri columns by report day and Before-Open / After-Close by session, sorted by score.</li>' +
+                '<li>The whole board is cached and saved to the database so it reloads instantly.</li></ol>' },
+            { heading: 'How the trading bots fit in', body:
+                'The Crypto and Stock bots run the <em>same</em> pipeline on a loop (every ~5 min): scan your coins/tickers &#8594; <strong>rule-based signal</strong> from 9 strategies &#8594; <strong>risk gates</strong> (kill switch, daily-loss limit, max positions) &#8594; a <strong>multi-LLM vote</strong> to approve/reject &#8594; <strong>paper order</strong> on BloFin demo / Alpaca paper. Everything is <strong>paper trading</strong> unless you explicitly opt into live mode. See the Crypto/Stock Bot guides for the full breakdown.' },
+            { heading: 'One rule everywhere: AI has a fallback', body:
+                'Every AI call path has a non-AI fallback. If the LLM providers are unreachable, the screener/analyzer/bots fall back to rule-based logic instead of failing — so the platform keeps working even when the models are down.' },
+        ],
+    },
     screener_default: {
         title: 'Feature Guide',
         sections: [
-            { heading: 'Welcome', body: 'Select a tab to get started. Click the Guide button anytime to learn how to use the current feature.' },
+            { heading: 'Welcome', body: 'Select a tab to get started. Click the Guide button anytime to learn how to use the current feature — or hit <strong>How It All Works</strong> at the top of the guide for a full system overview.' },
         ],
     },
 };
+
+// Build the inner HTML (title + sections) for one guide object.
+function _renderGuideBody(guide) {
+    let html = `<h3 class="guide-inner-title" style="margin:0 0 14px;font-size:17px">${guide.title}</h3>`;
+    guide.sections.forEach(s => {
+        html += `<div class="guide-section">
+            <h4 class="guide-section-heading">${s.heading}</h4>
+            <div class="guide-section-body">${s.body}</div>
+        </div>`;
+    });
+    return html;
+}
+
+// Toggle the guide modal between the current feature and the system overview.
+function guideSwitch(which) {
+    const inner = document.getElementById('guide-body-inner');
+    if (!inner) return;
+    const isOverview = which === 'overview';
+    inner.innerHTML = isOverview ? (window._guideOverviewHtml || '') : (window._guideFeatureHtml || '');
+    inner.scrollTop = 0;
+    const ft = document.getElementById('guide-tab-feature');
+    const ot = document.getElementById('guide-tab-overview');
+    if (ft) ft.classList.toggle('guide-tab-active', !isOverview);
+    if (ot) ot.classList.toggle('guide-tab-active', isOverview);
+}
 
 function showGuide() {
     const tab = _activeTab || 'analyzer';
     const guide = GUIDES[tab] || GUIDES[tab === 'main' ? 'analyzer' : 'screener_default'];
     if (!guide) return;
+    const overview = GUIDES.overview;
 
     // Remove existing guide modal
     const existing = document.getElementById('guide-modal-overlay');
     if (existing) existing.remove();
 
-    let contentHtml = '';
-    guide.sections.forEach(s => {
-        contentHtml += `<div class="guide-section">
-            <h4 class="guide-section-heading">${s.heading}</h4>
-            <div class="guide-section-body">${s.body}</div>
-        </div>`;
-    });
+    // Stash both views so the header tabs can swap between them without a rebuild.
+    window._guideFeatureHtml = _renderGuideBody(guide);
+    window._guideOverviewHtml = overview ? _renderGuideBody(overview) : '';
+
+    const tabBtn = (id, label, active) =>
+        `<button id="${id}" class="guide-tab${active ? ' guide-tab-active' : ''}" onclick="guideSwitch('${id === 'guide-tab-overview' ? 'overview' : 'feature'}')" ` +
+        `style="background:${active ? 'var(--accent-primary)' : 'transparent'};color:${active ? '#fff' : 'var(--text-muted,#8a90a0)'};` +
+        `border:1px solid var(--border,#333);border-radius:999px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;margin-right:8px">${label}</button>`;
 
     const overlay = document.createElement('div');
     overlay.id = 'guide-modal-overlay';
@@ -2207,10 +2397,13 @@ function showGuide() {
     overlay.innerHTML = `
         <div class="guide-modal">
             <div class="guide-header">
-                <h3>${guide.title}</h3>
+                <div class="guide-tabs">
+                    ${tabBtn('guide-tab-feature', '📖 This Feature', true)}
+                    ${overview ? tabBtn('guide-tab-overview', '🗺️ How It All Works', false) : ''}
+                </div>
                 <button class="guide-close" onclick="document.getElementById('guide-modal-overlay').remove()">&times;</button>
             </div>
-            <div class="guide-body">${contentHtml}</div>
+            <div class="guide-body"><div id="guide-body-inner">${window._guideFeatureHtml}</div></div>
         </div>
     `;
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
@@ -2409,16 +2602,28 @@ function renderNarrativeDashboard(container, d, assetFilter) {
     container.innerHTML = html;
 }
 
-/* ─── Theme switcher (Aurora / Terminal / Daylight) ─────────── */
+/* ─── Theme switcher ─────────────────────────────────────────
+   Themes live in core.css as html[data-theme="..."] blocks. Persisted in
+   localStorage('tw_theme') and applied before paint by the inline script in
+   index.html. Selecting a theme only flips data-theme — every styled element
+   follows via CSS custom properties (canonical tokens + bridge aliases). */
+var TW_THEMES = ['aurora', 'midnight', 'ember', 'nord', 'terminal', 'daylight', 'sandstone'];
+
 function setTheme(t) {
+    if (TW_THEMES.indexOf(t) === -1) t = 'aurora';
     document.documentElement.setAttribute('data-theme', t);
     try { localStorage.setItem('tw_theme', t); } catch (e) {}
+    var sel = document.getElementById('theme-select');
+    if (sel && sel.value !== t) sel.value = t;
+    // legacy button row (if still present anywhere)
     document.querySelectorAll('.theme-switch-btn').forEach(function (b) {
         b.classList.toggle('active', b.dataset.theme === t);
     });
 }
 document.addEventListener('DOMContentLoaded', function () {
     var t = document.documentElement.getAttribute('data-theme') || 'aurora';
+    var sel = document.getElementById('theme-select');
+    if (sel) sel.value = t;
     document.querySelectorAll('.theme-switch-btn').forEach(function (b) {
         b.classList.toggle('active', b.dataset.theme === t);
     });

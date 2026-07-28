@@ -1,0 +1,126 @@
+/* Earnings Calendar — weekly "most anticipated reports" board.
+   Layout modelled on the DominantX Earnings Whispers board: a 5-column
+   Mon–Fri grid, each column split into Before Open / After Close / TBD, with
+   RRG quadrant badges (LE/WE/IM/LAG), a near-highs dot and a 0–100 DX score.
+   All colours come from the theme tokens in core.css so it works across themes. */
+
+.ec-content { padding: 20px; }
+
+/* Quadrant colour tokens (map RRG state -> accent) */
+.ec-content {
+  --ec-le: var(--accent-green);
+  --ec-im: var(--accent-blue);
+  --ec-we: var(--accent-yellow, var(--accent-orange));
+  --ec-lag: var(--accent-red);
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.ec-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.ec-title { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: .3px;
+  text-transform: uppercase; color: var(--text-primary, var(--text)); }
+.ec-title-accent { color: var(--accent-primary); }
+.ec-sub { font-size: 12px; color: var(--text-muted, var(--text-secondary)); margin-top: 4px; }
+
+.ec-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  font-size: 11px; color: var(--text-muted, var(--text-secondary)); }
+.ec-legend .ec-leg-item { display: inline-flex; align-items: center; gap: 5px; }
+.ec-legend .ec-badge { padding: 1px 5px; }
+
+/* ── Toolbar (week nav + filters) ──────────────────────────── */
+.ec-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border, var(--border-color));
+}
+.ec-nav, .ec-filters, .ec-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ec-navbtn {
+  background: var(--bg-input, var(--bg-tertiary)); color: var(--text-primary, var(--text));
+  border: 1px solid var(--border, var(--border-color)); border-radius: var(--radius-sm, 6px);
+  padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: var(--transition, all .15s ease);
+}
+.ec-navbtn:hover { background: var(--hover-bg, var(--bg-secondary)); border-color: var(--accent-primary); }
+.ec-navbtn-today { color: var(--accent-primary); }
+
+.ec-chip {
+  background: transparent; color: var(--text-muted, var(--text-secondary));
+  border: 1px solid var(--border, var(--border-color)); border-radius: 999px;
+  padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: var(--transition, all .15s ease);
+}
+.ec-chip:hover { color: var(--text-primary, var(--text)); border-color: var(--accent-primary); }
+.ec-chip-active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+
+.ec-wide { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--text-muted, var(--text-secondary)); cursor: pointer; }
+
+/* ── Board grid ────────────────────────────────────────────── */
+.ec-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  align-items: start;
+}
+.ec-col {
+  background: var(--bg-card, var(--card-bg)); border: 1px solid var(--border, var(--border-color));
+  border-radius: var(--radius-md, 10px); overflow: hidden; min-width: 0;
+}
+.ec-col-head {
+  text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .5px;
+  padding: 9px 8px; color: var(--text-primary, var(--text));
+  background: var(--bg-tertiary, var(--bg-secondary));
+  border-bottom: 1px solid var(--border, var(--border-color));
+}
+.ec-col-head .ec-col-count { color: var(--text-muted, var(--text-secondary)); font-weight: 500; }
+.ec-col-today .ec-col-head { color: var(--accent-primary); box-shadow: inset 0 -2px 0 var(--accent-primary); }
+
+.ec-session { padding: 4px 0; }
+.ec-session-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--text-muted, var(--text-secondary)); padding: 8px 10px 4px;
+}
+.ec-session-empty { padding: 4px 10px 8px; font-size: 11px; color: var(--text-muted, var(--text-secondary)); opacity: .6; }
+
+/* ── Row ───────────────────────────────────────────────────── */
+.ec-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px 7px 12px; border: none; border-left: 3px solid transparent;
+  background: transparent; text-align: left; cursor: default;
+  color: var(--text-primary, var(--text));
+  transition: background .12s ease;
+}
+.ec-row:hover { background: var(--hover-bg, var(--bg-secondary)); }
+.ec-row.q-LE  { border-left-color: var(--ec-le); }
+.ec-row.q-IM  { border-left-color: var(--ec-im); }
+.ec-row.q-WE  { border-left-color: var(--ec-we); }
+.ec-row.q-LAG { border-left-color: var(--ec-lag); }
+
+.ec-row-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; }
+.ec-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ec-tkr { font-size: 12px; font-weight: 800; letter-spacing: .3px; }
+.ec-name { font-size: 11px; color: var(--text-muted, var(--text-secondary));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green);
+  flex: 0 0 auto; box-shadow: 0 0 5px var(--accent-green); }
+
+.ec-row-right { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.ec-badge {
+  font-size: 10px; font-weight: 800; letter-spacing: .4px; border-radius: 4px;
+  padding: 2px 6px; color: #fff;
+}
+.ec-badge.q-LE  { background: var(--ec-le); }
+.ec-badge.q-IM  { background: var(--ec-im); }
+.ec-badge.q-WE  { background: var(--ec-we); color: #1a1a1a; }
+.ec-badge.q-LAG { background: var(--ec-lag); }
+.ec-score { font-size: 13px; font-weight: 700; min-width: 22px; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--text-primary, var(--text)); }
+
+/* ── Footer + states ───────────────────────────────────────── */
+.ec-foot { margin-top: 14px; font-size: 11px; color: var(--text-muted, var(--text-secondary));
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ec-empty { padding: 40px 12px; text-align: center; color: var(--text-muted, var(--text-secondary)); font-size: 14px; }
+
+/* ── Responsive ────────────────────────────────────────────── */
+@media (max-width: 1100px) { .ec-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px)  { .ec-grid { grid-template-columns: 1fr; } .ec-content { padding: 12px; } }

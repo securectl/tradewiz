@@ -332,10 +332,59 @@ def _run_postgres(conn):
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             call_source TEXT,
             model TEXT,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
             called_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    # Token/cost columns (added for the admin AI-usage dashboard; backfill 0 on
+    # rows logged before this migration).
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS completion_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cost_usd REAL DEFAULT 0")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
+
+    # Daily call-option activity snapshots (one row per symbol per day) — powers
+    # the 30-day trend on the Option Calls tab. Rows older than 30 days are
+    # purged on write (see features/options_calls/engine._record_snapshot).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS options_call_snapshots (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            snap_date TEXT NOT NULL,
+            price REAL DEFAULT 0,
+            call_volume INTEGER DEFAULT 0,
+            call_oi INTEGER DEFAULT 0,
+            vol_oi_ratio REAL DEFAULT 0,
+            read TEXT,
+            top_strike REAL,
+            top_expiry TEXT,
+            top_volume INTEGER DEFAULT 0,
+            contracts INTEGER DEFAULT 0,
+            increasing_count INTEGER DEFAULT 0,
+            decreasing_count INTEGER DEFAULT 0,
+            source TEXT,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(symbol, snap_date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_optsnap_symbol_date ON options_call_snapshots(symbol, snap_date)")
+
+    # Earnings calendar — one JSON board per week (mirror of the computed weekly
+    # "most anticipated reports" view, so a restart serves the last board fast).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS earnings_calendar_snapshots (
+            id SERIAL PRIMARY KEY,
+            week_start TEXT NOT NULL,
+            payload TEXT,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(week_start)
+        )
+    """)
 
     # LLM model snapshots — admin-saved point-in-time captures of which models
     # are wired to which roles. Used by the "revert to previous version"
@@ -720,6 +769,25 @@ def _run_postgres(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_wa_ticker ON whale_activity (ticker, created_at DESC)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_wa_entity ON whale_activity (entity_id, created_at DESC)")
 
+    # ── News agent (RSS/Reddit ingestion; 30-day retention) ──────
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS news_articles (
+            id SERIAL PRIMARY KEY,
+            source TEXT,
+            category TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            url TEXT UNIQUE,
+            published_at TIMESTAMP,
+            tickers TEXT,
+            sectors TEXT,
+            sentiment TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_news_created ON news_articles (created_at DESC)")
+
     cur.close()
     logger.info("PostgreSQL tables created.")
 
@@ -1025,10 +1093,56 @@ def _run_sqlite(conn):
             user_id INTEGER,
             call_source TEXT,
             model TEXT,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
             called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Token/cost columns for the admin AI-usage dashboard (pre-existing rows -> 0).
+    _sqlite_add_column(conn, "llm_usage_log", "prompt_tokens", "INTEGER DEFAULT 0")
+    _sqlite_add_column(conn, "llm_usage_log", "completion_tokens", "INTEGER DEFAULT 0")
+    _sqlite_add_column(conn, "llm_usage_log", "total_tokens", "INTEGER DEFAULT 0")
+    _sqlite_add_column(conn, "llm_usage_log", "cost_usd", "REAL DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
+
+    # Daily call-option activity snapshots (one row per symbol per day) for the
+    # 30-day trend on the Option Calls tab. Old rows purged on write.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS options_call_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            snap_date TEXT NOT NULL,
+            price REAL DEFAULT 0,
+            call_volume INTEGER DEFAULT 0,
+            call_oi INTEGER DEFAULT 0,
+            vol_oi_ratio REAL DEFAULT 0,
+            read TEXT,
+            top_strike REAL,
+            top_expiry TEXT,
+            top_volume INTEGER DEFAULT 0,
+            contracts INTEGER DEFAULT 0,
+            increasing_count INTEGER DEFAULT 0,
+            decreasing_count INTEGER DEFAULT 0,
+            source TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(symbol, snap_date)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_optsnap_symbol_date ON options_call_snapshots(symbol, snap_date)")
+
+    # Earnings calendar — one JSON board per week (see the Postgres section).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS earnings_calendar_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start TEXT NOT NULL,
+            payload TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(week_start)
+        )
+    """)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_snapshots (
@@ -1413,6 +1527,25 @@ def _run_sqlite(conn):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # ── News agent (RSS/Reddit ingestion; 30-day retention) ──────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS news_articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT,
+            category TEXT,
+            title TEXT NOT NULL,
+            summary TEXT,
+            url TEXT UNIQUE,
+            published_at TIMESTAMP,
+            tickers TEXT,
+            sectors TEXT,
+            sentiment TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles (published_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_news_created ON news_articles (created_at DESC)")
 
     logger.info("SQLite tables created.")
 

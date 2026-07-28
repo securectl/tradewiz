@@ -42,9 +42,14 @@ LLM_PATTERN = os.getenv("LLM_PATTERN", "google/gemini-2.5-pro-preview")
 LLM_PREDICTION = os.getenv("LLM_PREDICTION", "deepseek/deepseek-chat-v3-0324")
 LLM_SCREENER = os.getenv("LLM_SCREENER", "google/gemini-2.5-flash")
 LLM_SUPERVISOR = os.getenv("LLM_SUPERVISOR", "")
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_FAST_MODE = os.getenv("LLM_FAST_MODE", "0") == "1"
+
+# Verdict-cache TTLs (seconds). Setups move with intraday price → short TTL;
+# 12-month theses move with fundamentals → longer. Both bypassable per-call.
+SETUP_CACHE_TTL = int(os.getenv("SETUP_CACHE_TTL", "900"))        # 15 min
+TWELVE_MONTH_CACHE_TTL = int(os.getenv("TWELVE_MONTH_CACHE_TTL", "3600"))  # 1 hr
 
 HEADERS = {
     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -57,6 +62,40 @@ HEADERS = {
 def is_configured() -> bool:
     """Check if OpenRouter API key is set."""
     return bool(OPENROUTER_API_KEY) and OPENROUTER_API_KEY != "your_openrouter_api_key_here"
+
+
+def _with_prompt_cache(model: str, messages: list) -> list:
+    """Mark the static system prompt as a prompt-cache breakpoint for Anthropic.
+
+    OpenRouter forwards Anthropic's ``cache_control`` so a repeated system
+    prefix is billed at the cheaper cache-read rate instead of full input.
+    Gemini/DeepSeek cache implicitly and ignore this field, so we only rewrite
+    the payload for Anthropic models to avoid touching other providers' content
+    format. NOTE: Anthropic only creates a cache entry for prefixes >=1024
+    tokens; today's one-line system prompts are well below that, so this is a
+    no-op until larger prompts are routed to Claude — it just makes the saving
+    automatic if/when that happens.
+    """
+    m = (model or "").lower()
+    if "anthropic/" not in m and "claude" not in m:
+        return messages
+    out = []
+    marked = False
+    for msg in messages:
+        if (not marked and msg.get("role") == "system"
+                and isinstance(msg.get("content"), str)):
+            out.append({
+                "role": "system",
+                "content": [{
+                    "type": "text",
+                    "text": msg["content"],
+                    "cache_control": {"type": "ephemeral"},
+                }],
+            })
+            marked = True
+        else:
+            out.append(msg)
+    return out
 
 
 def _call_openrouter(model: str, messages: list, temperature: float = None,
@@ -76,6 +115,29 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
             model = get_model(role, model)
         except Exception:
             pass  # llm_config unavailable — fall through with original model
+
+    # ── Ollama Cloud path (model explicitly routed with an `ollama/` prefix) ──
+    # Lets an admin run any LLM role on Ollama Cloud by setting its override to
+    # `ollama/<model>` — first-class, not just the failure fallback.
+    if isinstance(model, str) and model.startswith("ollama/"):
+        try:
+            from shared.ollama_fallback import call_ollama_chat, is_configured
+            if is_configured():
+                content = call_ollama_chat(messages, temperature=temperature,
+                                           max_tokens=max_tokens, timeout=timeout,
+                                           reason="routed_ollama", model=model)
+                try:
+                    from rate_limiter import get_llm_user, record_llm_call
+                    uid, source = _user_id, _source
+                    if not uid:
+                        uid, source = get_llm_user()
+                    if uid:
+                        record_llm_call(uid, source or "api", model)
+                except Exception:
+                    pass
+                return content
+        except Exception:
+            pass  # Ollama unavailable — fall through to Vertex/OpenRouter
 
     # ── Vertex AI path (direct Google Cloud, no OpenRouter markup) ──
     try:
@@ -108,7 +170,7 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
     # ── OpenRouter path (default) ──
     payload = {
         "model": model,
-        "messages": messages,
+        "messages": _with_prompt_cache(model, messages),
         "max_tokens": max_tokens or LLM_MAX_TOKENS,
         "temperature": temperature if temperature is not None else LLM_TEMPERATURE,
     }
@@ -120,26 +182,60 @@ def _call_openrouter(model: str, messages: list, temperature: float = None,
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        # Record LLM usage
+        # Record LLM usage (with token counts from the response when present)
         try:
             from rate_limiter import get_llm_user, record_llm_call
             uid, source = _user_id, _source
             if not uid:
                 uid, source = get_llm_user()
             if uid:
-                record_llm_call(uid, source or "api", model)
+                u = data.get("usage") or {}
+                record_llm_call(
+                    uid, source or "api", model,
+                    prompt_tokens=u.get("prompt_tokens", 0),
+                    completion_tokens=u.get("completion_tokens", 0),
+                    total_tokens=u.get("total_tokens", 0),
+                )
         except Exception:
             pass
         return content
     except requests.exceptions.Timeout:
-        return json.dumps({"error": "LLM request timed out. Try again."})
+        fb = _ollama_fallback(messages, temperature, max_tokens, timeout, "openrouter_timeout")
+        return fb if fb is not None else json.dumps({"error": "LLM request timed out. Try again."})
     except requests.exceptions.RequestException as e:
-        return json.dumps({"error": f"OpenRouter API error: {str(e)}"})
+        # Out-of-credits (402), rate-limit (429) and transport errors all land
+        # here. If the admin enabled the Ollama Cloud backup, retry there.
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        fb = _ollama_fallback(messages, temperature, max_tokens, timeout,
+                              f"openrouter_error_{status}" if status else "openrouter_error")
+        return fb if fb is not None else json.dumps({"error": f"OpenRouter API error: {str(e)}"})
     except (KeyError, IndexError) as e:
         return json.dumps({"error": f"Unexpected API response: {str(e)}"})
 
 
+def _ollama_fallback(messages, temperature, max_tokens, timeout, reason):
+    """Retry an OpenRouter failure on Ollama Cloud when the admin toggle is on.
+    Returns the answer string, or None to keep the original OpenRouter error."""
+    try:
+        from shared.ollama_fallback import try_fallback
+        return try_fallback(messages, temperature, max_tokens, timeout, reason=reason)
+    except Exception:
+        return None
+
+
 # ─── Context-Specific Data Summaries ─────────────────────────────
+
+def _num(v, places: int = 2):
+    """Round a numeric value to ``places`` dp to trim token-heavy float reprs.
+
+    Leaves non-numeric values (strings like 'N/A', None) untouched.
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return round(v, places)
+    return v
+
 
 def _build_data_summary(analysis: dict, context: str = "full") -> str:
     """Build a compact text summary of the analysis data for LLM context.
@@ -170,9 +266,22 @@ Market Cap: ${info.get('market_cap', 0):,.0f}""")
     else:
         parts.append(f"STOCK: {analysis['ticker']}")
 
-    # Price info (always included)
-    parts.append(f"""CURRENT PRICE: ${analysis['current_price']}
-Change: {analysis['change']} ({analysis['change_pct']}%)""")
+    # Price info (always included). Round long float reprs to trim tokens —
+    # e.g. 123.456789012 → 123.46 — without losing any decision-relevant info.
+    parts.append(f"""CURRENT PRICE: ${_num(analysis['current_price'])}
+Change: {_num(analysis['change'])} ({_num(analysis['change_pct'])}%)""")
+
+    # Market-condition backdrop (SPY/Nasdaq/VIX/Fear&Greed gauge) so the LLM
+    # weighs macro risk, not just the single name. Always included when present.
+    mc = analysis.get("market_condition")
+    if mc and mc.get("available"):
+        try:
+            from shared.market_gauge import summarize_for_llm
+            block = summarize_for_llm(mc)
+            if block:
+                parts.append(block)
+        except Exception:
+            pass
 
     # Indicators (skip for research context)
     if context != "research":
@@ -182,6 +291,17 @@ Change: {analysis['change']} ({analysis['change_pct']}%)""")
   EMA 9: {indicators.get('ema_9', 'N/A')} | EMA 21: {indicators.get('ema_21', 'N/A')} | SMA 50: {indicators.get('sma_50', 'N/A')}
   ATR(14): {indicators.get('atr_14', 'N/A')} | ADR%: {indicators.get('adr_pct', 'N/A')}%
   Volume: {indicators.get('volume', 'N/A')} | Vol MA(10): {indicators.get('vol_ma_10', 'N/A')} | Rel Vol: {indicators.get('relative_volume', 'N/A')}x""")
+
+    # Money flow (equity CMF/MFI + options premium) — a key money-in/out tell.
+    mf = analysis.get("money_flow")
+    if mf and mf.get("label"):
+        eq = mf.get("equity") or {}
+        opt = mf.get("options")
+        opt_txt = (f" | Options: {opt.get('sentiment')} (P/C {opt.get('pc_ratio')}, "
+                   f"net premium ${opt.get('net_premium')})") if opt else " | Options: n/a"
+        parts.append(
+            f"MONEY FLOW: {mf.get('label')} — {mf.get('note')}\n"
+            f"  Equity: CMF {eq.get('cmf')} | MFI {eq.get('mfi')} ({eq.get('mf_label')}){opt_txt}")
 
     # Recent price action (only for pattern context)
     if context in ("pattern", "full"):
@@ -574,7 +694,7 @@ def _build_investment_verdict(facts: dict, health: dict, price: dict, supervisor
                               ("price_action", price), ("supervisor", supervisor)]:
         conf = model_out.get("confidence", 0)
         verdict = model_out.get("verdict", "HOLD").upper()
-        if not model_out.get("error"):
+        if not model_out.get("error") and not model_out.get("skipped"):
             scores.append(conf)
             verdicts.append(verdict)
             model_scores[label] = conf
@@ -735,10 +855,13 @@ def _parse_json_response(raw: str, label: str) -> dict:
 
 # ─── Public API ──────────────────────────────────────────────────
 
-def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
+def validate_setup(analysis: dict, fast_mode: bool = None, force_refresh: bool = False) -> dict:
     """
     Run all 3 LLM validations in parallel and synthesize results.
     Returns comprehensive AI verdict with risk gates.
+
+    Verdicts are memoized per ticker for SETUP_CACHE_TTL seconds (skips the
+    3-model fan-out on repeat requests). Pass force_refresh=True to bypass.
     """
     if not is_configured():
         return {
@@ -748,6 +871,13 @@ def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
 
     use_fast = fast_mode if fast_mode is not None else LLM_FAST_MODE
     ticker = analysis.get("ticker", "UNKNOWN")
+
+    from shared.llm_cache import get as _cache_get, put as _cache_put
+    cache_key = f"setup:{ticker}:{'fast' if use_fast else 'full'}"
+    if not force_refresh:
+        _hit = _cache_get(cache_key)
+        if _hit is not None:
+            return _hit
 
     # Capture user context from calling thread to propagate into executor threads
     from rate_limiter import get_llm_user, set_llm_user
@@ -806,7 +936,25 @@ def validate_setup(analysis: dict, fast_mode: bool = None) -> dict:
     }
     if supervisor:
         result["supervisor"] = supervisor
+
+    # Cache only a clean verdict — don't pin a fan-out where a model errored.
+    if not any(m.get("error") for m in (research, pattern, prediction)):
+        _cache_put(cache_key, result, SETUP_CACHE_TTL)
     return result
+
+
+def _base_models_agree(facts: dict, health: dict, price: dict) -> bool:
+    """True when all 3 base models succeeded and cast the SAME verdict.
+
+    Used to skip the supervisor LLM call when there is no disagreement to
+    arbitrate. Any model error → False (run the supervisor to compensate for
+    the missing voter).
+    """
+    models = [facts, health, price]
+    if any(m.get("error") for m in models):
+        return False
+    verdicts = {str(m.get("verdict", "")).upper() for m in models}
+    return len(verdicts) == 1 and "" not in verdicts
 
 
 def _supervisor_review(facts: dict, health: dict, price: dict, ticker: str, fast_mode: bool = False) -> dict:
@@ -839,13 +987,17 @@ Respond with ONLY this JSON:
     return _parse_json_response(raw, "supervisor")
 
 
-def predict_12month(fundamentals: dict, indicators: dict = None, df=None, fast_mode: bool = None) -> dict:
+def predict_12month(fundamentals: dict, indicators: dict = None, df=None, fast_mode: bool = None, force_refresh: bool = False) -> dict:
     """
-    Run 12-month investment prediction using 4 LLMs.
+    Run 12-month investment prediction using up to 4 LLMs.
     Phase 1: Fact Gatherer (sequential)
     Phase 2: Company Health + Price Action (parallel)
-    Phase 3: Supervisor Review (sequential)
+    Phase 3: Supervisor Review (sequential — SKIPPED when the 3 base models
+             already agree, to save the extra LLM call)
     Returns comprehensive investment verdict with INVEST/HOLD/PASS (3/4 quorum).
+
+    Verdicts are memoized per ticker for TWELVE_MONTH_CACHE_TTL seconds; pass
+    force_refresh=True to bypass.
     """
     if not is_configured():
         return {
@@ -855,6 +1007,14 @@ def predict_12month(fundamentals: dict, indicators: dict = None, df=None, fast_m
 
     use_fast = fast_mode if fast_mode is not None else LLM_FAST_MODE
     ticker = fundamentals.get("ticker", "UNKNOWN")
+
+    from shared.llm_cache import get as _cache_get, put as _cache_put
+    cache_key = f"12month:{ticker}:{'fast' if use_fast else 'full'}"
+    if not force_refresh:
+        _hit = _cache_get(cache_key)
+        if _hit is not None:
+            return _hit
+
     fundamentals_summary = _build_fundamentals_summary(fundamentals)
     price_action_summary = _build_price_action_summary(indicators or {}, df)
 
@@ -878,8 +1038,14 @@ def predict_12month(fundamentals: dict, indicators: dict = None, df=None, fast_m
         health = future_health.result()
         price = future_price.result()
 
-    # Phase 3: Supervisor Review (sequential — reviews all prior outputs)
-    supervisor = _run_with_context(_supervisor_review, facts, health, price, ticker, use_fast)
+    # Phase 3: Supervisor Review — only when the 3 base models disagree.
+    # The supervisor exists to break ties / catch overconfidence; when every
+    # non-errored base model already votes the same way there is nothing to
+    # arbitrate, so we skip the extra LLM call (a Claude call by default).
+    if _base_models_agree(facts, health, price):
+        supervisor = {"skipped": True, "reason": "unanimous base-model consensus"}
+    else:
+        supervisor = _run_with_context(_supervisor_review, facts, health, price, ticker, use_fast)
 
     # Build verdict with 3/4 quorum from all 4 models
     verdict = _build_investment_verdict(facts, health, price, supervisor)
@@ -911,4 +1077,8 @@ def predict_12month(fundamentals: dict, indicators: dict = None, df=None, fast_m
         "supervisor": supervisor,
         "verdict": verdict,
     }
+
+    # Cache only a clean verdict — don't pin a fan-out where a base model errored.
+    if not any(m.get("error") for m in (facts, health, price)):
+        _cache_put(cache_key, result, TWELVE_MONTH_CACHE_TTL)
     return result

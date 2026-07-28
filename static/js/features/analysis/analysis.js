@@ -113,18 +113,23 @@ function renderAnalysis(data) {
     }
 
     // Right panel
+    renderMarketGauge(data.market_condition);
     renderRecommendation(data.recommendation);
+    renderShortVsBull(data.short_vs_bull);
+    renderMoneyFlow(data.money_flow);
     renderBreakoutStatus(data.breakout_status);
     renderPatternInfo(data.pattern);
     renderTrendlineTests(data.trendline_tests || []);
     renderCandlePatterns(data.candle_patterns || []);
     renderTradePlan(data.trade_plan);
     renderIndicators(data.indicators);
+    renderNewsAgentPanel(data.news_agent || []);
     renderFinancials(data.fundamentals);
     // Liquidity tile + recent news (24h, multi-source: yfinance / GDELT / Reddit)
     loadLiquidity(data.ticker);
     loadNews(data.ticker);
     resetAIValidation();
+    resetBacktest();
     resetPrediction();
     resetEarnings();
 
@@ -588,6 +593,46 @@ function drawPatternOverlay(data) {
 
 // ─── Right Panel Renderers ───────────────────────────────────
 
+function renderMarketGauge(mc) {
+    const panel = document.getElementById('right-panel');
+    if (!panel) return;
+    let box = document.getElementById('market-gauge-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'market-gauge-box';
+        box.className = 'panel-section';
+        panel.insertBefore(box, panel.firstChild);  // sits above Recommendation
+    }
+    if (!mc || !mc.available) { box.innerHTML = ''; return; }
+    const c = mc.components || {};
+    const chip = (label, val, ok) =>
+        `<span class="mg-chip ${ok === true ? 'mg-pos' : ok === false ? 'mg-neg' : ''}">${label}: ${val}</span>`;
+    const chips = [];
+    if (c.spy && !c.spy.error) chips.push(chip('SPY', (c.spy.change_5d >= 0 ? '+' : '') + c.spy.change_5d + '%', c.spy.change_5d >= 0));
+    if (c.nasdaq && !c.nasdaq.error) chips.push(chip('QQQ', (c.nasdaq.change_5d >= 0 ? '+' : '') + c.nasdaq.change_5d + '%', c.nasdaq.change_5d >= 0));
+    if (c.vix && !c.vix.error) chips.push(chip('VIX', c.vix.value, c.vix.value < 23));
+    if (c.fear_greed && !c.fear_greed.error) chips.push(chip('F&G', c.fear_greed.score + ' ' + (c.fear_greed.rating || ''), c.fear_greed.score >= 45));
+    const volFlags = [];
+    if (c.spy && c.spy.vol_direction && c.spy.vol_direction !== 'NORMAL') volFlags.push('SPY ' + c.spy.vol_direction);
+    if (c.nasdaq && c.nasdaq.vol_direction && c.nasdaq.vol_direction !== 'NORMAL') volFlags.push('QQQ ' + c.nasdaq.vol_direction);
+    const sign = mc.score > 0 ? '+' : '';
+    box.innerHTML = `
+        <div class="panel-section-title">Market Gauge</div>
+        <div class="mg-card" style="border-left:4px solid ${mc.color}">
+            <div class="mg-top">
+                <span class="mg-stance" style="color:${mc.color}">${mc.stance}</span>
+                <span class="mg-label">${mc.label}</span>
+            </div>
+            <div class="mg-score">Market risk score ${sign}${mc.score} / 100</div>
+            <details class="info-more">
+                <summary>Components${volFlags.length ? ' · ⚡ volume surge' : ''}</summary>
+                <div class="mg-chips">${chips.join('')}</div>
+                ${volFlags.length ? `<div class="mg-vol">⚡ ${volFlags.join(' · ')}</div>` : ''}
+                <div class="mg-note">Verdict below is risk-adjusted for this backdrop.</div>
+            </details>
+        </div>`;
+}
+
 function renderRecommendation(rec) {
     const panel = document.getElementById('right-panel');
     if (!panel) return;
@@ -610,9 +655,227 @@ function renderRecommendation(rec) {
             </div>
             <div class="reco-summary">${rec.summary || ''}</div>
             <div class="reco-meter"><i style="width:${Math.min(100, Math.abs(rec.score || 0))}%"></i></div>
-            <div class="reco-score">Technical signal ${sign}${rec.score || 0} / 100</div>
-            ${reasons ? `<ul class="reco-reasons">${reasons}</ul>` : ''}
-            <div class="reco-disclaimer">Rule-based technical read — not financial advice.</div>
+            <details class="info-more">
+                <summary>Why this call${rec.reasons && rec.reasons.length ? ' · ' + rec.reasons.length + ' factors' : ''}</summary>
+                <div class="reco-score">Technical signal ${sign}${rec.score || 0} / 100</div>
+                ${reasons ? `<ul class="reco-reasons">${reasons}</ul>` : ''}
+                <div class="reco-disclaimer">Rule-based technical read — not financial advice.</div>
+            </details>
+        </div>`;
+}
+
+// Money-in/out read: equity flow (CMF/MFI) fused with options premium flow.
+function renderShortVsBull(sb) {
+    const section = document.getElementById('section-shortbull');
+    const box = document.getElementById('short-bull-box');
+    if (!section || !box) return;
+    if (!sb || !sb.available) { section.style.display = 'none'; box.innerHTML = ''; return; }
+    section.style.display = '';
+
+    const GREEN = '#26a69a', RED = '#ef5350', MUTED = '#787b86';
+    const abbr = (n) => {
+        if (n == null || isNaN(n)) return '—';
+        const a = Math.abs(n);
+        if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return String(Math.round(n));
+    };
+    const fmtDate = (sec) => {
+        if (!sec) return null;
+        const d = new Date(sec * 1000);
+        if (isNaN(d.getTime())) return null;
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    };
+
+    const BULL_G = 'linear-gradient(90deg,#149b82,#28e0b0)';
+    const SHORT_G = 'linear-gradient(90deg,#ff7043,#ff5252)';
+
+    const bull = sb.bull || {};
+    const short = sb.short;
+
+    // ── Bull meter label + fill ──
+    let bullLabel;
+    if (bull.source === 'options') {
+        const cp = (bull.call_value != null) ? '$' + abbr(bull.call_value) : '—';
+        const pc = (bull.pc_ratio != null) ? ' · P/C ' + bull.pc_ratio : '';
+        bullLabel = `Call premium ${cp}${pc}`;
+    } else {
+        const cmf = (bull.cmf != null) ? bull.cmf : '—';
+        bullLabel = `Equity money-flow · CMF ${cmf}`;
+    }
+    const bullFill = (bull.fill != null) ? bull.fill : 50;
+    const shortFill = (short && short.fill != null) ? short.fill : (short ? 0 : null);
+
+    // ── Tug-of-war: who controls the tape right now ──
+    let tugBull;
+    if (shortFill != null && (bullFill + shortFill) > 0) tugBull = bullFill / (bullFill + shortFill) * 100;
+    else tugBull = bullFill;
+    tugBull = Math.max(4, Math.min(96, Math.round(tugBull)));
+    const tugShort = 100 - tugBull;
+    let verdict, vColor;
+    if (tugBull >= 58) { verdict = 'Bulls in control'; vColor = GREEN; }
+    else if (tugBull <= 42) { verdict = 'Shorts pressing'; vColor = RED; }
+    else { verdict = 'Contested'; vColor = '#ff9800'; }
+
+    const tug = `
+        <div class="sb-verdict-row">
+            <span class="sb-verdict" style="background:${vColor}22;color:${vColor};border:1px solid ${vColor}55;">${verdict}</span>
+            <span class="sb-tug-nums"><b style="color:${GREEN};">${tugBull}</b> · <b style="color:${RED};">${tugShort}</b></span>
+        </div>
+        <div class="sb-tug" role="img" aria-label="Bull ${tugBull} versus short ${tugShort}">
+            <div class="sb-tug-bull" style="width:${tugBull}%;"></div>
+            <div class="sb-tug-short" style="width:${tugShort}%;"></div>
+            <div class="sb-tug-knob" style="left:${tugBull}%;"></div>
+        </div>`;
+
+    // ── Bull + Short meters (gradient + glow) ──
+    const bullMeter = `
+        <div class="sb-row">
+            <div class="sb-head"><span class="sb-name" style="color:${GREEN};">▲ Bull</span>
+                <span class="sb-detail">${bullLabel}</span></div>
+            <div class="sb-meter"><i class="sb-glow-g" style="width:${Math.max(3, bullFill)}%;background:${BULL_G};"></i></div>
+        </div>`;
+    let shortRow;
+    if (short) {
+        const pf = (short.percent_float != null) ? short.percent_float + '% of float' : 'float n/a';
+        const dtc = (short.days_to_cover != null) ? ' · ' + short.days_to_cover + 'd to cover' : '';
+        shortRow = `
+            <div class="sb-row">
+                <div class="sb-head"><span class="sb-name" style="color:${RED};">▼ Short</span>
+                    <span class="sb-detail">${pf}${dtc}</span></div>
+                <div class="sb-meter"><i class="sb-glow-r" style="width:${Math.max(3, shortFill)}%;background:${SHORT_G};"></i></div>
+            </div>`;
+    } else {
+        shortRow = `<div class="sb-row"><div class="sb-head"><span class="sb-name" style="color:${RED};">▼ Short</span>
+            <span class="sb-detail" style="color:${MUTED};">no short-interest reported</span></div></div>`;
+    }
+
+    // ── Short-interest trend (reported, bi-monthly) ──
+    let trendRow = '';
+    if (short && short.change_pct != null) {
+        const up = short.change_pct > 0;
+        const arrow = short.trend === 'rising' ? '▲' : short.trend === 'falling' ? '▼' : '▬';
+        const col = short.trend === 'rising' ? RED : short.trend === 'falling' ? GREEN : MUTED;
+        const from = (short.percent_float_prior != null) ? short.percent_float_prior + '%' : abbr(short.shares_short_prior) + ' sh';
+        const to = (short.percent_float != null) ? short.percent_float + '%' : abbr(short.shares_short) + ' sh';
+        const dPrior = fmtDate(short.prior_date), dNow = fmtDate(short.reported_date);
+        const dates = (dPrior && dNow) ? ` <span class="sb-detail">(${dPrior} → ${dNow})</span>` : '';
+        trendRow = `<div class="sb-trend">Short interest ${from} → <b>${to}</b>
+            <span style="color:${col};">${arrow} ${up ? '+' : ''}${short.change_pct}% vs prior report</span>${dates}</div>`;
+    }
+
+    // ── 14-day daily buying/selling pressure sparkline (gradient area + glow) ──
+    let spark = '';
+    const series = sb.series_14d || [];
+    if (series.length >= 2) {
+        const n = series.length, W = 100, H = 40;
+        const pts = series.map((d, i) => [
+            (i / (n - 1)) * W,
+            H - (Math.max(0, Math.min(100, d.bull)) / 100) * H,
+        ]);
+        const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(2)}`).join(' L ');
+        const area = `M 0,${H} L ${line} L ${W},${H} Z`;
+        const poly = pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(2)).join(' ');
+        const lastBull = series[series.length - 1].bull;
+        const lastCol = lastBull >= 50 ? GREEN : RED;
+        spark = `
+            <div class="sb-spark-title">14-day buying vs selling pressure
+                <span class="sb-chip" style="background:${lastCol}22;color:${lastCol};">now ${lastBull}% bull</span></div>
+            <svg class="sb-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+                 aria-label="14-day daily buying versus selling pressure">
+                <defs>
+                    <linearGradient id="sbGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="${GREEN}" stop-opacity="0.45"/>
+                        <stop offset="100%" stop-color="${GREEN}" stop-opacity="0.02"/>
+                    </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="${W}" height="${H}" fill="${RED}" opacity="0.07"/>
+                <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" stroke="${MUTED}"
+                    stroke-width="0.5" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"/>
+                <path d="${area}" fill="url(#sbGrad)"/>
+                <polyline points="${poly}" class="sb-spark-line" fill="none" stroke="${GREEN}"
+                    stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+            </svg>
+            <div class="sb-spark-axis"><span>◄ selling</span><span>buying ►</span></div>`;
+    }
+
+    const srcNote = bull.source === 'options'
+        ? 'Bull = premium-weighted options flow. Short = exchange-reported short interest (bi-monthly).'
+        : 'Bull = equity money-flow (no options data). Short = exchange-reported short interest (bi-monthly).';
+
+    box.innerHTML = `
+        <div class="sb-card">
+            ${tug}
+            ${bullMeter}
+            ${shortRow}
+            ${trendRow}
+            ${spark}
+            <div class="sb-note">${srcNote} Not financial advice.</div>
+        </div>`;
+}
+
+function renderNewsAgentPanel(items) {
+    const section = document.getElementById('section-news-agent');
+    const box = document.getElementById('news-agent-box');
+    if (!section || !box) return;
+    if (!items || !items.length) { section.style.display = 'none'; box.innerHTML = ''; return; }
+    section.style.display = '';
+    const sentColor = (s) => s === 'bullish' ? '#26a69a' : s === 'bearish' ? '#ef5350' : '#787b86';
+    const ago = (iso) => {
+        const t = new Date(iso).getTime(); if (isNaN(t)) return '';
+        const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+        return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd';
+    };
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    box.innerHTML = items.slice(0, 8).map(it => `
+        <a class="na-item" href="${esc(it.url)}" target="_blank" rel="noopener">
+            <span class="na-dot" style="background:${sentColor(it.sentiment)}" title="${esc(it.sentiment)}"></span>
+            <span class="na-title">${esc(it.title)}</span>
+            <span class="na-meta">${it.category === 'reddit' ? '🔥 ' : ''}${esc(it.source)} · ${ago(it.published_at)}</span>
+        </a>`).join('');
+}
+
+function renderMoneyFlow(mf) {
+    const panel = document.getElementById('right-panel');
+    if (!panel) return;
+    let box = document.getElementById('money-flow-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'money-flow-box';
+        box.className = 'panel-section';
+        const after = document.getElementById('recommendation-box');
+        if (after && after.nextSibling) panel.insertBefore(box, after.nextSibling);
+        else panel.appendChild(box);
+    }
+    if (!mf || !mf.label) { box.innerHTML = ''; return; }
+    const colorFor = (sig) => ({
+        STRONG_IN: '#26a69a', IN: '#26a69a',
+        STRONG_OUT: '#ef5350', OUT: '#ef5350', TOP: '#ef5350',
+        PROFIT_TAKING: '#ff9800', DIVERGENCE: '#ff9800',
+        NEUTRAL: '#787b86',
+    }[sig] || '#787b86');
+    const c = colorFor(mf.signal);
+    const eq = mf.equity || {};
+    const opt = mf.options;
+    const optHtml = opt
+        ? `<div class="mf-row"><span>Options</span><b style="color:${(opt.sentiment === 'BULLISH') ? '#26a69a' : (opt.sentiment === 'BEARISH') ? '#ef5350' : '#787b86'}">${opt.sentiment || '—'}</b></div>
+           <div class="mf-row"><span>Net premium</span><b>${opt.net_premium != null ? '$' + Number(opt.net_premium).toLocaleString() : '—'}</b></div>
+           <div class="mf-row"><span>Put/Call</span><b>${opt.pc_ratio != null ? opt.pc_ratio : '—'}</b></div>`
+        : `<div class="mf-row" style="color:#787b86;"><span>Options</span><b>no data</b></div>`;
+    box.innerHTML = `
+        <div class="panel-section-title">Money Flow</div>
+        <div class="reco-card" style="border-left:3px solid ${c};">
+            <div class="reco-top">
+                <span class="reco-action" style="color:${c};">${mf.label}</span>
+            </div>
+            <div class="reco-summary">${mf.note || ''}</div>
+            <div class="mf-grid" style="margin-top:8px; font-size:12px;">
+                <div class="mf-row"><span>Equity (CMF / MFI)</span><b>${eq.cmf != null ? eq.cmf : '—'} / ${eq.mfi != null ? Math.round(eq.mfi) : '—'}</b></div>
+                ${optHtml}
+            </div>
+            <div class="reco-disclaimer">Accumulation/distribution read — not financial advice.</div>
         </div>`;
 }
 
@@ -1483,6 +1746,28 @@ function renderAIValidation(data, container) {
     `;
     container.appendChild(banner);
 
+    // ── Measured-accuracy gate ──
+    // How often has THIS confidence bucket been right on ~2-week direction?
+    const acc = v.accuracy;
+    if (acc) {
+        const gate = document.createElement('div');
+        gate.className = 'ai-accuracy-gate';
+        if (acc.measured === false) {
+            gate.innerHTML = `<div class="ai-acc-note">Accuracy not yet measured — an admin can run the calibration to enable the confidence gate.</div>`;
+        } else if (!acc.directional) {
+            gate.innerHTML = `<div class="ai-acc-note">No directional call (WAIT / NEUTRAL) — nothing to grade.</div>`;
+        } else if (acc.hit_rate == null || acc.n < 20) {
+            gate.innerHTML = `<div class="ai-acc-note ai-acc-weak">Not enough historical samples in this confidence range to trust it${acc.n ? ` (only ${acc.n})` : ''}. Treat as no clear edge.</div>`;
+        } else if (acc.actionable) {
+            gate.innerHTML = `<div class="ai-acc-badge ai-acc-good">✓ Actionable</div>
+                <div class="ai-acc-detail">This confidence bucket has been <b>${acc.hit_rate}%</b> correct on ${acc.horizon}-day direction (n=${acc.n}).</div>`;
+        } else {
+            gate.innerHTML = `<div class="ai-acc-badge ai-acc-bad">⚠ Low confidence — no clear edge</div>
+                <div class="ai-acc-detail">This bucket has only been <b>${acc.hit_rate}%</b> correct historically (n=${acc.n}), below the ${acc.target}% bar. Don't trade this call on its own.</div>`;
+        }
+        container.appendChild(gate);
+    }
+
     // Risk Flags Banner
     if (v.risk_flags && v.risk_flags.length > 0) {
         const flagsBanner = document.createElement('div');
@@ -1544,7 +1829,7 @@ function buildResearchSection(r) {
             <span class="ai-model-title">Research & Fundamentals</span>
             <span class="ai-model-badge ai-tag ${verdictClass}">${r.verdict} ${r.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${r.summary || ''}</div>
             ${r.sector_analysis ? `<div class="indicator-row"><span class="indicator-label">Sector</span><span class="indicator-value" style="font-size:11px;">${r.sector_analysis}</span></div>` : ''}
             ${r.earnings_risk ? `<div class="indicator-row"><span class="indicator-label">Earnings Risk</span><span class="indicator-value" style="font-size:11px;">${r.earnings_risk}</span></div>` : ''}
@@ -1574,7 +1859,7 @@ function buildPatternSection(p) {
             <span class="ai-model-title">Pattern Validation</span>
             <span class="ai-model-badge ai-tag ${validClass}">${validText} ${p.pattern_confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${p.summary || ''}</div>
             <div class="indicator-row"><span class="indicator-label">AI Detected</span><span class="indicator-value" style="font-size:11px;">${p.detected_pattern || 'N/A'}</span></div>
             <div class="indicator-row"><span class="indicator-label">Agrees with Algo</span><span class="indicator-value" style="font-size:11px; color:${p.algo_agreement ? '#26a69a' : '#ef5350'};">${p.algo_agreement ? 'Yes' : 'No'}</span></div>
@@ -1619,7 +1904,7 @@ function buildPredictionSection(pr) {
             <span class="ai-model-title">Prediction & Risk</span>
             <span class="ai-model-badge ai-tag ${verdictClass}">${pr.trade_verdict} ${pr.overall_probability}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${pr.summary || ''}</div>
 
             ${targets.conservative ? `
@@ -1671,6 +1956,152 @@ function buildPredictionSection(pr) {
 }
 
 // ─── 12-Month Investment Prediction ──────────────────────────
+
+// ─── Strategy Backtest (top strategies on the analyzed ticker) ───────────
+// Runs on click and renders into a centered modal for readability.
+let _backtestPoll = null;
+
+function _stopBacktestPoll() {
+    if (_backtestPoll) { clearInterval(_backtestPoll); _backtestPoll = null; }
+}
+
+function resetBacktest() {
+    const btn = document.getElementById('btn-backtest');
+    if (!btn) return;
+    _stopBacktestPoll();
+    closeBacktestModal();
+    if (currentAnalysis) {
+        btn.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = `Backtest Top Strategies on ${currentAnalysis.ticker}`;
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+function openBacktestModal() {
+    const ov = document.getElementById('bt-overlay');
+    if (ov) ov.classList.add('open');
+}
+
+function closeBacktestModal() {
+    const ov = document.getElementById('bt-overlay');
+    if (ov) ov.classList.remove('open');
+    _stopBacktestPoll();
+    const btn = document.getElementById('btn-backtest');
+    if (btn && currentAnalysis) {
+        btn.disabled = false;
+        btn.textContent = `Backtest Top Strategies on ${currentAnalysis.ticker}`;
+    }
+}
+
+async function runTickerBacktest() {
+    if (!currentAnalysis) return;
+    const ticker = currentAnalysis.ticker;
+    const btn = document.getElementById('btn-backtest');
+    const body = document.getElementById('bt-modal-body');
+    const sub = document.getElementById('bt-modal-sub');
+    if (btn) { btn.disabled = true; btn.textContent = 'Backtesting…'; }
+    if (sub) sub.textContent = `${ticker} · top 5 strategies`;
+
+    openBacktestModal();
+    if (body) {
+        body.innerHTML = `<div class="bt-loading">
+            <div class="spinner"></div>
+            <div class="bt-loading-msg" style="color:var(--text-secondary);font-size:13px;">Running 5 strategies over ~3 years of ${ticker}…</div>
+            <div style="color:var(--text-secondary);font-size:11px;margin-top:4px;">Net of trading costs · 1-bar-lag entries</div>
+        </div>`;
+    }
+
+    try {
+        const resp = await fetch('/api/backtest/ticker', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.run_id) throw new Error(data.error || 'backtest failed to start');
+        pollTickerBacktest(data.run_id);
+    } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = `Backtest Top Strategies on ${ticker}`; }
+        if (body) body.innerHTML = `<div class="bt-results" style="color:#ef5350;font-size:13px;">Backtest failed: ${e.message}</div>`;
+    }
+}
+
+function pollTickerBacktest(runId) {
+    _stopBacktestPoll();
+    _backtestPoll = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/backtest/ticker/${runId}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'status error');
+            const msg = document.querySelector('#bt-modal-body .bt-loading-msg');
+            if (msg && data.total) msg.textContent = `Backtested ${data.progress}/${data.total} strategies…`;
+            if (data.status === 'completed' || data.status === 'failed') {
+                _stopBacktestPoll();
+                renderTickerBacktest(data);
+            }
+        } catch (e) {
+            _stopBacktestPoll();
+        }
+    }, 1500);
+}
+
+function renderTickerBacktest(data) {
+    const body = document.getElementById('bt-modal-body');
+    const sub = document.getElementById('bt-modal-sub');
+    const btn = document.getElementById('btn-backtest');
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = `Re-run Backtest on ${data.ticker}`;
+    }
+    if (!body) return;
+    if (sub) sub.textContent =
+        `${data.ticker} · ${(data.params && data.params.start_date) || ''} → ${(data.params && data.params.end_date) || ''} · net of costs`;
+
+    const results = data.results || [];
+    const fmtPct = (v) => (v == null || isNaN(v)) ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+    const col = (v) => v == null ? '#787b86' : v > 0 ? '#26a69a' : v < 0 ? '#ef5350' : '#787b86';
+
+    // Rank: enough trades + best return first
+    const rank = (r) => (r.error ? -1e9 : (r.trades >= 3 ? 1 : 0) * 1000 + (r.total_return_pct || 0));
+    const sorted = [...results].sort((a, b) => rank(b) - rank(a));
+    const best = sorted.find(r => !r.error && (r.trades || 0) >= 3 && (r.total_return_pct || 0) > 0 && (r.profit_factor || 0) >= 1.2);
+
+    const rows = sorted.map(r => {
+        if (r.error) {
+            return `<tr><td class="bt-strat">${r.label}</td><td colspan="5" style="color:#ef5350;">error</td></tr>`;
+        }
+        const thin = (r.trades || 0) < 3;
+        const good = !thin && (r.total_return_pct || 0) > 0 && (r.profit_factor || 0) >= 1.2;
+        const badge = r.trades === 0 ? '<span class="bt-tag bt-none">no setups</span>'
+            : thin ? '<span class="bt-tag bt-thin">thin</span>'
+            : good ? '<span class="bt-tag bt-good">edge</span>'
+            : '<span class="bt-tag bt-meh">weak</span>';
+        return `<tr title="${r.desc || ''}">
+            <td class="bt-strat">${r.label} ${badge}<div class="bt-strat-desc">${r.desc || ''}</div></td>
+            <td>${r.trades ?? '—'}</td>
+            <td>${r.win_rate != null ? r.win_rate.toFixed(0) + '%' : '—'}</td>
+            <td style="color:${col(r.total_return_pct)};font-weight:700;">${fmtPct(r.total_return_pct)}</td>
+            <td style="color:${col(r.expectancy_pct)};">${fmtPct(r.expectancy_pct)}</td>
+            <td>${r.profit_factor != null ? r.profit_factor.toFixed(2) : '—'}</td>
+        </tr>`;
+    }).join('');
+
+    const headline = best
+        ? `<div class="bt-headline bt-headline-good">Best on ${data.ticker}: <b>${best.label}</b> — ${fmtPct(best.total_return_pct)}, ${best.win_rate.toFixed(0)}% win, PF ${best.profit_factor.toFixed(2)}</div>`
+        : `<div class="bt-headline bt-headline-none">No strategy showed a reliable edge on ${data.ticker} over this window.</div>`;
+
+    body.innerHTML = `
+        ${headline}
+        <div class="bt-table-wrap">
+        <table class="bt-table">
+            <thead><tr><th>Strategy</th><th>Trades</th><th>Win</th><th>Return</th><th>Exp/trade</th><th>PF</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>
+        <div class="bt-note">Per-strategy backtest on this one ticker (single position, 1-bar-lag entries, friction applied).
+        "Return" is the strategy's compounded P&amp;L over the window; <b>PF</b> = profit factor (gross win ÷ gross loss).
+        Few trades ⇒ not statistically meaningful. Past performance is not predictive. Not financial advice.</div>`;
+}
 
 function resetPrediction() {
     const box = document.getElementById('prediction-box');
@@ -1896,7 +2327,7 @@ function buildFactGathererSection(fg) {
             <span class="ai-model-title">Fact Gatherer</span>
             <span class="ai-model-badge ai-tag ${vClass}">${fg.verdict} ${fg.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${fg.fact_summary || ''}</div>
             ${fg.competitive_position ? `<div class="indicator-row"><span class="indicator-label">Competitive Position</span><span class="indicator-value" style="font-size:11px;">${fg.competitive_position}</span></div>` : ''}
             ${fg.bull_case ? `<div style="margin-top:8px; padding:6px 8px; background:rgba(38,166,154,0.1); border-radius:4px; font-size:11px;"><b style="color:#26a69a;">Bull:</b> ${fg.bull_case}</div>` : ''}
@@ -1925,7 +2356,7 @@ function buildCompanyHealthSection(h) {
             <span class="ai-model-title">Company Health</span>
             <span class="ai-model-badge ai-tag ${vClass}">${h.verdict} ${h.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${h.summary || ''}</div>
             ${h.financial_grade ? `<div class="indicator-row"><span class="indicator-label">Financial Grade</span><span class="indicator-value" style="font-size:11px;">${h.financial_grade}</span></div>` : ''}
             ${h.survival_probability ? `<div class="indicator-row"><span class="indicator-label">Survival (12mo)</span><span class="indicator-value" style="font-size:11px; color:${h.survival_probability >= 80 ? '#26a69a' : h.survival_probability >= 60 ? '#ff9800' : '#ef5350'};">${h.survival_probability}%</span></div>` : ''}
@@ -1960,7 +2391,7 @@ function buildPriceActionSection(pa) {
             <span class="ai-model-title">Price Action & Valuation</span>
             <span class="ai-model-badge ai-tag ${vClass}">${pa.verdict} ${pa.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${pa.summary || ''}</div>
             ${pa.trend_assessment ? `<div class="indicator-row"><span class="indicator-label">Trend</span><span class="indicator-value" style="font-size:11px;">${pa.trend_assessment}</span></div>` : ''}
             ${pa.momentum_signal ? `<div class="indicator-row"><span class="indicator-label">Momentum</span><span class="indicator-value" style="font-size:11px;">${pa.momentum_signal}</span></div>` : ''}
@@ -2000,7 +2431,7 @@ function buildSupervisorSection(sup) {
             <span class="ai-model-title">Supervisor Review</span>
             <span class="ai-model-badge ai-tag ${vClass}">${sup.verdict} ${sup.confidence}%</span>
         </div>
-        <div class="ai-model-body">
+        <div class="ai-model-body collapsed">
             <div style="margin-bottom:8px;">${sup.reasoning || sup.summary || ''}</div>
             <div class="indicator-row"><span class="indicator-label">Agrees w/ Health</span><span class="indicator-value" style="font-size:11px; color:${sup.agrees_with_health ? '#26a69a' : '#ef5350'};">${sup.agrees_with_health ? 'Yes' : 'No'}</span></div>
             <div class="indicator-row"><span class="indicator-label">Agrees w/ Price Action</span><span class="indicator-value" style="font-size:11px; color:${sup.agrees_with_price_action ? '#26a69a' : '#ef5350'};">${sup.agrees_with_price_action ? 'Yes' : 'No'}</span></div>
@@ -2188,6 +2619,19 @@ async function fetchEarningsResult(jobId) {
 
 function renderEarningsResult(result, jobId, container) {
     const earnings = result.earnings || {};
+    // Guard: if the LLM call failed (out of credits / provider error) the report
+    // comes back empty or as an {error}/{raw_response} payload — show WHY instead
+    // of a blank card so the user isn't left guessing.
+    const llmErr = result.llm_earnings_error || earnings.error;
+    const looksEmpty = !earnings.summary && !earnings.executive_snapshot && !earnings.header && !earnings.overall_score;
+    if (llmErr || looksEmpty) {
+        const raw = (earnings.raw_response || '').slice(0, 300);
+        showEarningsError(
+            'The AI could not generate this report — usually the OpenRouter LLM is out of credits (402) or the provider errored. '
+            + 'Enable the Ollama Cloud fallback in the admin panel, or top up credits.'
+            + (llmErr ? ` (${String(llmErr).slice(0, 160)})` : raw ? ` (${raw})` : ''));
+        return;
+    }
     const ratios = result.computed_ratios || {};
     const header = earnings.header || {};
     const charts = result._charts || [];

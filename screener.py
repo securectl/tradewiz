@@ -28,6 +28,12 @@ from ai_validator import (
     is_configured, _call_openrouter, _parse_json_response,
     LLM_SCREENER, LLM_SUPERVISOR,
 )
+import os as _os
+# Screener verdicts are memoized per (category, ticker, day). 6h default caps
+# intraday staleness while letting repeat scans of the same category reuse the
+# vetting. Key embeds the date so it naturally rolls at midnight.
+VET_CACHE_TTL = int(_os.getenv("VET_CACHE_TTL", "21600"))  # 6 hours
+
 from shared.prompts.screener import (
     LOWCAP_SYSTEM, LOWCAP_USER_TEMPLATE,
     MIDCAP_SYSTEM, MIDCAP_USER_TEMPLATE,
@@ -214,6 +220,27 @@ AI_TICKERS = [
     "CRWD", "ZS", "S",
 ]
 
+# High-beta, heavily-watched retail names (AI datacenters, quantum, crypto
+# miners, next-gen semis, space) that get oversold often — added so the daily
+# oversold scan can actually surface them. These were previously absent from
+# the universe (e.g. APLD, IREN), so they could never appear.
+OVERSOLD_WATCH_TICKERS = [
+    # AI datacenters / neoclouds
+    "APLD", "IREN", "NBIS", "CORZ", "CIFR", "WULF", "BTDR",
+    # Crypto miners
+    "MARA", "RIOT", "HUT", "BITF", "CLSK", "HIVE",
+    # Quantum
+    "QBTS", "IONQ", "RGTI", "QUBT", "ARQQ",
+    # Next-gen / power semis
+    "WOLF", "NVTS", "CRDO", "AMBA", "INDI", "SITM",
+    # Nuclear / clean power
+    "OKLO", "SMR", "NNE", "VST",
+    # Space / launch
+    "RKLB", "ASTS", "LUNR", "RDW", "SPCE",
+    # Biotech / other retail favorites
+    "RXRX", "TEM", "CRSP", "HIMS", "AFRM", "SOFI", "CHPT", "PLUG", "RUN",
+]
+
 # ─── Extended Universe for Top Gainers / Top Losers ──────────
 
 # S&P 500 tickers (representative sample ~200)
@@ -289,7 +316,7 @@ def _get_full_universe() -> list:
     Excludes crypto tickers (ending in -USD)."""
     all_tickers = (
         LOWCAP_TICKERS + MIDCAP_TICKERS + LARGECAP_TICKERS + ETF_TICKERS +
-        METALS_MINING_TICKERS + AI_TICKERS + SP500_TICKERS +
+        METALS_MINING_TICKERS + AI_TICKERS + OVERSOLD_WATCH_TICKERS + SP500_TICKERS +
         RUSSELL2000_TOP + NASDAQ100_EXTRA
     )
     seen = set()
@@ -357,6 +384,65 @@ def _apply_alpaca_money_flow(candidates):
     except Exception as e:
         import logging
         logging.getLogger(__name__).debug(f"alpaca money-flow pass skipped: {e}")
+
+
+_options_cache = {}        # ticker -> (sentiment_dict|None, ts)
+_OPTIONS_TTL = 900         # 15 min
+
+
+def _options_sentiment(ticker):
+    """Cached premium-weighted options read for one ticker (sentiment, net
+    premium, P/C). None when unavailable. Caches misses too, so a throttled or
+    non-optionable name isn't retried every scan."""
+    import time
+    now = time.time()
+    c = _options_cache.get(ticker)
+    if c:
+        res_cached, ts = c
+        # Cache hits for the full TTL; cache misses only briefly so a transient
+        # Yahoo throttle during a scan recovers on the next scan instead of
+        # blanking options for 15 min.
+        ttl = _OPTIONS_TTL if res_cached else 120
+        if now - ts < ttl:
+            return res_cached
+    res = None
+    try:
+        from features.watchdog.options_flow import _fetch_options_flow
+        of = _fetch_options_flow(ticker)
+        if of and of.get("sentiment"):
+            res = {"sentiment": of.get("sentiment"), "net_premium": of.get("net_premium"),
+                   "pc_ratio": of.get("pc_ratio")}
+    except Exception:
+        res = None
+    _options_cache[ticker] = (res, now)
+    return res
+
+
+def _apply_options_overlay(rows, cap=20):
+    """Fuse options sentiment into the money-flow signal for the displayed rows
+    (options flow is a key money-in/out tell). Bounded by `cap` + cached to
+    limit options-chain pulls; skips crypto; degrades to equity flow on failure.
+    Upgrades mf_signal to the combined read (STRONG_IN/STRONG_OUT/TOP/DIVERGENCE)
+    and records options_sentiment/net_premium for display."""
+    try:
+        from analysis_engine import _combine_flow
+    except Exception:
+        return
+    attempts = 0
+    for r in rows:
+        if attempts >= cap:
+            break
+        tk = r.get("ticker") or ""
+        if not tk or tk.upper().endswith("-USD"):
+            continue
+        attempts += 1
+        opt = _options_sentiment(tk)
+        if not opt:
+            continue
+        sig, label, _note = _combine_flow(r.get("mf_signal"), opt)
+        r["mf_signal"], r["mf_label"] = sig, label
+        r["options_sentiment"] = opt.get("sentiment")
+        r["net_premium"] = opt.get("net_premium")
 
 
 def _mf_prompt_line(candidate):
@@ -1453,7 +1539,15 @@ def _parallel_vet(candidates: list, vet_fn, batch_size: int = 5) -> list:
     def _run_with_context(c):
         if _ctx_uid:
             set_llm_user(_ctx_uid, _ctx_src)
-        result = vet_fn(c)
+        # Memoize the LLM verdict per (category, ticker, day): re-running the
+        # same screener category the same day reuses the verdict instead of
+        # re-vetting every candidate. Money-flow fields are re-merged below, so
+        # only the (slow, token-heavy) LLM verdict is cached.
+        from datetime import date as _date
+        from shared.llm_cache import cached_call
+        _tkr = (c.get("ticker") if isinstance(c, dict) else None) or "?"
+        _key = f"vet:{getattr(vet_fn, '__name__', 'vet')}:{_tkr}:{_date.today().isoformat()}"
+        result = cached_call(_key, VET_CACHE_TTL, lambda: vet_fn(c))
         # vet_fn returns only the LLM verdict; carry the money-flow fields
         # computed during scanning through to the vetted result (for storage +
         # frontend) for every category.
@@ -1758,6 +1852,8 @@ def _run_oversold_pipeline(limit: int = 20, sectors: list = None) -> dict:
     # Money flow from Alpaca (cached) — oversold_daily doesn't persist it, so
     # attach on read; feeds both this response and the screener_results store.
     _apply_alpaca_money_flow(all_results)
+    # Fuse options sentiment into the Flow signal for the displayed names.
+    _apply_options_overlay(all_results)
 
     # Ensure in screener_results for past scans UI
     _store_screener_results("oversold", all_results)
@@ -2019,6 +2115,10 @@ def run_screener(min_price: float = 2.0, max_price: float = 15.0,
             result["avoided"] += supervisor_vetoed
         except Exception:
             pass  # Graceful degradation
+
+    # Options-flow overlay on the displayed rows — fuse options sentiment into
+    # the Flow signal (bounded + cached). Equities only; crypto keeps equity flow.
+    _apply_options_overlay(result["opportunities"] + result["risky"])
 
     # ── Store results for history tracking (shared across all users) ──
     all_vetted = result["opportunities"] + result["risky"]

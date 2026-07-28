@@ -17,6 +17,17 @@ from db import execute
 bp = Blueprint("analysis", __name__)
 
 
+@bp.route("/api/market/gauge")
+@login_required
+def api_market_gauge():
+    """Market-condition risk gauge — BUY/HOLD/SELL from SPY, Nasdaq (QQQ),
+    VIX, and Fear & Greed. Helps users gauge broad-market risk before trading.
+    ?refresh=1 bypasses the 15-minute cache."""
+    from shared.market_gauge import get_market_gauge
+    force = request.args.get("refresh") in ("1", "true", "yes")
+    return jsonify(get_market_gauge(force_refresh=force))
+
+
 @bp.route("/api/analyze/<ticker>/news")
 @login_required
 def api_news(ticker):
@@ -185,6 +196,14 @@ def api_validate():
         set_llm_user(_uid(), "validate")
         fast_mode = data.pop("fast_mode", None)
         result = validate_setup(data, fast_mode=fast_mode)
+        # Attach the measured-accuracy gate: how often has THIS confidence bucket
+        # been right on ~2-week direction, and is the call actionable?
+        try:
+            from shared.ai_validation_accuracy import annotate_verdict
+            if isinstance(result, dict) and result.get("verdict"):
+                result["verdict"]["accuracy"] = annotate_verdict(result["verdict"])
+        except Exception:
+            pass  # gate is advisory — never break the verdict
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"AI validation failed: {str(e)}"}), 500

@@ -37,6 +37,24 @@ def api_screener():
     sectors = data.get("sectors", [])
     try:
         result = run_screener(min_price, max_price, limit, category=category, sectors=sectors)
+        # News-agent integration: annotate each pick with its 48h news buzz +
+        # sentiment, and give buzzy bullish names a small ranking nudge so the
+        # stock picker factors in what the news/Reddit tape is saying.
+        try:
+            from features.news_agent.agent import ticker_signal
+            for bucket in ("opportunities", "risky"):
+                for item in (result.get(bucket) or []):
+                    sig = ticker_signal(item.get("ticker"), hours=48)
+                    item["news_mentions"] = sig["mentions"]
+                    item["news_reddit"] = sig["reddit_mentions"]
+                    item["news_sentiment"] = sig["sentiment_score"]
+                    if sig["buzz"] and sig["sentiment_score"] > 0.2 and item.get("confidence") is not None:
+                        item["confidence"] = min(99, item["confidence"] + 5)
+                        item["news_boost"] = True
+            result.setdefault("opportunities", []).sort(
+                key=lambda x: x.get("confidence", 0), reverse=True)
+        except Exception:
+            pass
         result_json = json.dumps(result, cls=NumpyEncoder, default=str)
         from flask import current_app
         return current_app.response_class(response=result_json, status=200, mimetype='application/json')
