@@ -463,6 +463,19 @@ def _run_postgres(conn):
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE")
+    # SMS alerts — phone + verification state (opt-in stored in bot_config key alert_sms)
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS phone_verifications (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            phone TEXT NOT NULL,
+            code TEXT NOT NULL,
+            attempts INTEGER DEFAULT 0,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
     # Relax google_id NOT NULL so email-registered users can have NULL
     try:
         cur.execute("ALTER TABLE users ALTER COLUMN google_id DROP NOT NULL")
@@ -1251,6 +1264,19 @@ def _run_sqlite(conn):
     _sqlite_add_column(conn, "users", "password_hash", "TEXT")
     _sqlite_add_column(conn, "users", "totp_secret", "TEXT")
     _sqlite_add_column(conn, "users", "is_locked", "INTEGER DEFAULT 0")
+    # SMS alerts — phone + verification state (opt-in stored in bot_config key alert_sms)
+    _sqlite_add_column(conn, "users", "phone", "TEXT")
+    _sqlite_add_column(conn, "users", "phone_verified", "INTEGER DEFAULT 0")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS phone_verifications (
+            user_id INTEGER PRIMARY KEY,
+            phone TEXT NOT NULL,
+            code TEXT NOT NULL,
+            attempts INTEGER DEFAULT 0,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # Support requests table
     conn.execute("""

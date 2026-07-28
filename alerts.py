@@ -243,21 +243,74 @@ def recipient_emails():
         return []
 
 
+def recipient_phones():
+    """Verified phone numbers of users opted into SMS alerts (bot_config alert_sms=1)."""
+    try:
+        from db import query, IS_POSTGRES
+        P = "%s" if IS_POSTGRES else "?"
+        rows = query(
+            f"SELECT DISTINCT u.phone FROM users u "
+            f"JOIN bot_config b ON b.user_id = u.id "
+            f"WHERE b.key = {P} AND b.value = {P} "
+            f"AND u.phone IS NOT NULL AND u.phone_verified = {P}",
+            ("alert_sms", "1", True if IS_POSTGRES else 1),
+        )
+        return [r["phone"] for r in rows if r.get("phone")]
+    except Exception as e:
+        log.warning("[alerts] SMS recipient lookup failed: %s", e)
+        return []
+
+
+def build_daily_digest_sms(volume_spikes, oversold, earnings, app_name="TradeWiz"):
+    """Short plaintext digest for SMS (email is the rich version). ~1-2 segments."""
+    parts = []
+    if volume_spikes:
+        top = ", ".join(s.get("ticker", "?") for s in volume_spikes[:3])
+        parts.append(f"{len(volume_spikes)} vol spikes ({top})")
+    if oversold:
+        parts.append(f"{len(oversold)} oversold")
+    if earnings:
+        parts.append(f"{len(earnings)} earnings soon")
+    if not parts:
+        return f"{app_name}: no notable signals today."
+    body = f"{app_name} daily: " + "; ".join(parts) + ". Open the app for details. Reply STOP to opt out."
+    return body[:320]
+
+
 def send_daily_alerts(recipients=None, app_name="TradeWiz"):
-    """Build the digest and email it. Returns a small status dict."""
-    from shared.mailer import send_email, is_configured
-    if not is_configured():
-        log.warning("[alerts] no email provider configured — skipping daily alerts")
+    """Build the digest and deliver it by email and (if configured) SMS.
+
+    Returns a small status dict. Email and SMS are independent channels; each is
+    skipped gracefully when its provider is unconfigured or has no recipients."""
+    from shared.mailer import send_email, is_configured as email_configured
+    try:
+        from shared.sms import send_sms, is_configured as sms_configured
+    except Exception:
+        send_sms, sms_configured = None, lambda: False
+
+    email_on = email_configured()
+    sms_on = bool(send_sms) and sms_configured()
+    if not email_on and not sms_on:
+        log.warning("[alerts] no email or SMS provider configured — skipping daily alerts")
         return {"sent": 0, "skipped": "no_provider"}
 
     data = collect_alerts()
     subject, html = build_daily_digest(data["volume_spikes"], data["oversold"],
                                        data["earnings"], app_name=app_name)
-    recips = recipients if recipients is not None else recipient_emails()
-    if not recips:
-        log.info("[alerts] digest built but no recipients configured")
-        return {"sent": 0, "skipped": "no_recipients", "signals": data}
 
-    sent = sum(1 for to in recips if send_email(to, subject, html))
-    log.info("[alerts] daily digest sent to %d/%d recipients", sent, len(recips))
-    return {"sent": sent, "recipients": len(recips), "signals": data}
+    email_sent = 0
+    if email_on:
+        recips = recipients if recipients is not None else recipient_emails()
+        email_sent = sum(1 for to in recips if send_email(to, subject, html))
+        log.info("[alerts] daily digest emailed to %d recipient(s)", email_sent)
+
+    sms_sent = 0
+    if sms_on:
+        sms_body = build_daily_digest_sms(data["volume_spikes"], data["oversold"],
+                                          data["earnings"], app_name=app_name)
+        phones = recipient_phones()
+        sms_sent = sum(1 for to in phones if send_sms(to, sms_body))
+        log.info("[alerts] daily digest SMS'd to %d recipient(s)", sms_sent)
+
+    return {"sent": email_sent + sms_sent, "email_sent": email_sent,
+            "sms_sent": sms_sent, "signals": data}
