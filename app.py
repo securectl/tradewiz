@@ -588,17 +588,79 @@ def _landing_context():
         )
     except Exception:
         pass
-    amts = {"starter": 19, "pro": 39, "trader": 79}
+    amts = {"starter": "19", "pro": "39", "trader": "79.99"}
     try:
         from app_settings import get_setting
-        for tier, default in list(amts.items()):
+        for tier in list(amts):
             v = get_setting(f"price_{tier}_amount")
-            amts[tier] = int(float(v)) if v not in (None, "") else default
+            if v not in (None, ""):
+                amts[tier] = v
     except Exception:
         pass
     return {"first_time": first_time, "recommended": "starter",
-            "starter_amount": amts["starter"], "pro_amount": amts["pro"],
-            "trader_amount": amts["trader"]}
+            "starter_amount": _fmt_amt(amts["starter"]), "pro_amount": _fmt_amt(amts["pro"]),
+            "trader_amount": _fmt_amt(amts["trader"])}
+
+
+def _fmt_amt(v):
+    """Show a price as '79.99' when it has cents, else '79'."""
+    try:
+        f = float(v)
+        return str(int(f)) if f == int(f) else ("%.2f" % f)
+    except Exception:
+        return str(v)
+
+
+_TICKER_UNIVERSE = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "INTC",
+    "BAC", "F", "PLTR", "SOFI", "COIN", "RIVN", "NIO", "UBER", "DIS", "BABA",
+    "AAL", "T", "SNAP", "MU", "QQQ", "SPY",
+]
+
+
+def _compute_ticker(limit=15):
+    """Live quotes for the day's most-traded names (ranked by dollar volume)."""
+    try:
+        import yfinance as yf
+        df = yf.download(_TICKER_UNIVERSE, period="2d", interval="1d",
+                         group_by="ticker", threads=True, progress=False, auto_adjust=False)
+        out = []
+        multi = hasattr(df.columns, "levels")
+        for t in _TICKER_UNIVERSE:
+            try:
+                sub = df[t] if multi else df
+                closes = sub["Close"].dropna()
+                vols = sub["Volume"].dropna()
+                if len(closes) < 1:
+                    continue
+                price = float(closes.iloc[-1])
+                prev = float(closes.iloc[-2]) if len(closes) >= 2 else price
+                vol = float(vols.iloc[-1]) if len(vols) >= 1 else 0.0
+                chg = ((price - prev) / prev * 100) if prev else 0.0
+                out.append({"symbol": t, "price": round(price, 2),
+                            "change_pct": round(chg, 2), "_dv": price * vol})
+            except Exception:
+                continue
+        out.sort(key=lambda x: -x["_dv"])
+        for o in out:
+            o.pop("_dv", None)
+        return out[:limit]
+    except Exception:
+        return []
+
+
+@app.route("/api/market/ticker")
+def market_ticker():
+    """Public: live 'most traded today' quotes for the landing ticker (60s cache)."""
+    import time as _t
+    now = _t.time()
+    c = getattr(market_ticker, "_cache", None)
+    if c and now - c[0] < 60:
+        return jsonify({"quotes": c[1]})
+    data = _compute_ticker()
+    if data:
+        market_ticker._cache = (now, data)
+    return jsonify({"quotes": data})
 
 
 @app.route("/")

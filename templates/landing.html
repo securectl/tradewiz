@@ -348,16 +348,25 @@
   const io = new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}})},{threshold:.16});
   document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 
-  // Ticker tape — illustrative quotes (marketing decoration, not live)
+  // Ticker tape — LIVE: the day's most-traded stocks (refreshes every 60s)
   (function(){
-    var t=document.getElementById('tickertrack'); if(!t) return;
-    var rows=[['AAPL',224.10,0.8],['MSFT',430.20,-0.3],['NVDA',126.40,1.9],['TSLA',248.50,-1.2],
-      ['AMZN',186.30,0.6],['GOOGL',178.90,0.4],['META',512.70,1.1],['SPY',561.20,0.5],
-      ['BTC',67240,2.3],['AMD',162.80,-0.7],['NFLX',678.40,0.9],['COIN',214.60,-1.5]];
-    function cell(r){var up=r[2]>=0;return '<span class="sym"><b>'+r[0]+'</b> '+r[1].toLocaleString()+
-      ' <span class="'+(up?'up':'dn')+'">'+(up?'▲':'▼')+' '+Math.abs(r[2]).toFixed(1)+'%</span></span>';}
-    var html=rows.map(cell).join('');
-    t.innerHTML=html+html;   // duplicated for a seamless -50% loop
+    var track=document.getElementById('tickertrack'), bar=document.querySelector('.ticker');
+    if(!track||!bar) return;
+    function cell(r){var up=(r.change_pct||0)>=0;
+      return '<span class="sym"><b>'+r.symbol+'</b> '+Number(r.price).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+
+        ' <span class="'+(up?'up':'dn')+'">'+(up?'▲':'▼')+' '+Math.abs(r.change_pct||0).toFixed(2)+'%</span></span>';}
+    function render(rows){
+      if(!rows||!rows.length){ bar.style.display='none'; return; }
+      bar.style.display=''; var html=rows.map(cell).join('');
+      track.innerHTML=html+html;   // duplicated for a seamless -50% loop
+    }
+    var FALLBACK=[{symbol:'SPY',price:561.2,change_pct:0.4},{symbol:'AAPL',price:224.1,change_pct:0.8},
+      {symbol:'NVDA',price:126.4,change_pct:1.9},{symbol:'MSFT',price:430.2,change_pct:-0.3},
+      {symbol:'TSLA',price:248.5,change_pct:-1.2},{symbol:'AMD',price:162.8,change_pct:-0.7}];
+    function load(){ fetch('/api/market/ticker').then(function(r){return r.json();})
+      .then(function(d){ if(d.quotes&&d.quotes.length){ render(d.quotes); } else if(!track.innerHTML){ render(FALLBACK); } })
+      .catch(function(){ if(!track.innerHTML){ render(FALLBACK); } }); }
+    load(); setInterval(load, 60000);
   })();
 
   // Live-market area chart drifting behind the hero (Aurora colours, subtle)

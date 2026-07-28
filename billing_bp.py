@@ -142,11 +142,15 @@ def billing_webhook():
 
 
 def _plan_amount(tier, default):
-    """Admin-set displayed monthly amount (app_settings) or the default."""
+    """Admin-set displayed monthly amount (app_settings) or the default.
+    Supports cents (e.g. 79.99) — returns an int when whole, else a 2dp float."""
     try:
         from app_settings import get_setting
         v = get_setting(f"price_{tier}_amount")
-        return int(float(v)) if v not in (None, "") else default
+        if v in (None, ""):
+            return default
+        f = float(v)
+        return int(f) if f == int(f) else round(f, 2)
     except Exception:
         return default
 
@@ -163,12 +167,12 @@ def admin_pricing():
         d = request.get_json(silent=True) or {}
         for tier in ("starter", "pro", "trader"):
             if f"{tier}_amount" in d and str(d[f"{tier}_amount"]).strip() != "":
-                set_setting(f"price_{tier}_amount", int(float(d[f"{tier}_amount"])))
+                set_setting(f"price_{tier}_amount", round(float(d[f"{tier}_amount"]), 2))
             if f"{tier}_price_id" in d:
                 set_setting(f"price_{tier}_stripe_id", (d[f"{tier}_price_id"] or "").strip())
         return jsonify({"ok": True})
     out = {}
-    for tier, default in (("starter", 19), ("pro", 39), ("trader", 79)):
+    for tier, default in (("starter", 19), ("pro", 39), ("trader", 79.99)):
         out[tier] = {
             "amount": _plan_amount(tier, default),
             "stripe_price_id": get_setting(f"price_{tier}_stripe_id", ""),
