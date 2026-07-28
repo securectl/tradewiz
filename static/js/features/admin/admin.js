@@ -968,7 +968,35 @@ function switchAdminTab(name) {
     if (name === 'codes') {
         if (typeof loadPromoCodes === 'function') loadPromoCodes();
         if (typeof loadPricing === 'function') loadPricing();
+        if (typeof loadPortfolioGrants === 'function') loadPortfolioGrants();
     }
+}
+
+// ─── Portfolio Advisor access grants ────────────────────────
+async function loadPortfolioGrants() {
+    const el = document.getElementById('pf-granted');
+    if (!el) return;
+    try {
+        const r = await fetch('/api/admin/portfolio-access');
+        const d = await r.json();
+        const ids = d.granted_user_ids || [];
+        el.textContent = ids.length ? ('Granted: user IDs ' + ids.join(', ')) : 'No users granted yet.';
+    } catch (e) { /* ignore */ }
+}
+
+async function pfGrant(enabled) {
+    const uid = parseInt((document.getElementById('pf-grant-uid') || {}).value || '', 10);
+    const msg = document.getElementById('pf-grant-msg');
+    if (!uid) { if (msg) { msg.style.color = 'var(--accent-red)'; msg.textContent = 'Enter a user ID.'; } return; }
+    try {
+        const r = await fetch('/api/admin/portfolio-access', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: uid, enabled: enabled }),
+        });
+        const d = await r.json();
+        if (msg) { msg.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)'; msg.textContent = d.ok ? (enabled ? 'Granted.' : 'Revoked.') : (d.error || 'Failed.'); }
+        loadPortfolioGrants();
+    } catch (e) { if (msg) { msg.style.color = 'var(--accent-red)'; msg.textContent = 'Request failed.'; } }
 }
 
 // ─── Plan pricing ───────────────────────────────────────────

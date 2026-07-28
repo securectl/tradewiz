@@ -2069,6 +2069,7 @@ function switchTab(tab, skipHash) {
     const dashboardContent = document.getElementById('dashboard-content');
     const optionCallsContent = document.getElementById('option-calls-content');
     const earningsContent = document.getElementById('earnings-content');
+    const portfolioContent = document.getElementById('portfolio-content');
     const newsContent = document.getElementById('news-content');
 
     mainContent.style.display = 'none';
@@ -2088,6 +2089,7 @@ function switchTab(tab, skipHash) {
     if (claudeBotContent) claudeBotContent.style.display = 'none';
     if (optionCallsContent) optionCallsContent.style.display = 'none';
     if (earningsContent) earningsContent.style.display = 'none';
+    if (portfolioContent) portfolioContent.style.display = 'none';
     if (newsContent) newsContent.style.display = 'none';
     if (autotradingContent) autotradingContent.style.display = 'none';
     if (stocktradingContent) stocktradingContent.style.display = 'none';
@@ -2173,6 +2175,9 @@ function switchTab(tab, skipHash) {
     } else if (tab === 'earnings') {
         if (earningsContent) earningsContent.style.display = 'block';
         if (typeof initEarningsCalendar === 'function') initEarningsCalendar();
+    } else if (tab === 'portfolio') {
+        if (portfolioContent) portfolioContent.style.display = 'block';
+        if (typeof initPortfolio === 'function') initPortfolio();
     } else if (tab === 'news') {
         if (newsContent) newsContent.style.display = 'block';
         if (typeof loadNewsTab === 'function') loadNewsTab();

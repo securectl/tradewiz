@@ -89,6 +89,7 @@ from features.earnings_calendar.routes import bp as earnings_calendar_bp
 from features.news_agent.routes import bp as news_agent_bp
 from claude_bot.routes import bp as claude_bot_bp
 from features.flags.routes import bp as feature_flags_bp
+from features.portfolio.routes import bp as portfolio_bp
 
 app.register_blueprint(ipo_bp)
 app.register_blueprint(status_bp)
@@ -293,6 +294,7 @@ def _maybe_start_scheduler():
         pass
 
 app.register_blueprint(feature_flags_bp)
+app.register_blueprint(portfolio_bp)
 
 # Serve feature static files (JS/CSS)
 @app.route('/features/<path:filename>')

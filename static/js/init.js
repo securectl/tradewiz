@@ -68,3 +68,4 @@ async function applyFeatureFlags() {
 })();
 
 applyFeatureFlags();
+if (typeof revealPortfolioTab === 'function') revealPortfolioTab();

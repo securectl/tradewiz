@@ -399,6 +399,30 @@ def _run_postgres(conn):
             value TEXT
         )
     """)
+    # Portfolio Advisor — imported holdings + saved analyses (admin-gated feature).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_holdings (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL,
+            shares REAL,
+            cost_basis REAL,
+            source TEXT,
+            imported_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(user_id, symbol)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pf_hold_user ON portfolio_holdings(user_id)")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_analyses (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            holdings_count INTEGER DEFAULT 0,
+            result TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pf_ana_user ON portfolio_analyses(user_id, created_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
@@ -1188,6 +1212,29 @@ def _run_sqlite(conn):
             value TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            symbol TEXT NOT NULL,
+            shares REAL,
+            cost_basis REAL,
+            source TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, symbol)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pf_hold_user ON portfolio_holdings(user_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            holdings_count INTEGER DEFAULT 0,
+            result TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pf_ana_user ON portfolio_analyses(user_id, created_at)")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_usage_log (
