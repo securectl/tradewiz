@@ -289,6 +289,16 @@ def _run_postgres(conn):
             called_at TIMESTAMP DEFAULT NOW()
         )
     """)
+
+    # Feature flags — cohort/canary rollout control (off/admin/beta/percent/on).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS feature_flags (
+            flag TEXT PRIMARY KEY,
+            state TEXT NOT NULL DEFAULT 'off',
+            rollout_pct INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
 
     # Add bot_access column to user_subscriptions
@@ -629,6 +639,15 @@ def _run_sqlite(conn):
             current_period_end TIMESTAMP,
             cancel_at_period_end INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feature_flags (
+            flag TEXT PRIMARY KEY,
+            state TEXT NOT NULL DEFAULT 'off',
+            rollout_pct INTEGER NOT NULL DEFAULT 0,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

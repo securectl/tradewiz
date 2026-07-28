@@ -61,6 +61,7 @@ from features.user.routes import bp as user_bp
 from features.analysis.routes import bp as analysis_bp
 from features.predictions.routes import bp as predictions_bp
 from features.congress.routes import bp as congress_bp
+from features.flags.routes import bp as feature_flags_bp
 
 app.register_blueprint(ipo_bp)
 app.register_blueprint(status_bp)
@@ -73,6 +74,7 @@ app.register_blueprint(user_bp)
 app.register_blueprint(analysis_bp)
 app.register_blueprint(predictions_bp)
 app.register_blueprint(congress_bp)
+app.register_blueprint(feature_flags_bp)
 
 # Serve feature static files (JS/CSS)
 @app.route('/features/<path:filename>')
