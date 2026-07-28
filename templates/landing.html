@@ -159,7 +159,7 @@
 <body>
 
 {% if first_time %}
-<div class="promobar">New here? We'd start you on <b>Starter</b> — <b>3 days free, no credit card</b>. Launch offer: 20% off with <span class="code">LAUNCH20</span>.</div>
+<div class="promobar">New here? We'd start you on <b>Starter</b> — <b>3 days free, no credit card</b> (then ${{ starter_amount }}/mo). Launch offer: 20% off with <span class="code">LAUNCH20</span>.</div>
 {% endif %}
 
 <nav><div class="wrap">
@@ -271,14 +271,14 @@
     </div>
     <div class="plan rec reveal">
       <div class="pn">Starter <span class="rec-tag">{% if first_time %}BEST FOR BEGINNERS{% else %}MOST POPULAR{% endif %}</span></div>
-      <div class="price">$19<span>/mo</span></div>
+      <div class="price">${{ starter_amount }}<span>/mo</span></div>
       <div class="tr">3-day free trial · no card</div>
       <ul><li>Plenty of daily analyses</li><li>Full idea finder + earnings</li><li>Follow-the-pros &amp; alerts</li><li>Priority AI models</li><li class="off">Everything in Pro</li></ul>
       <a class="btn btn-primary" href="/auth/signup">Start 3-day trial →</a>
     </div>
     <div class="plan reveal">
       <div class="pn">Pro</div>
-      <div class="price">$39<span>/mo</span></div>
+      <div class="price">${{ pro_amount }}<span>/mo</span></div>
       <div class="tr">3-day free trial · no card</div>
       <ul><li>Everything in Starter</li><li>Highest usage limits</li><li>Deeper research &amp; sectors</li><li>The most thorough checks</li><li>Priority support</li></ul>
       <a class="btn btn-ghost" href="/auth/signup">Start 3-day trial</a>

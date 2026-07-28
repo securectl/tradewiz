@@ -48,11 +48,14 @@ class TestPromoLifecycle(unittest.TestCase):
         import promo
         from db import execute
         code = promo.create_codes(tier="starter", days=5, max_uses=1, quantity=1)[0]
-        # a different user redeems it, exhausting the single use
-        execute(f"INSERT INTO users (google_id, email, name) VALUES ({self.P}, {self.P}, {self.P})",
-                ("promo-b-gid", "promo-b@example.com", "B"))
+        # a different user redeems it, exhausting the single use (idempotent create)
         from db import query_one
-        other = query_one("SELECT id FROM users WHERE email = " + self.P, ("promo-b@example.com",))["id"]
+        row = query_one("SELECT id FROM users WHERE email = " + self.P, ("promo-b@example.com",))
+        if not row:
+            execute(f"INSERT INTO users (google_id, email, name) VALUES ({self.P}, {self.P}, {self.P})",
+                    ("promo-b-gid", "promo-b@example.com", "B"))
+            row = query_one("SELECT id FROM users WHERE email = " + self.P, ("promo-b@example.com",))
+        other = row["id"]
         ok, _, _ = promo.redeem_code(other, code)
         self.assertTrue(ok)
         # now this user can't — fully redeemed

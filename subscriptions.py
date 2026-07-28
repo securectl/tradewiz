@@ -68,11 +68,23 @@ def get_or_create_stripe_customer(user_id, email, name=None):
 
 # ─── Checkout & Portal ──────────────────────────────────────────────
 
+def resolve_price_id(tier):
+    """Admin-set Stripe price id (app_settings) wins; else the env default."""
+    try:
+        from app_settings import get_setting
+        pid = get_setting(f"price_{tier}_stripe_id")
+        if pid:
+            return pid
+    except Exception:
+        pass
+    return TIER_PRICES.get(tier)
+
+
 def create_checkout_session(user_id, email, name, tier, success_url, cancel_url, trial_days=0):
     """Create a Stripe Checkout Session for a subscription tier.
     If trial_days > 0, creates a subscription with a free trial period."""
     stripe = _get_stripe()
-    price_id = TIER_PRICES.get(tier)
+    price_id = resolve_price_id(tier)
     if not price_id:
         raise ValueError(f"No Stripe price configured for tier: {tier}")
 

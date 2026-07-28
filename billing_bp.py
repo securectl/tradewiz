@@ -60,8 +60,8 @@ def billing_status():
         "subscription": subscription,
         "stripe_configured": stripe_configured(),
         "prices": {
-            "starter": {"price_id": STRIPE_PRICE_STARTER, "amount": 19, "name": "Starter"},
-            "pro": {"price_id": STRIPE_PRICE_PRO, "amount": 39, "name": "Pro"},
+            "starter": {"price_id": STRIPE_PRICE_STARTER, "amount": _plan_amount("starter", 19), "name": "Starter"},
+            "pro": {"price_id": STRIPE_PRICE_PRO, "amount": _plan_amount("pro", 39), "name": "Pro"},
         },
         "tiers": {
             k: {"limit": v["limit"], "bot_access": v["bot_access"]}
@@ -139,6 +139,41 @@ def billing_webhook():
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return jsonify({"error": str(e)}), 400
+
+
+def _plan_amount(tier, default):
+    """Admin-set displayed monthly amount (app_settings) or the default."""
+    try:
+        from app_settings import get_setting
+        v = get_setting(f"price_{tier}_amount")
+        return int(float(v)) if v not in (None, "") else default
+    except Exception:
+        return default
+
+
+@billing_bp.route("/admin/pricing", methods=["GET", "POST"])
+@login_required
+def admin_pricing():
+    """Admin-only: view/set the displayed amount + Stripe price id per plan."""
+    from flask_login import current_user
+    if not any(r == "admin" for r in (getattr(current_user, "roles", []) or [])):
+        return jsonify({"error": "admin only"}), 403
+    from app_settings import get_setting, set_setting
+    if request.method == "POST":
+        d = request.get_json(silent=True) or {}
+        for tier in ("starter", "pro"):
+            if f"{tier}_amount" in d and str(d[f"{tier}_amount"]).strip() != "":
+                set_setting(f"price_{tier}_amount", int(float(d[f"{tier}_amount"])))
+            if f"{tier}_price_id" in d:
+                set_setting(f"price_{tier}_stripe_id", (d[f"{tier}_price_id"] or "").strip())
+        return jsonify({"ok": True})
+    out = {}
+    for tier, default in (("starter", 19), ("pro", 39)):
+        out[tier] = {
+            "amount": _plan_amount(tier, default),
+            "stripe_price_id": get_setting(f"price_{tier}_stripe_id", ""),
+        }
+    return jsonify({"pricing": out})
 
 
 @billing_bp.route("/upgrade")

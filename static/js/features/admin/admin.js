@@ -965,7 +965,38 @@ function switchAdminTab(name) {
     document.querySelectorAll('.admin-tabpanel').forEach(function (p) {
         p.style.display = (p.getAttribute('data-apanel') === name) ? '' : 'none';
     });
-    if (name === 'codes' && typeof loadPromoCodes === 'function') loadPromoCodes();
+    if (name === 'codes') {
+        if (typeof loadPromoCodes === 'function') loadPromoCodes();
+        if (typeof loadPricing === 'function') loadPricing();
+    }
+}
+
+// ─── Plan pricing ───────────────────────────────────────────
+async function loadPricing() {
+    try {
+        const r = await fetch('/billing/admin/pricing');
+        const d = await r.json();
+        const p = d.pricing || {};
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set('pr-starter-amt', (p.starter || {}).amount != null ? p.starter.amount : '');
+        set('pr-starter-id', (p.starter || {}).stripe_price_id || '');
+        set('pr-pro-amt', (p.pro || {}).amount != null ? p.pro.amount : '');
+        set('pr-pro-id', (p.pro || {}).stripe_price_id || '');
+    } catch (e) { /* ignore */ }
+}
+
+async function savePricing() {
+    const msg = document.getElementById('pr-msg');
+    const v = id => (document.getElementById(id) || {}).value || '';
+    const body = {
+        starter_amount: v('pr-starter-amt'), starter_price_id: v('pr-starter-id'),
+        pro_amount: v('pr-pro-amt'), pro_price_id: v('pr-pro-id'),
+    };
+    try {
+        const r = await fetch('/billing/admin/pricing', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const d = await r.json();
+        if (msg) { msg.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)'; msg.textContent = d.ok ? 'Pricing saved.' : (d.error || 'Save failed.'); }
+    } catch (e) { if (msg) { msg.style.color = 'var(--accent-red)'; msg.textContent = 'Request failed.'; } }
 }
 
 // ─── Promo / access codes ───────────────────────────────────

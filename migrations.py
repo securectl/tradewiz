@@ -392,6 +392,13 @@ def _run_postgres(conn):
             UNIQUE(code, user_id)
         )
     """)
+    # Global key/value settings (admin-editable plan pricing, etc.)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
@@ -1173,6 +1180,12 @@ def _run_sqlite(conn):
             user_id INTEGER,
             redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(code, user_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
     """)
 

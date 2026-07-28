@@ -575,7 +575,17 @@ def _landing_context():
         )
     except Exception:
         pass
-    return {"first_time": first_time, "recommended": "starter"}
+    starter_amt, pro_amt = 19, 39
+    try:
+        from app_settings import get_setting
+        s = get_setting("price_starter_amount")
+        p = get_setting("price_pro_amount")
+        starter_amt = int(float(s)) if s not in (None, "") else 19
+        pro_amt = int(float(p)) if p not in (None, "") else 39
+    except Exception:
+        pass
+    return {"first_time": first_time, "recommended": "starter",
+            "starter_amount": starter_amt, "pro_amount": pro_amt}
 
 
 @app.route("/")
