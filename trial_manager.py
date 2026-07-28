@@ -20,7 +20,7 @@ from db import query, query_one, execute, IS_POSTGRES
 logger = logging.getLogger(__name__)
 P = "%s" if IS_POSTGRES else "?"
 
-TRIAL_DAYS = 7
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))  # free-trial length (default 3 days)
 TRIAL_TIER = "pro"  # What tier users get during trial
 
 

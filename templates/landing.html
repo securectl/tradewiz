@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeWiz — AI Market Intelligence for Smarter Trades</title>
+  <meta name="description" content="AI-powered stock & crypto analysis, screeners, options flow, smart-money 13F tracking and automated trading bots. Start a 3-day free trial.">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0a0c12; --bg2:#0f1219; --card:rgba(255,255,255,.04); --border:rgba(255,255,255,.09);
+      --text:#e8ebf0; --muted:#9aa1b0; --brand:#4f8aff; --brand2:#8b5cf6; --teal:#22d3ee; --green:#22c55e; --amber:#f59e0b;
+      --grad:linear-gradient(120deg,#4f8aff,#8b5cf6 55%,#22d3ee);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.55;overflow-x:hidden}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:1160px;margin:0 auto;padding:0 22px}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;font-family:inherit;font-weight:700;
+      font-size:15px;padding:13px 22px;border-radius:12px;transition:transform .15s ease,box-shadow .2s ease,background .2s}
+    .btn-primary{background:var(--grad);color:#fff;box-shadow:0 8px 30px rgba(79,138,255,.35)}
+    .btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(139,92,246,.5)}
+    .btn-ghost{background:var(--card);color:var(--text);border:1px solid var(--border)}
+    .btn-ghost:hover{border-color:var(--brand);transform:translateY(-2px)}
+    .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+    /* Nav */
+    nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(10,12,18,.72);border-bottom:1px solid var(--border)}
+    nav .wrap{display:flex;align-items:center;justify-content:space-between;height:66px}
+    .logo{font-weight:900;font-size:21px;letter-spacing:.3px}
+    .logo .w{color:var(--brand)}
+    .nav-links{display:flex;align-items:center;gap:22px}
+    .nav-links a.muted{color:var(--muted);font-weight:600;font-size:14px}
+    .nav-links a.muted:hover{color:var(--text)}
+    @media(max-width:640px){.nav-links a.muted{display:none}}
+
+    /* First-time banner */
+    .fttop{background:linear-gradient(90deg,rgba(79,138,255,.16),rgba(139,92,246,.16));border-bottom:1px solid var(--border);
+      text-align:center;font-size:14px;padding:10px 16px;color:var(--text)}
+    .fttop b{color:#fff}
+    .fttop .code{background:rgba(255,255,255,.1);border:1px dashed var(--brand);border-radius:6px;padding:1px 8px;font-weight:800;letter-spacing:1px}
+
+    /* Hero */
+    .hero{position:relative;padding:88px 0 64px;text-align:center;overflow:hidden}
+    .blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.55;z-index:0;animation:drift 18s ease-in-out infinite}
+    .blob.a{width:520px;height:520px;background:#4f8aff;top:-160px;left:-120px}
+    .blob.b{width:460px;height:460px;background:#8b5cf6;top:-80px;right:-120px;animation-delay:-6s}
+    .blob.c{width:420px;height:420px;background:#22d3ee;bottom:-220px;left:40%;animation-delay:-11s}
+    @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(40px,30px) scale(1.08)}66%{transform:translate(-30px,20px) scale(.96)}}
+    .hero .wrap{position:relative;z-index:1}
+    .pill{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);
+      border-radius:999px;padding:6px 14px;font-size:13px;color:var(--muted);margin-bottom:22px}
+    .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+    h1{font-size:clamp(34px,6vw,62px);line-height:1.05;font-weight:900;letter-spacing:-1.5px;margin-bottom:20px}
+    .sub{font-size:clamp(16px,2.4vw,20px);color:var(--muted);max-width:660px;margin:0 auto 32px}
+    .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+    .trust{margin-top:22px;color:var(--muted);font-size:13px}
+
+    /* Stat chips */
+    .stats{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:46px}
+    .stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 22px;min-width:150px}
+    .stat .n{font-size:26px;font-weight:900}.stat .l{font-size:12.5px;color:var(--muted)}
+
+    /* Sections */
+    section{padding:72px 0}
+    .eyebrow{text-align:center;color:var(--brand);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;font-size:12.5px;margin-bottom:10px}
+    h2{text-align:center;font-size:clamp(26px,4vw,40px);font-weight:900;letter-spacing:-.8px;margin-bottom:12px}
+    .lead{text-align:center;color:var(--muted);max-width:620px;margin:0 auto 46px}
+
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+    @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:600px){.grid{grid-template-columns:1fr}}
+    .feat{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;transition:transform .2s,border-color .2s,background .2s}
+    .feat:hover{transform:translateY(-4px);border-color:var(--brand);background:rgba(79,138,255,.06)}
+    .feat .ic{font-size:26px;width:50px;height:50px;display:grid;place-items:center;border-radius:12px;background:rgba(79,138,255,.12);margin-bottom:14px}
+    .feat h3{font-size:17px;margin-bottom:7px}
+    .feat p{color:var(--muted);font-size:14px}
+
+    /* Steps */
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;counter-reset:s}
+    @media(max-width:760px){.steps{grid-template-columns:1fr}}
+    .step{position:relative;padding-left:56px}
+    .step::before{counter-increment:s;content:counter(s);position:absolute;left:0;top:0;width:40px;height:40px;border-radius:50%;
+      display:grid;place-items:center;font-weight:900;background:var(--grad);color:#fff}
+    .step h3{font-size:17px;margin-bottom:6px}.step p{color:var(--muted);font-size:14px}
+
+    /* Pricing */
+    .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch}
+    @media(max-width:860px){.prices{grid-template-columns:1fr;max-width:420px;margin:0 auto}}
+    .plan{position:relative;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:28px 24px;display:flex;flex-direction:column}
+    .plan.rec{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand),0 20px 60px rgba(79,138,255,.25);background:rgba(79,138,255,.06)}
+    .rec-tag{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--grad);color:#fff;font-size:12px;font-weight:800;
+      padding:4px 14px;border-radius:999px;white-space:nowrap;box-shadow:0 6px 20px rgba(139,92,246,.4)}
+    .plan .pname{font-size:15px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+    .plan .price{font-size:44px;font-weight:900;margin:8px 0 2px}.plan .price span{font-size:15px;color:var(--muted);font-weight:600}
+    .plan .trial{font-size:13px;color:var(--green);font-weight:700;margin-bottom:16px}
+    .plan ul{list-style:none;margin:6px 0 22px;flex:1}
+    .plan li{padding:7px 0;font-size:14px;color:var(--text);display:flex;gap:9px;align-items:flex-start}
+    .plan li::before{content:"✓";color:var(--green);font-weight:900}
+    .plan li.off{color:var(--muted)}.plan li.off::before{content:"—";color:var(--muted)}
+
+    /* FAQ */
+    .faq{max-width:760px;margin:0 auto}
+    details{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+    summary{cursor:pointer;font-weight:700;list-style:none}summary::-webkit-details-marker{display:none}
+    summary::after{content:"+";float:right;color:var(--brand);font-weight:900}
+    details[open] summary::after{content:"–"}
+    details p{color:var(--muted);font-size:14px;margin-top:10px}
+
+    /* Final CTA */
+    .final{text-align:center;background:linear-gradient(120deg,rgba(79,138,255,.12),rgba(139,92,246,.12));
+      border:1px solid var(--border);border-radius:24px;padding:56px 24px;margin:24px 0}
+    footer{border-top:1px solid var(--border);padding:34px 0;color:var(--muted);font-size:13px;text-align:center}
+
+    .reveal{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
+    .reveal.in{opacity:1;transform:none}
+    .disclaimer{color:var(--muted);font-size:11.5px;max-width:820px;margin:20px auto 0;text-align:center;opacity:.8}
+  </style>
+</head>
+<body>
+
+{% if first_time %}
+<div class="fttop">👋 First time here? We recommend <b>Starter</b> — <b>3 days free</b>, then $19/mo. Use code <span class="code">LAUNCH20</span> for 20% off your first month.</div>
+{% endif %}
+
+<nav>
+  <div class="wrap">
+    <div class="logo">Trade<span class="w">Wiz</span></div>
+    <div class="nav-links">
+      <a class="muted" href="#features">Features</a>
+      <a class="muted" href="#pricing">Pricing</a>
+      <a class="muted" href="#faq">FAQ</a>
+      <a class="muted" href="/auth/login">Sign in</a>
+      <a class="btn btn-primary" href="/auth/signup" style="padding:9px 18px;font-size:14px">Get started free</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="blob a"></div><div class="blob b"></div><div class="blob c"></div>
+  <div class="wrap">
+    <div class="pill"><span class="dot"></span> Multi-LLM validated signals · Live market data</div>
+    <h1>Trade with an <span class="grad-text">AI edge</span>,<br>not a gut feeling.</h1>
+    <p class="sub">TradeWiz turns raw market data into clear, AI-validated decisions — technical &amp; fundamental analysis, screeners, options flow, smart-money 13F tracking and automated paper-trading bots, all in one place.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="/auth/signup">Start your 3-day free trial →</a>
+      <a class="btn btn-ghost" href="#features">See what's inside</a>
+    </div>
+    <div class="trust">No card charged during your trial · Cancel anytime</div>
+    <div class="stats">
+      <div class="stat"><div class="n grad-text">40+</div><div class="l">Technical &amp; fundamental signals</div></div>
+      <div class="stat"><div class="n grad-text">3×</div><div class="l">Independent LLMs validate each call</div></div>
+      <div class="stat"><div class="n grad-text">9</div><div class="l">Bot strategies, fully automated</div></div>
+      <div class="stat"><div class="n grad-text">24/7</div><div class="l">Crypto &amp; market monitoring</div></div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">Everything in one platform</div>
+    <h2 class="reveal">One tab away from your next trade idea</h2>
+    <p class="lead reveal">Stop juggling ten tools. TradeWiz brings professional-grade intelligence into a single, fast dashboard.</p>
+    <div class="grid">
+      <div class="feat reveal"><div class="ic">🧠</div><h3>AI Analyzer</h3><p>Full technical + fundamental breakdown on any stock or crypto, graded A–D with an ATR-based trade plan and a multi-LLM verdict.</p></div>
+      <div class="feat reveal"><div class="ic">🔎</div><h3>Smart Screener</h3><p>Scan the market by category, then let AI vet each candidate — opportunities and red flags, side by side.</p></div>
+      <div class="feat reveal"><div class="ic">📅</div><h3>Earnings Calendar</h3><p>The week's most-anticipated reports, ranked by momentum and relative strength so you're never caught off guard.</p></div>
+      <div class="feat reveal"><div class="ic">🏦</div><h3>Smart-Money 13F</h3><p>Track what the top hedge funds and investors are buying — convergence signals when the smart money agrees.</p></div>
+      <div class="feat reveal"><div class="ic">🌊</div><h3>Options Flow</h3><p>See where call and put volume is surging, with a bullish/bearish read on real-time positioning.</p></div>
+      <div class="feat reveal"><div class="ic">🤖</div><h3>Automated Bots</h3><p>Nine strategies, risk-gated and LLM-validated, running in safe paper-trading mode with a daily goal.</p></div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="eyebrow">How it works</div>
+    <h2 class="reveal">From sign-up to signal in minutes</h2>
+    <p class="lead reveal">No setup headaches. Start your trial and explore immediately.</p>
+    <div class="steps">
+      <div class="step reveal"><h3>Create your account</h3><p>Start a 3-day free trial — full access, no card charged up front.</p></div>
+      <div class="step reveal"><h3>Explore the intelligence</h3><p>Analyze tickers, run screeners, watch options flow and smart-money moves.</p></div>
+      <div class="step reveal"><h3>Act with confidence</h3><p>Every idea comes with an AI verdict, a trade plan and clear risk levels.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <div class="eyebrow">Simple pricing</div>
+    <h2 class="reveal">Start free. Upgrade when you're ready.</h2>
+    <p class="lead reveal">Every paid plan starts with a <b style="color:var(--green)">3-day free trial</b>. Launch offer: <b>20% off</b> your first month with code <b class="grad-text">LAUNCH20</b>.</p>
+    <div class="prices">
+      <div class="plan reveal">
+        <div class="pname">Free</div>
+        <div class="price">$0<span>/mo</span></div>
+        <div class="trial">Explore the basics</div>
+        <ul>
+          <li>Limited daily AI analyses</li>
+          <li>Core screener access</li>
+          <li>Market dashboard</li>
+          <li class="off">Priority AI models</li>
+          <li class="off">Full feature access</li>
+        </ul>
+        <a class="btn btn-ghost" href="/auth/signup">Get started</a>
+      </div>
+      <div class="plan rec reveal">
+        <div class="rec-tag">{% if first_time %}★ Recommended for you{% else %}★ Most popular{% endif %}</div>
+        <div class="pname">Starter</div>
+        <div class="price">$19<span>/mo</span></div>
+        <div class="trial">3-day free trial included</div>
+        <ul>
+          <li>Higher daily AI limits</li>
+          <li>Full screener + earnings calendar</li>
+          <li>Options flow &amp; smart-money tracking</li>
+          <li>Faster, priority AI models</li>
+          <li class="off">Everything in Pro</li>
+        </ul>
+        <a class="btn btn-primary" href="/auth/signup">Start 3-day trial →</a>
+      </div>
+      <div class="plan reveal">
+        <div class="pname">Pro</div>
+        <div class="price">$39<span>/mo</span></div>
+        <div class="trial">3-day free trial included</div>
+        <ul>
+          <li>Everything in Starter</li>
+          <li>Highest AI usage limits</li>
+          <li>Advanced research &amp; sector radar</li>
+          <li>Deep multi-LLM validation</li>
+          <li>Priority support</li>
+        </ul>
+        <a class="btn btn-ghost" href="/auth/signup">Start 3-day trial</a>
+      </div>
+    </div>
+    <p class="disclaimer">Automated trading runs in paper mode by default. TradeWiz is a research &amp; analytics tool, not financial advice — trading involves risk and past performance does not guarantee future results.</p>
+  </div>
+</section>
+
+<section id="faq" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="eyebrow">Questions</div>
+    <h2 class="reveal">Frequently asked</h2>
+    <div class="faq" style="margin-top:34px">
+      <details class="reveal"><summary>Is the trial really free?</summary><p>Yes — every paid plan starts with a 3-day free trial and you're not charged up front. Cancel anytime before it ends from your account page.</p></details>
+      <details class="reveal"><summary>Which plan should I start with?</summary><p>Starter covers what most traders need — full screener, earnings calendar, options flow and smart-money tracking with priority AI. You can upgrade to Pro anytime.</p></details>
+      <details class="reveal"><summary>Do the bots trade real money?</summary><p>Bots run in safe paper-trading mode by default, so you can validate strategies risk-free before ever considering live trading.</p></details>
+      <details class="reveal"><summary>How is this different from a regular screener?</summary><p>Every signal is validated by three independent AI models and paired with a concrete trade plan and risk levels — not just a number on a table.</p></details>
+      <details class="reveal"><summary>Can I cancel anytime?</summary><p>Absolutely. Manage or cancel your subscription in one click from your account — no emails, no phone calls.</p></details>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="final reveal">
+      <h2 style="margin-bottom:14px">Ready to trade smarter?</h2>
+      <p class="sub" style="margin-bottom:26px">Join now and put an AI research desk in your pocket. 3 days free — see the difference before you pay a cent.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="/auth/signup">Start your free trial →</a>
+        <a class="btn btn-ghost" href="/auth/login">I already have an account</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="logo" style="font-size:18px;margin-bottom:8px">Trade<span class="w">Wiz</span></div>
+    TradeWiz is a product of Infinity Ventures Group LLC · © 2026 · Research &amp; analytics only, not financial advice.
+  </div>
+</footer>
+
+<script>
+  // Scroll-reveal
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: .14 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+</body>
+</html>

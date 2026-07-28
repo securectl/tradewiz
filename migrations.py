@@ -358,6 +358,17 @@ def _run_postgres(conn):
     # Seed the Earnings tab as an admin-only canary (admins can then ramp it).
     cur.execute("INSERT INTO feature_flags (flag, state, rollout_pct) "
                 "VALUES ('earnings_tab', 'admin', 0) ON CONFLICT (flag) DO NOTHING")
+    # Public (non-invite) signup — OFF by default; flip to 'on' in Admin to go live.
+    cur.execute("INSERT INTO feature_flags (flag, state, rollout_pct) "
+                "VALUES ('public_signup', 'off', 0) ON CONFLICT (flag) DO NOTHING")
+    # Landing-page visits — first-time-IP detection for the Starter recommendation.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS landing_visits (
+            ip TEXT PRIMARY KEY,
+            first_seen TIMESTAMP DEFAULT NOW(),
+            hits INTEGER DEFAULT 1
+        )
+    """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_user_time ON llm_usage_log(user_id, called_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_time ON llm_usage_log(called_at)")
 
@@ -1110,6 +1121,15 @@ def _run_sqlite(conn):
     """)
     conn.execute("INSERT OR IGNORE INTO feature_flags (flag, state, rollout_pct) "
                  "VALUES ('earnings_tab', 'admin', 0)")
+    conn.execute("INSERT OR IGNORE INTO feature_flags (flag, state, rollout_pct) "
+                 "VALUES ('public_signup', 'off', 0)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS landing_visits (
+            ip TEXT PRIMARY KEY,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            hits INTEGER DEFAULT 1
+        )
+    """)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS llm_usage_log (
